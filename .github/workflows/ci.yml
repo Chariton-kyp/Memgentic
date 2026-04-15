@@ -52,7 +52,6 @@ jobs:
 
   typecheck:
     runs-on: ubuntu-latest
-    continue-on-error: true  # optional-import noise; cleaned up incrementally
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -94,7 +93,6 @@ jobs:
 
   dashboard:
     runs-on: ubuntu-latest
-    continue-on-error: true  # pending QueryClientProvider test wrapper
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

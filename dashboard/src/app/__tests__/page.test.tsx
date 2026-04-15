@@ -1,6 +1,18 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { render as rtlRender, screen } from '@testing-library/react'
 import React from 'react'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+
+// HomePage uses useQueryClient internally, so we wrap every render in a
+// fresh QueryClientProvider. Retries disabled to keep tests deterministic.
+const render = (ui: React.ReactElement) => {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+  })
+  return rtlRender(
+    React.createElement(QueryClientProvider, { client }, ui)
+  )
+}
 
 // Mock next/link
 vi.mock('next/link', () => ({
