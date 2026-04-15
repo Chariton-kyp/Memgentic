@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Run core tests
+        run: uv run pytest memgentic/tests/ -v --cov=memgentic --cov-report=term-missing
+      - name: Run API tests
+        run: uv run pytest memgentic-api/tests/ -v
+      - name: Check coverage threshold
+        run: uv run pytest memgentic/tests/ --cov=memgentic --cov-fail-under=75 -q
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Lint
+        run: uv run ruff check memgentic/ memgentic-api/
+      - name: Format check
+        run: uv run ruff format --check memgentic/ memgentic-api/
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Type check
+        run: uv run pyright memgentic/memgentic/ --project memgentic
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+      - name: Install dependencies
+        run: uv sync --dev
+      - name: Security scan (bandit)
+        run: uv run pip install bandit && uv run bandit -r memgentic/memgentic/ memgentic-api/memgentic_api/ -ll -q
+      - name: Dependency audit (pip-audit)
+        run: uv run pip install pip-audit && uv run pip-audit
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create .env for Docker Compose validation
+        run: touch .env
+      - name: Validate Docker Compose config
+        run: docker compose config --quiet
+      - name: Build Docker image
+        run: docker build -t memgentic -f Dockerfile .
+
+  dashboard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install dependencies
+        run: cd dashboard && npm ci
+      - name: Type check + build
+        run: cd dashboard && npx next build
+      - name: Run tests
+        run: cd dashboard && npx vitest run --passWithNoTests

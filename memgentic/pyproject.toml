@@ -1,0 +1,130 @@
+[project]
+name = "memgentic"
+dynamic = ["version"]
+description = "Universal AI memory layer — cross-tool knowledge capture with MCP, semantic search, and knowledge graphs"
+requires-python = ">=3.12"
+license = "Apache-2.0"
+authors = [{name = "Chariton Kypraios", email = "chariton@ellinai.com"}]
+keywords = ["ai", "memory", "mcp", "rag", "knowledge-graph", "claude", "gemini", "codex", "semantic-search"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    # MCP Server
+    "mcp[cli]>=1.26",
+
+    # Vector Store
+    "qdrant-client>=1.17",
+
+    # Database (metadata)
+    "aiosqlite>=0.22",
+
+    # HTTP / Embeddings
+    "httpx>=0.28",
+
+    # File watching (daemon)
+    "watchdog>=6.0",
+
+    # CLI
+    "click>=8.1",
+    "rich>=14.0",
+
+    # Core utilities
+    "pydantic>=2.12",
+    "pydantic-settings>=2.10",
+    "python-dotenv>=1.0",
+    "structlog>=25.0",
+    "tenacity>=9.0",
+]
+
+[project.optional-dependencies]
+# Intelligence layer — LLM processing, knowledge graph, advanced search
+intelligence = [
+    "langchain-core>=1.2",
+    "langchain-google-genai>=4.0",
+    "langchain-anthropic>=1.0",
+    "langchain-ollama>=0.3",
+    "google-genai>=1.50",
+    "langgraph>=1.1",
+    "networkx>=3.4",
+]
+# Observability — OpenTelemetry tracing + metrics (opt-in)
+observability = [
+    "opentelemetry-api>=1.28",
+    "opentelemetry-sdk>=1.28",
+    "opentelemetry-exporter-otlp>=1.28",
+    "opentelemetry-instrumentation-httpx>=0.49",
+    "opentelemetry-instrumentation-sqlite3>=0.49",
+]
+# Document format support — extract text from office files
+documents = [
+    "python-docx>=1.1",
+    "striprtf>=0.0.26",
+    "openpyxl>=3.1",
+    "python-pptx>=1.0",
+    "ebooklib>=0.18",
+    "pdfminer.six>=20231228",
+]
+# Native Rust acceleration is available as a separate package:
+#     pip install memgentic-native
+# It is auto-detected at runtime — no extra config needed. When present, hot
+# paths (scrubbing, parsing, graph, dedup) run 5-50× faster. When absent, the
+# pure-Python fallback is used transparently. We do NOT list it as an extra
+# here because it ships as platform-specific wheels on a separate release
+# cycle (release-native.yml).
+
+# All optional deps for development
+dev = [
+    "memgentic[intelligence]",
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "pytest-cov>=6.0",
+    "ruff>=0.14",
+    "pyright>=1.1",
+]
+
+[project.scripts]
+memgentic = "memgentic.cli:main"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501"]  # Allow long lines in test data
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+markers = [
+    "benchmark: marks tests as benchmarks (deselect with '-m \"not benchmark\"')",
+]
+
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+# MCP SDK has incomplete type stubs — suppress errors in server module
+ignore = ["memgentic/mcp/server.py"]
+
+[project.urls]
+Homepage = "https://github.com/Chariton-kyp/memgentic"
+Repository = "https://github.com/Chariton-kyp/memgentic"
+Issues = "https://github.com/Chariton-kyp/memgentic/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["memgentic"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "memgentic/__version__.py"

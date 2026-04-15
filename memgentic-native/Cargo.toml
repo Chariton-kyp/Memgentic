@@ -1,0 +1,18 @@
+[package]
+name = "memgentic-native"
+version = "0.4.1"
+edition = "2021"
+license = "Apache-2.0"
+description = "Native Rust acceleration for Memgentic — text processing, parsers, and knowledge graph"
+
+[lib]
+name = "memgentic_native"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module"] }
+regex = "1"
+rayon = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+petgraph = "0.6"

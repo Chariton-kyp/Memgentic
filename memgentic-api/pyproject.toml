@@ -1,0 +1,37 @@
+[project]
+name = "memgentic-api"
+version = "0.4.0"
+description = "REST API for Memgentic — memory search, management, and real-time updates"
+requires-python = ">=3.12"
+dependencies = [
+    "memgentic",
+    "fastapi>=0.130",
+    "uvicorn[standard]>=0.34",
+    "python-multipart>=0.0.20",
+    "slowapi>=0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.0",
+    "httpx>=0.28",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["memgentic_api"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

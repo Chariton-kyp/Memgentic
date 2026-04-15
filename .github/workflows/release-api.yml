@@ -1,0 +1,54 @@
+name: Release memgentic-api to PyPI
+
+on:
+  push:
+    tags:
+      - "api-v*"
+
+permissions:
+  id-token: write  # required for trusted publishing
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        working-directory: memgentic-api
+        run: uv sync --all-extras
+
+      - name: Run tests
+        working-directory: memgentic-api
+        run: uv run python -m pytest tests/ -q
+
+      - name: Build package
+        working-directory: memgentic-api
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: memgentic-api/dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-api
+      url: https://pypi.org/p/memgentic-api
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

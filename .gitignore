@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Virtual environments
+.venv/
+venv/
+
+# UV
+# uv.lock is tracked for reproducible builds
+
+# Environment
+.env
+
+# Claude Code
+.claude/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Memgentic data (local development)
+*.db
+data/
+.memgentic/
+
+# Backup archives
+*.tar.gz
+
+# Docker
+docker-compose.override.yml
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Playwright
+.playwright-mcp/
+
+# Private/internal working docs (not for public repo)
+cloud/
+.mneme/
+
+# Rust
+target/
+Cargo.lock
+!memgentic-native/Cargo.lock

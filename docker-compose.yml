@@ -1,0 +1,137 @@
+services:
+  # Memgentic MCP Server (HTTP transport, :8200)
+  memgentic:
+    build: .
+    ports:
+      - "8200:8200"
+    env_file: .env
+    environment:
+      - TZ=UTC
+      - MEMGENTIC_STORAGE_BACKEND=qdrant
+      - MEMGENTIC_QDRANT_URL=http://qdrant:6333
+      - MEMGENTIC_MCP_TRANSPORT=streamable-http
+      - MEMGENTIC_MCP_PORT=8200
+      - MEMGENTIC_OLLAMA_URL=http://ollama:11434
+      - UV_PROJECT_ENVIRONMENT=/opt/venv
+      - UV_LINK_MODE=copy
+    volumes:
+      - .:/app
+      - memgentic_data:/root/.memgentic
+    command: uv run memgentic serve
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    networks:
+      - memgentic
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8200/health\")' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Memgentic REST API (HTTP, :8100)
+  memgentic-api:
+    build: .
+    ports:
+      - "8100:8100"
+    env_file: .env
+    environment:
+      - TZ=UTC
+      - MEMGENTIC_STORAGE_BACKEND=qdrant
+      - MEMGENTIC_QDRANT_URL=http://qdrant:6333
+      - MEMGENTIC_OLLAMA_URL=http://ollama:11434
+      - UV_PROJECT_ENVIRONMENT=/opt/venv
+      - UV_LINK_MODE=copy
+    volumes:
+      - .:/app
+      - memgentic_data:/root/.memgentic
+    command: uv run uvicorn memgentic_api.main:app --host 0.0.0.0 --port 8100
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      ollama-init:
+        condition: service_completed_successfully
+    networks:
+      - memgentic
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8100/api/v1/health\")' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # Qdrant vector database
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      - TZ=UTC
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333' 2>/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+      start_period: 10s
+    networks:
+      - memgentic
+    restart: unless-stopped
+
+  # Ollama — embedding + LLM server (GPU if available, CPU fallback)
+  ollama:
+    image: ollama/ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - TZ=UTC
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+    networks:
+      - memgentic
+    restart: unless-stopped
+
+  # Auto-pull the embedding model on first start
+  ollama-init:
+    image: ollama/ollama
+    volumes:
+      - ollama_data:/root/.ollama
+    depends_on:
+      ollama:
+        condition: service_healthy
+    entrypoint: ["sh", "-c", "ollama pull ${MEMGENTIC_EMBEDDING_MODEL:-qwen3-embedding:0.6b}"]
+    environment:
+      - OLLAMA_HOST=http://ollama:11434
+      - MEMGENTIC_EMBEDDING_MODEL=${MEMGENTIC_EMBEDDING_MODEL:-qwen3-embedding:0.6b}
+    networks:
+      - memgentic
+    restart: "no"
+
+volumes:
+  memgentic_data:
+  qdrant_data:
+  ollama_data:
+
+networks:
+  memgentic:
+    driver: bridge

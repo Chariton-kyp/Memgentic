@@ -1,0 +1,35 @@
+[project]
+name = "memgentic-workspace"
+version = "0.1.0"
+description = "Memgentic — Universal AI Memory Layer. Zero-effort knowledge capture across all AI tools."
+requires-python = ">=3.12"
+dependencies = [
+    "memgentic",
+    "memgentic-api",
+]
+
+[dependency-groups]
+dev = [
+    "memgentic[dev]",
+    "memgentic-api[dev]",
+]
+
+[tool.uv.workspace]
+members = ["memgentic", "memgentic-api"]
+
+[tool.uv.sources]
+memgentic = { workspace = true }
+memgentic-api = { workspace = true }
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"memgentic-native/*" = ["E", "F"]  # Rust crate — no Python to lint
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
