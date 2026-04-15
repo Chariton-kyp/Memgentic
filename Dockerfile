@@ -4,8 +4,9 @@ FROM python:3.12-slim AS builder
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
-# Install Rust toolchain for native acceleration module
-RUN apt-get update && apt-get install -y --no-install-recommends curl gcc && \
+# Install Rust toolchain + build tools for native acceleration module.
+# build-essential brings libc6-dev (crt*.o, libdl, libc) which maturin/pyo3 need to link.
+RUN apt-get update && apt-get install -y --no-install-recommends curl gcc build-essential && \
     curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal && \
     apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ENV PATH="/root/.cargo/bin:${PATH}"

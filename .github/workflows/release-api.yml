@@ -12,6 +12,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -26,8 +27,12 @@ jobs:
         run: uv sync --all-extras
 
       - name: Run tests
+        timeout-minutes: 10
         working-directory: memgentic-api
-        run: uv run python -m pytest tests/ -q
+        run: |
+          uv pip install pytest-timeout
+          uv run python -m pytest tests/ -q \
+            --timeout=60 --timeout-method=thread
 
       - name: Build package
         working-directory: memgentic-api
