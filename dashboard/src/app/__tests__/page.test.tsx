@@ -104,7 +104,34 @@ vi.mock('@/hooks/use-memories', () => ({
 
 vi.mock('@/hooks/use-collections', () => ({
   useCollections: () => ({ data: [], isLoading: false }),
+  useCollectionMemories: () => ({ data: null, isLoading: false }),
   useCreateCollection: () => ({ mutate: vi.fn(), isPending: false }),
+  useUpdateCollection: () => ({ mutate: vi.fn(), isPending: false }),
+  useDeleteCollection: () => ({ mutate: vi.fn(), isPending: false }),
+  useAddToCollection: () => ({ mutate: vi.fn(), isPending: false }),
+  useRemoveFromCollection: () => ({ mutate: vi.fn(), isPending: false }),
+}))
+
+vi.mock('@/stores/dashboard-store', () => ({
+  useDashboardStore: () => ({
+    selectedCollectionId: null,
+    setSelectedCollectionId: vi.fn(),
+    selectedSources: [],
+    setSelectedSources: vi.fn(),
+    selectedTypes: [],
+    setSelectedTypes: vi.fn(),
+    batchSelectedIds: [],
+    clearBatchSelection: vi.fn(),
+    toggleBatchSelection: vi.fn(),
+  }),
+}))
+
+vi.mock('@/stores/activity-store', () => ({
+  useActivityStore: () => ({ events: [] }),
+}))
+
+vi.mock('@/lib/api', () => ({
+  batchUpdateMemories: vi.fn(),
 }))
 
 import HomePage from '../page'
