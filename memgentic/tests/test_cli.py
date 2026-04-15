@@ -16,7 +16,7 @@ class TestCLIHelp:
     """Tests for --help output of all commands."""
 
     def test_version(self):
-        from memgentic import __version__
+        from memgentic.__version__ import __version__
 
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])

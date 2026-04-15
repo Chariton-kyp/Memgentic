@@ -42,12 +42,13 @@ jobs:
 
       - name: Build package
         working-directory: memgentic
-        run: uv build
+        run: uv build --package memgentic --out-dir dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: memgentic/dist/
+          if-no-files-found: error
 
   publish:
     needs: build

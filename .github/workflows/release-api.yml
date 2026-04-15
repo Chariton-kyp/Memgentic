@@ -36,12 +36,16 @@ jobs:
 
       - name: Build package
         working-directory: memgentic-api
-        run: uv build
+        # Explicitly target this workspace member and output locally, so the
+        # upload step finds the dist/ directory here (uv build in a workspace
+        # otherwise writes to the workspace root).
+        run: uv build --package memgentic-api --out-dir dist
 
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: memgentic-api/dist/
+          if-no-files-found: error
 
   publish:
     needs: build

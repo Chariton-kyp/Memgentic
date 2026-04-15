@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "memgentic-native"
-version = "0.4.3"
+version = "0.4.4"
 description = "Native Rust acceleration for Memgentic"
 requires-python = ">=3.11"
 license = "Apache-2.0"
