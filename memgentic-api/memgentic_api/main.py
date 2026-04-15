@@ -101,8 +101,11 @@ class CachingHeadersMiddleware(BaseHTTPMiddleware):
             body_chunks.append(chunk if isinstance(chunk, bytes) else chunk.encode())
         body = b"".join(body_chunks)
 
-        # Generate ETag from content hash
-        etag = '"' + hashlib.md5(body).hexdigest() + '"'  # noqa: S324
+        # Generate ETag from content hash. MD5 is fine here: it's not used
+        # for authentication or integrity — only to detect content change
+        # for HTTP caching. `usedforsecurity=False` tells bandit and FIPS
+        # mode this usage is non-security.
+        etag = '"' + hashlib.md5(body, usedforsecurity=False).hexdigest() + '"'  # nosec B324
 
         # Check If-None-Match
         if_none_match = request.headers.get("if-none-match")
