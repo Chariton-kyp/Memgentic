@@ -1,10 +1,10 @@
 [project]
 name = "memgentic-api"
-version = "0.4.2"
+version = "0.4.3"
 description = "REST API for Memgentic — memory search, management, and real-time updates"
 requires-python = ">=3.12"
 dependencies = [
-    "memgentic",
+    "memgentic[intelligence]",
     "fastapi>=0.130",
     "uvicorn[standard]>=0.34",
     "python-multipart>=0.0.20",

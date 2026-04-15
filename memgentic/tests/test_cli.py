@@ -16,10 +16,12 @@ class TestCLIHelp:
     """Tests for --help output of all commands."""
 
     def test_version(self):
+        from memgentic import __version__
+
         runner = CliRunner()
         result = runner.invoke(main, ["--version"])
         assert result.exit_code == 0
-        assert "0.3.0" in result.output
+        assert __version__ in result.output
 
     def test_help(self):
         runner = CliRunner()

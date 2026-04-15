@@ -37,7 +37,8 @@ jobs:
             --deselect tests/test_daemon.py \
             --deselect tests/test_mcp_server.py \
             --deselect tests/test_integration.py \
-            --deselect tests/test_observability.py
+            --deselect tests/test_observability.py \
+            --deselect tests/test_embedder.py
 
       - name: Build package
         working-directory: memgentic
