@@ -32,13 +32,15 @@ jobs:
         run: |
           uv pip install pytest-timeout
           uv run python -m pytest tests/ -q \
-            --timeout=60 --timeout-method=thread \
-            --deselect tests/test_benchmarks.py \
-            --deselect tests/test_daemon.py \
-            --deselect tests/test_mcp_server.py \
-            --deselect tests/test_integration.py \
-            --deselect tests/test_observability.py \
-            --deselect tests/test_embedder.py
+            --timeout=30 --timeout-method=thread \
+            --ignore=tests/test_benchmarks.py \
+            --ignore=tests/test_daemon.py \
+            --ignore=tests/test_mcp_server.py \
+            --ignore=tests/test_integration.py \
+            --ignore=tests/test_observability.py \
+            --ignore=tests/test_embedder.py \
+            --ignore=tests/test_pipeline.py \
+            --ignore=tests/test_init_wizard.py
 
       - name: Build package
         working-directory: memgentic

@@ -23,14 +23,14 @@ jobs:
           uv run pytest memgentic/tests/ -v \
             --timeout=30 --timeout-method=thread \
             --cov=memgentic --cov-report=term-missing \
-            --deselect memgentic/tests/test_benchmarks.py \
-            --deselect memgentic/tests/test_daemon.py \
-            --deselect memgentic/tests/test_mcp_server.py \
-            --deselect memgentic/tests/test_integration.py \
-            --deselect memgentic/tests/test_observability.py \
-            --deselect memgentic/tests/test_embedder.py \
-            --deselect memgentic/tests/test_pipeline.py \
-            --deselect memgentic/tests/test_init_wizard.py
+            --ignore=memgentic/tests/test_benchmarks.py \
+            --ignore=memgentic/tests/test_daemon.py \
+            --ignore=memgentic/tests/test_mcp_server.py \
+            --ignore=memgentic/tests/test_integration.py \
+            --ignore=memgentic/tests/test_observability.py \
+            --ignore=memgentic/tests/test_embedder.py \
+            --ignore=memgentic/tests/test_pipeline.py \
+            --ignore=memgentic/tests/test_init_wizard.py
       - name: Run API tests
         timeout-minutes: 5
         run: |
