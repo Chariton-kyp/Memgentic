@@ -1,0 +1,59 @@
+# CODEOWNERS for Chariton-kyp/Memgentic
+#
+# Reviewers assigned automatically based on changed paths. Latest match wins
+# (GitHub CODEOWNERS precedence). Keep ordered from general to specific.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*                               @Chariton-kyp
+
+# Core engine
+/memgentic/                     @Chariton-kyp
+/memgentic/processing/          @Chariton-kyp
+/memgentic/storage/             @Chariton-kyp
+/memgentic/adapters/            @Chariton-kyp
+/memgentic/graph/               @Chariton-kyp
+/memgentic/mcp/                 @Chariton-kyp
+
+# REST API
+/memgentic-api/                 @Chariton-kyp
+
+# Rust native acceleration
+/memgentic-native/              @Chariton-kyp
+
+# Dashboard (Next.js)
+/dashboard/                     @Chariton-kyp
+
+# Docs & ADRs
+/docs/                          @Chariton-kyp
+/docs/adr/                      @Chariton-kyp
+
+# CI, releases, and security-sensitive config
+/.github/                       @Chariton-kyp
+/.github/workflows/             @Chariton-kyp
+/.github/dependabot.yml         @Chariton-kyp
+/.github/CODEOWNERS             @Chariton-kyp
+/Dockerfile                     @Chariton-kyp
+/docker-compose.yml             @Chariton-kyp
+/docker-compose.gpu.yml         @Chariton-kyp
+/Makefile                       @Chariton-kyp
+
+# Packaging & lockfiles
+/pyproject.toml                 @Chariton-kyp
+/uv.lock                        @Chariton-kyp
+/memgentic/pyproject.toml       @Chariton-kyp
+/memgentic-api/pyproject.toml   @Chariton-kyp
+/memgentic-native/Cargo.toml    @Chariton-kyp
+/memgentic-native/pyproject.toml @Chariton-kyp
+/dashboard/package.json         @Chariton-kyp
+/dashboard/package-lock.json    @Chariton-kyp
+
+# Licensing & community health
+/LICENSE                        @Chariton-kyp
+/NOTICE                         @Chariton-kyp
+/CODE_OF_CONDUCT.md             @Chariton-kyp
+/SECURITY.md                    @Chariton-kyp
+/CONTRIBUTING.md                @Chariton-kyp
+/README.md                      @Chariton-kyp
+/CHANGELOG.md                   @Chariton-kyp
