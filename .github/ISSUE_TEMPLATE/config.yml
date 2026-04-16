@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or discussion
+    url: https://github.com/Chariton-kyp/Memgentic/discussions
+    about: Ask questions, share ideas, or show what you built. Please use Discussions instead of opening an issue for open-ended topics.
+  - name: Security vulnerability
+    url: https://github.com/Chariton-kyp/Memgentic/security/advisories/new
+    about: Privately report a security issue via GitHub Security Advisories. Do NOT file a public issue for security problems.
+  - name: Documentation
+    url: https://github.com/Chariton-kyp/Memgentic/tree/main/docs
+    about: Read the technical docs, API guide, and architecture decision records before filing.

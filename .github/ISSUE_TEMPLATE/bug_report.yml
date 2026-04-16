@@ -1,0 +1,125 @@
+name: Bug report
+description: Report a reproducible bug in Memgentic
+title: "bug: "
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please search existing issues and discussions first to avoid duplicates.
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Pre-submission checklist
+      options:
+        - label: I have searched existing issues and Discussions for duplicates.
+          required: true
+        - label: I can reproduce this on the latest release from PyPI.
+          required: true
+        - label: I have read the [Code of Conduct](https://github.com/Chariton-kyp/Memgentic/blob/main/CODE_OF_CONDUCT.md).
+          required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: One-sentence description of the bug.
+      placeholder: "memgentic daemon crashes when a watched file contains a BOM"
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, reliable repro steps.
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Memgentic version
+      description: Output of `memgentic --version`.
+      placeholder: "0.4.5"
+    validations:
+      required: true
+  - type: dropdown
+    id: component
+    attributes:
+      label: Affected component
+      multiple: true
+      options:
+        - CLI (memgentic)
+        - MCP server
+        - Daemon / file watcher
+        - Ingestion pipeline
+        - Vector store (Qdrant)
+        - Metadata store (SQLite/FTS5)
+        - Knowledge graph
+        - Adapter (claude_code / chatgpt / gemini / codex / aider / copilot / antigravity)
+        - REST API (memgentic-api)
+        - Dashboard (Next.js)
+        - Native acceleration (memgentic-native)
+        - Docs
+    validations:
+      required: true
+  - type: input
+    id: python
+    attributes:
+      label: Python version
+      placeholder: "3.12.3"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      placeholder: "macOS 15.4 / Ubuntu 24.04 / Windows 11"
+    validations:
+      required: true
+  - type: dropdown
+    id: embedder
+    attributes:
+      label: Embedding provider
+      options:
+        - Ollama (Qwen3-Embedding-0.6B)
+        - Ollama (other)
+        - OpenAI
+        - Other / not applicable
+    validations:
+      required: true
+  - type: dropdown
+    id: native
+    attributes:
+      label: Rust native acceleration active
+      options:
+        - "Yes"
+        - "No"
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      description: Paste relevant logs. Will be rendered as a code block. Scrub secrets.
+      render: shell
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Screenshots, related issues, workarounds tried, etc.
