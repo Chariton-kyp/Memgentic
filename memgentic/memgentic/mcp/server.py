@@ -403,7 +403,7 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
         - query="what did we decide", content_types=["decision"] → decisions only
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         embedder: Embedder = state["embedder"]
         vector_store: VectorStore = state["vector_store"]
         metadata_store: MetadataStore = state["metadata_store"]
@@ -475,7 +475,7 @@ async def memgentic_expand(params: ExpandInput, ctx: Context) -> str:
     Use after memgentic_recall with detail='index' to drill into specific results.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
         memory = await metadata_store.get_memory(params.memory_id)
         if memory is None:
@@ -525,7 +525,7 @@ async def memgentic_remember(params: RememberInput, ctx: Context) -> str:
         str: Confirmation with memory ID.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         pipeline: IngestionPipeline = state["pipeline"]
 
         try:
@@ -577,7 +577,7 @@ async def memgentic_sources(ctx: Context) -> str:
         str: Markdown table of sources and counts.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
 
         stats = await metadata_store.get_source_stats()
@@ -701,7 +701,7 @@ async def memgentic_search(params: SearchInput, ctx: Context) -> str:
         str: Markdown-formatted matching memories.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
 
         session_config = _get_session_config(ctx)
@@ -757,7 +757,7 @@ async def memgentic_recent(params: RecentInput, ctx: Context) -> str:
         str: Markdown list of recent memories.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
 
         config = _get_session_config(ctx)
@@ -814,7 +814,7 @@ async def memgentic_stats(ctx: Context) -> str:
              vector store info, and current session config.
     """
     try:
-        state = ctx.request_context.lifespan_state
+        state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
         vector_store: VectorStore = state["vector_store"]
 
@@ -885,7 +885,7 @@ async def memgentic_briefing(params: BriefingInput, ctx: Context) -> str:
         str: Markdown briefing with platform counts, top topics, and previews.
     """
     try:
-        metadata_store = ctx.request_context.lifespan_state["metadata_store"]
+        metadata_store = ctx.request_context.lifespan_context["metadata_store"]
         since = datetime.now(UTC) - timedelta(hours=params.since_hours)
         memories = await metadata_store.get_memories_since(since, limit=100)
 
@@ -946,8 +946,8 @@ async def memgentic_forget(params: ForgetInput, ctx: Context) -> str:
         str: Confirmation or error message.
     """
     try:
-        metadata_store: MetadataStore = ctx.request_context.lifespan_state["metadata_store"]
-        vector_store: VectorStore = ctx.request_context.lifespan_state["vector_store"]
+        metadata_store: MetadataStore = ctx.request_context.lifespan_context["metadata_store"]
+        vector_store: VectorStore = ctx.request_context.lifespan_context["vector_store"]
 
         memory = await metadata_store.get_memory(params.memory_id)
         if not memory:
@@ -991,7 +991,7 @@ async def memgentic_export(params: ExportInput, ctx: Context) -> str:
     try:
         import json
 
-        metadata_store: MetadataStore = ctx.request_context.lifespan_state["metadata_store"]
+        metadata_store: MetadataStore = ctx.request_context.lifespan_context["metadata_store"]
 
         config = SessionConfig()
         if params.source:
@@ -1218,7 +1218,7 @@ async def memgentic_pin(params: PinInput, ctx: Context) -> str:
         str: Confirmation message.
     """
     try:
-        metadata_store: MetadataStore = ctx.request_context.lifespan_state["metadata_store"]
+        metadata_store: MetadataStore = ctx.request_context.lifespan_context["metadata_store"]
 
         memory = await metadata_store.get_memory(params.memory_id)
         if not memory:
@@ -1254,7 +1254,7 @@ async def memgentic_skills_tool(ctx: Context) -> str:
         str: Markdown list of available skills.
     """
     try:
-        metadata_store: MetadataStore = ctx.request_context.lifespan_state["metadata_store"]
+        metadata_store: MetadataStore = ctx.request_context.lifespan_context["metadata_store"]
 
         skills = await metadata_store.get_skills()
         if not skills:
@@ -1304,7 +1304,7 @@ async def memgentic_skill_tool(params: SkillInput, ctx: Context) -> str:
         str: Full skill content in markdown format.
     """
     try:
-        metadata_store: MetadataStore = ctx.request_context.lifespan_state["metadata_store"]
+        metadata_store: MetadataStore = ctx.request_context.lifespan_context["metadata_store"]
 
         skill = await metadata_store.get_skill_by_name(params.name)
         if not skill:
