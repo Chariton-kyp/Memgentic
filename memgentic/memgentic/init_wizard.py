@@ -341,7 +341,7 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
             )
 
             await metadata_store.initialize()
-            await vector_store.initialize()
+            await vector_store.initialize(metadata_store)
 
             try:
                 adapters = get_import_adapters()

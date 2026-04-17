@@ -147,6 +147,21 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             )""",
         ],
     ),
+    (
+        7,
+        "embedding_config — pin model/dimensions to prevent silent mismatch",
+        [
+            # Key/value store recording the embedding model + dimensions used
+            # to build the current vector collection. VectorStore reads this
+            # on startup and refuses to proceed if the configured model/dim
+            # differs from what's pinned.
+            """CREATE TABLE IF NOT EXISTS embedding_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""",
+        ],
+    ),
 ]
 
 SCHEMA_VERSION_TABLE = """

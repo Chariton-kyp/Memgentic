@@ -134,6 +134,50 @@ class MetadataStore:
             await self._db.close()
             self._db = None
 
+    # --- Embedding config (pinned to prevent silent model/dim mismatch) ---
+
+    async def get_embedding_config(self) -> dict[str, str] | None:
+        """Return the embedding model+dimensions pinned to the current collection,
+        or None if nothing has been recorded yet (fresh install).
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        cursor = await self._db.execute("SELECT key, value FROM embedding_config")
+        rows = await cursor.fetchall()
+        if not rows:
+            return None
+        config = {row["key"]: row["value"] for row in rows}
+        # Require both keys to consider config valid
+        if "model" not in config or "dimensions" not in config:
+            return None
+        return config
+
+    async def set_embedding_config(self, model: str, dimensions: int) -> None:
+        """Pin the embedding model + dimensions that built the current collection.
+        Called exactly once, the first time the collection is created.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        now = datetime.now(UTC).isoformat()
+        await self._db.execute(
+            "INSERT OR REPLACE INTO embedding_config (key, value, updated_at) VALUES (?, ?, ?)",
+            ("model", model, now),
+        )
+        await self._db.execute(
+            "INSERT OR REPLACE INTO embedding_config (key, value, updated_at) VALUES (?, ?, ?)",
+            ("dimensions", str(dimensions), now),
+        )
+        await self._db.commit()
+
+    async def clear_embedding_config(self) -> None:
+        """Remove the pinned embedding config. Used by `memgentic re-embed` after
+        the collection has been rebuilt with a new model.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        await self._db.execute("DELETE FROM embedding_config")
+        await self._db.commit()
+
     async def save_memory(self, memory: Memory) -> None:
         """Insert or update a memory record."""
         if not self._db:

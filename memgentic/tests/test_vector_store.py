@@ -165,3 +165,169 @@ class TestDeleteAndInfo:
         assert "indexed_vectors_count" in info
         assert "points_count" in info
         assert "status" in info
+
+
+class TestEmbeddingSafetyCheck:
+    """v0.5.0 #4 — refuse to start when the pinned embedding model or dimensions
+    disagree with what's configured.
+    """
+
+    async def test_first_init_pins_model_and_dim(self, tmp_path):
+        from memgentic.storage.metadata import MetadataStore
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "memgentic_data",
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_fresh",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+        )
+        meta = MetadataStore(settings.sqlite_path)
+        vec = VectorStore(settings)
+        vec._try_server_connection = _no_server  # type: ignore[assignment]
+        try:
+            await meta.initialize()
+            await vec.initialize(meta)
+            pinned = await meta.get_embedding_config()
+        finally:
+            await vec.close()
+            await meta.close()
+
+        assert pinned is not None
+        assert pinned["model"] == "qwen3-embedding:0.6b"
+        assert pinned["dimensions"] == "768"
+
+    async def test_dim_mismatch_raises(self, tmp_path):
+        from memgentic.exceptions import EmbeddingMismatchError
+        from memgentic.storage.metadata import MetadataStore
+
+        settings_a = MemgenticSettings(
+            data_dir=tmp_path / "memgentic_data",
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_dim",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+        )
+        meta = MetadataStore(settings_a.sqlite_path)
+        vec = VectorStore(settings_a)
+        vec._try_server_connection = _no_server  # type: ignore[assignment]
+        await meta.initialize()
+        await vec.initialize(meta)
+        await vec.close()
+
+        settings_b = MemgenticSettings(
+            data_dir=settings_a.data_dir,
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_dim",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=384,
+        )
+        vec2 = VectorStore(settings_b)
+        vec2._try_server_connection = _no_server  # type: ignore[assignment]
+        try:
+            with pytest.raises(EmbeddingMismatchError) as excinfo:
+                await vec2.initialize(meta)
+            msg = str(excinfo.value)
+            assert "re-embed" in msg
+            assert "768" in msg
+            assert "384" in msg
+        finally:
+            await vec2.close()
+            await meta.close()
+
+    async def test_model_mismatch_raises(self, tmp_path):
+        from memgentic.exceptions import EmbeddingMismatchError
+        from memgentic.storage.metadata import MetadataStore
+
+        settings_a = MemgenticSettings(
+            data_dir=tmp_path / "memgentic_data",
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_model",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+        )
+        meta = MetadataStore(settings_a.sqlite_path)
+        vec = VectorStore(settings_a)
+        vec._try_server_connection = _no_server  # type: ignore[assignment]
+        await meta.initialize()
+        await vec.initialize(meta)
+        await vec.close()
+
+        settings_b = MemgenticSettings(
+            data_dir=settings_a.data_dir,
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_model",
+            embedding_model="nomic-embed-text",
+            embedding_dimensions=768,
+        )
+        vec2 = VectorStore(settings_b)
+        vec2._try_server_connection = _no_server  # type: ignore[assignment]
+        try:
+            with pytest.raises(EmbeddingMismatchError) as excinfo:
+                await vec2.initialize(meta)
+            assert "nomic-embed-text" in str(excinfo.value)
+            assert "qwen3-embedding:0.6b" in str(excinfo.value)
+        finally:
+            await vec2.close()
+            await meta.close()
+
+    async def test_missing_pin_backfills_from_collection(self, tmp_path):
+        from memgentic.storage.metadata import MetadataStore
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "memgentic_data",
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_backfill",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+        )
+        meta = MetadataStore(settings.sqlite_path)
+        vec = VectorStore(settings)
+        vec._try_server_connection = _no_server  # type: ignore[assignment]
+        await meta.initialize()
+        await vec.initialize(meta)
+        # Simulate pre-v0.5.0 DB: collection exists, pin is missing.
+        await meta.clear_embedding_config()
+        assert await meta.get_embedding_config() is None
+        await vec.close()
+
+        vec2 = VectorStore(settings)
+        vec2._try_server_connection = _no_server  # type: ignore[assignment]
+        try:
+            await vec2.initialize(meta)
+            pinned = await meta.get_embedding_config()
+        finally:
+            await vec2.close()
+            await meta.close()
+
+        assert pinned is not None
+        assert pinned["model"] == "qwen3-embedding:0.6b"
+        assert pinned["dimensions"] == "768"
+
+    async def test_no_metadata_store_keeps_old_behaviour(self, tmp_path):
+        """Callers not passing metadata_store keep pre-v0.5.0 behaviour (no
+        check, no pin). Important for backwards compatibility during staged
+        rollout.
+        """
+        from memgentic.storage.metadata import MetadataStore
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "memgentic_data",
+            storage_backend=StorageBackend.LOCAL,
+            collection_name="safety_nostore",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+        )
+        vec = VectorStore(settings)
+        vec._try_server_connection = _no_server  # type: ignore[assignment]
+        try:
+            await vec.initialize()
+        finally:
+            await vec.close()
+
+        meta = MetadataStore(settings.sqlite_path)
+        await meta.initialize()
+        try:
+            assert await meta.get_embedding_config() is None
+        finally:
+            await meta.close()
