@@ -125,7 +125,7 @@ jobs:
         run: cargo fmt --all -- --check
       - name: Clippy (no warnings allowed)
         run: cargo clippy --all-targets -- -D warnings
-      - name: Build
+      - name: Build (with extension-module — wheel layout)
         run: cargo build --release
-      - name: Test
-        run: cargo test --release
+      - name: Test (no extension-module — link to libpython)
+        run: cargo test --release --no-default-features

@@ -10,9 +10,17 @@ name = "memgentic_native"
 crate-type = ["cdylib"]
 
 [dependencies]
-pyo3 = { version = "0.24", features = ["extension-module"] }
+pyo3 = { version = "0.24" }
 regex = "1"
 rayon = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 petgraph = "0.6"
+
+# extension-module is enabled by default for wheel builds (maturin / cargo build).
+# It must be DISABLED for `cargo test`, otherwise the test binary cannot link
+# (libpython symbols are expected to come from the host interpreter at runtime,
+# which only happens for cdylib loaded by Python — not for standalone test bins).
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
