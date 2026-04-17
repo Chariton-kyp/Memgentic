@@ -121,7 +121,7 @@ def daemon(scan: bool):
         pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+        await vector_store.initialize(metadata_store)
 
         try:
             # Register all daemon-capable adapters
@@ -214,7 +214,7 @@ def search(
         embedder = Embedder(settings)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+        await vector_store.initialize(metadata_store)
 
         try:
             config = SessionConfig()
@@ -403,7 +403,7 @@ def remember(content: str, content_type: str, source: str, topics: str | None):
         pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+        await vector_store.initialize(metadata_store)
 
         try:
             topic_list = [t.strip() for t in topics.split(",")] if topics else []
@@ -474,7 +474,7 @@ def import_existing(source: str | None):
         pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+        await vector_store.initialize(metadata_store)
 
         try:
             adapters = get_import_adapters()
@@ -752,7 +752,7 @@ def consolidate():
         embedder = Embedder(settings)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+        await vector_store.initialize(metadata_store)
 
         try:
             console.print("[cyan]Running consolidation...[/]")
@@ -1330,7 +1330,14 @@ def re_embed(model_name: str | None, reembed_all: bool, batch_size: int):
         embedder = Embedder(effective_settings)
 
         await metadata_store.initialize()
-        await vector_store.initialize()
+
+        # Re-embed is the one path that *intentionally* replaces the embedding
+        # model. Clear the pinned config first so the safety check doesn't
+        # abort — we'll re-pin the new model on success.
+        if model_name:
+            await metadata_store.clear_embedding_config()
+
+        await vector_store.initialize(metadata_store)
 
         success_count = 0
         failure_count = 0
@@ -1376,6 +1383,15 @@ def re_embed(model_name: str | None, reembed_all: bool, batch_size: int):
                         failure_count += len(batch)
 
                     progress.advance(task, len(batch))
+
+            # Pin the (possibly new) model so the next startup passes the
+            # dim/model safety check. Use the effective model even when
+            # --model wasn't passed, to backfill any earlier corruption.
+            if success_count and failure_count == 0:
+                await metadata_store.set_embedding_config(
+                    model=effective_settings.embedding_model,
+                    dimensions=effective_settings.embedding_dimensions,
+                )
 
             console.print(
                 f"\n[bold green]Re-embed complete![/] "

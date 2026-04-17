@@ -138,7 +138,7 @@ async def app_lifespan(server: FastMCP):
     )
 
     await metadata_store.initialize()
-    await vector_store.initialize()
+    await vector_store.initialize(metadata_store)
 
     logger.info("mcp_server.ready", storage=settings.storage_backend.value)
 

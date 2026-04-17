@@ -2,14 +2,67 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import structlog
 from qdrant_client import AsyncQdrantClient, models
 
 from memgentic.config import MemgenticSettings, StorageBackend
-from memgentic.exceptions import StorageError
+from memgentic.exceptions import EmbeddingMismatchError, StorageError
 from memgentic.models import Memory, SessionConfig
 
+if TYPE_CHECKING:
+    from memgentic.storage.metadata import MetadataStore
+
 logger = structlog.get_logger()
+
+
+def _format_mismatch_message(
+    *,
+    collection: str,
+    pinned_model: str | None,
+    pinned_dim: int,
+    current_model: str,
+    current_dim: int,
+    actual_dim: int,
+) -> str:
+    """Produce an actionable error message for embedding-model / dimension mismatch.
+
+    Mixing vectors from different embedding models yields nonsense similarity
+    scores, so we refuse to start. The message is the primary UX here — it has
+    to tell the user exactly what's wrong and exactly how to fix it.
+    """
+    lines = [
+        "",
+        "Embedding model / dimension mismatch — semantic search would be corrupted.",
+        "",
+        f"  Collection        : {collection}",
+        f"  Pinned model      : {pinned_model or '(unknown — pre-v0.5.0 collection)'}",
+        f"  Pinned dimensions : {pinned_dim}",
+        f"  Collection on disk: {actual_dim} dimensions",
+        f"  Now configured    : {current_model} ({current_dim} dimensions)",
+        "",
+        "This collection was built with a different embedding model than what's",
+        "currently configured. Vectors produced by different models are NOT",
+        "comparable, so Memgentic refuses to proceed rather than silently",
+        "return meaningless results.",
+        "",
+        "To resolve, pick ONE:",
+        "",
+        "  (A) Keep your existing memories — revert the embedding model:",
+        f"        # MEMGENTIC_EMBEDDING_MODEL='{pinned_model or 'qwen3-embedding:0.6b'}'",
+        f"        # MEMGENTIC_EMBEDDING_DIMENSIONS={pinned_dim}",
+        "",
+        "  (B) Rebuild the collection with the new model (re-embeds every",
+        "      memory — progress bar, resumable):",
+        "        memgentic re-embed",
+        "",
+        "  (C) Start fresh (destroys existing memories):",
+        "        memgentic doctor   # to confirm current config",
+        "        # then manually remove ~/.memgentic/data/ and run `memgentic init`",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 class VectorStore:
@@ -26,7 +79,7 @@ class VectorStore:
         self._settings = settings
         self._client: AsyncQdrantClient | None = None
 
-    async def initialize(self) -> None:
+    async def initialize(self, metadata_store: MetadataStore | None = None) -> None:
         """Initialize async Qdrant client and create collection if needed.
 
         When storage_backend is LOCAL, first probes the Qdrant server URL.
@@ -58,11 +111,14 @@ class VectorStore:
         collections = await self._client.get_collections()
         collection_names = [c.name for c in collections.collections]
 
+        current_model = self._settings.embedding_model
+        current_dim = self._settings.embedding_dimensions
+
         if self._settings.collection_name not in collection_names:
             await self._client.create_collection(
                 collection_name=self._settings.collection_name,
                 vectors_config=models.VectorParams(
-                    size=self._settings.embedding_dimensions,
+                    size=current_dim,
                     distance=models.Distance.COSINE,
                 ),
             )
@@ -81,8 +137,90 @@ class VectorStore:
             logger.info(
                 "vector_store.collection_created",
                 name=self._settings.collection_name,
-                dimensions=self._settings.embedding_dimensions,
+                dimensions=current_dim,
             )
+            # Pin the embedding model+dim that built this collection. Used by
+            # future initialize() calls to detect silent mismatches.
+            if metadata_store is not None:
+                await metadata_store.set_embedding_config(
+                    model=current_model, dimensions=current_dim
+                )
+        elif metadata_store is not None:
+            await self._verify_embedding_compatibility(metadata_store)
+
+    async def _verify_embedding_compatibility(self, metadata_store: MetadataStore) -> None:
+        """Compare the configured embedding model + dimensions against what was
+        pinned when the collection was first created. Refuse to proceed on a
+        mismatch rather than corrupting the semantic search with mixed vectors.
+        """
+        if self._client is None:
+            return
+
+        pinned = await metadata_store.get_embedding_config()
+        current_model = self._settings.embedding_model
+        current_dim = self._settings.embedding_dimensions
+
+        # Always reconcile against the collection's actual vector size on-disk,
+        # not just the pinned row — catches cases where the SQLite entry was
+        # deleted but the collection wasn't rebuilt.
+        info = await self._client.get_collection(self._settings.collection_name)
+        vectors_config = info.config.params.vectors
+        if isinstance(vectors_config, dict):
+            # Named vectors are not a layout Memgentic uses, but guard anyway.
+            actual_dim = next(iter(vectors_config.values())).size
+        else:
+            actual_dim = vectors_config.size
+
+        if actual_dim != current_dim:
+            raise EmbeddingMismatchError(
+                _format_mismatch_message(
+                    collection=self._settings.collection_name,
+                    pinned_model=(pinned or {}).get("model"),
+                    pinned_dim=int((pinned or {}).get("dimensions", actual_dim)),
+                    current_model=current_model,
+                    current_dim=current_dim,
+                    actual_dim=actual_dim,
+                )
+            )
+
+        if pinned is None:
+            # Collection exists but no pinned record — likely upgraded from
+            # an earlier Memgentic version. Backfill the pin with what we see
+            # in the collection (dim) and the currently configured model.
+            # This is the only path that trusts current_model implicitly.
+            logger.warning(
+                "vector_store.embedding_config.backfill",
+                collection=self._settings.collection_name,
+                model=current_model,
+                dimensions=actual_dim,
+                hint=(
+                    "Existing collection had no pinned model. Assuming the "
+                    "currently configured model was the one that built it. "
+                    "If that's wrong, run `memgentic re-embed` to rebuild."
+                ),
+            )
+            await metadata_store.set_embedding_config(
+                model=current_model, dimensions=actual_dim
+            )
+            return
+
+        if pinned["model"] != current_model:
+            raise EmbeddingMismatchError(
+                _format_mismatch_message(
+                    collection=self._settings.collection_name,
+                    pinned_model=pinned["model"],
+                    pinned_dim=int(pinned["dimensions"]),
+                    current_model=current_model,
+                    current_dim=current_dim,
+                    actual_dim=actual_dim,
+                )
+            )
+
+        logger.debug(
+            "vector_store.embedding_config.verified",
+            model=current_model,
+            dimensions=current_dim,
+        )
 
     async def close(self) -> None:
         """Close Qdrant client."""
