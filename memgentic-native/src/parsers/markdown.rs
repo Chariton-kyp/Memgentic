@@ -3,8 +3,7 @@ use regex::Regex;
 use std::sync::LazyLock;
 
 /// Regex for Aider-style markdown turn markers (#### user / #### assistant).
-static RE_AIDER_SPLIT: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?m)^####\s+").unwrap());
+static RE_AIDER_SPLIT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?m)^####\s+").unwrap());
 
 /// Regex for Codex-style markdown turn markers (# user / ## assistant).
 /// Matches the full header including role word (no lookahead — unsupported by regex crate).

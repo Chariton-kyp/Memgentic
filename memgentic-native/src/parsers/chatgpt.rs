@@ -79,7 +79,7 @@ pub fn flatten_chatgpt_mapping(mapping_json: &str) -> PyResult<Vec<PyObject>> {
         nodes_with_time
             .into_iter()
             .map(|(_, role, text)| -> PyResult<PyObject> {
-                let dict = pyo3::types::PyDict::new_bound(py);
+                let dict = pyo3::types::PyDict::new(py);
                 dict.set_item("role", &role)?;
                 dict.set_item("text", &text)?;
                 Ok(dict.into_any().unbind())
@@ -171,14 +171,13 @@ pub fn parse_chatgpt_conversations(json_content: &str) -> PyResult<Vec<Vec<PyObj
             nodes_with_time.push((create_time, role, text));
         }
 
-        nodes_with_time
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        nodes_with_time.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         let turns = Python::with_gil(|py| -> PyResult<Vec<PyObject>> {
             nodes_with_time
                 .into_iter()
                 .map(|(_, role, text)| -> PyResult<PyObject> {
-                    let dict = pyo3::types::PyDict::new_bound(py);
+                    let dict = pyo3::types::PyDict::new(py);
                     dict.set_item("role", &role)?;
                     dict.set_item("text", &text)?;
                     Ok(dict.into_any().unbind())

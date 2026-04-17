@@ -152,19 +152,21 @@ pub fn scrub_text_inner(text: &str) -> ScrubResult {
 
     for pattern in CREDENTIAL_PATTERNS.iter() {
         let mut count = 0usize;
-        let new_text = pattern.regex.replace_all(&result, |caps: &regex::Captures| {
-            count += 1;
-            // Handle backreferences in replacement
-            let mut replacement = pattern.replacement.to_string();
-            for i in 1..caps.len() {
-                if let Some(m) = caps.get(i) {
-                    replacement = replacement.replace(&format!("${{{}}}", i), m.as_str());
-                    replacement = replacement.replace(&format!("${}", i), m.as_str());
-                    replacement = replacement.replace(&format!("\\{}", i), m.as_str());
+        let new_text = pattern
+            .regex
+            .replace_all(&result, |caps: &regex::Captures| {
+                count += 1;
+                // Handle backreferences in replacement
+                let mut replacement = pattern.replacement.to_string();
+                for i in 1..caps.len() {
+                    if let Some(m) = caps.get(i) {
+                        replacement = replacement.replace(&format!("${{{}}}", i), m.as_str());
+                        replacement = replacement.replace(&format!("${}", i), m.as_str());
+                        replacement = replacement.replace(&format!("\\{}", i), m.as_str());
+                    }
                 }
-            }
-            replacement
-        });
+                replacement
+            });
         if count > 0 {
             result = new_text.into_owned();
             redaction_count += count;

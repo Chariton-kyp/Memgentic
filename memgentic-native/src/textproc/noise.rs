@@ -16,10 +16,8 @@ static NOISE_ACKNOWLEDGMENT_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
 });
 
 static OUTPUT_LINE_INDICATOR: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(
-        r#"^\s*(?:at |File "|Traceback|>>>|\$|>|#|[0-9]+:|\s*\w+\.(?:py|js|ts|go|rs):\d+)"#,
-    )
-    .unwrap()
+    Regex::new(r#"^\s*(?:at |File "|Traceback|>>>|\$|>|#|[0-9]+:|\s*\w+\.(?:py|js|ts|go|rs):\d+)"#)
+        .unwrap()
 });
 
 /// Core noise detection logic (no GIL needed).

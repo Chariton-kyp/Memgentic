@@ -13,30 +13,30 @@ mod textproc;
 #[pymodule]
 fn memgentic_native(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // --- textproc submodule ---
-    let textproc_mod = PyModule::new_bound(m.py(), "textproc")?;
+    let textproc_mod = PyModule::new(m.py(), "textproc")?;
     textproc::register(&textproc_mod)?;
     m.add_submodule(&textproc_mod)?;
     // Fix Python import path so `from memgentic_native.textproc import ...` works
     m.py()
-        .import_bound("sys")?
+        .import("sys")?
         .getattr("modules")?
         .set_item("memgentic_native.textproc", &textproc_mod)?;
 
     // --- parsers submodule ---
-    let parsers_mod = PyModule::new_bound(m.py(), "parsers")?;
+    let parsers_mod = PyModule::new(m.py(), "parsers")?;
     parsers::register(&parsers_mod)?;
     m.add_submodule(&parsers_mod)?;
     m.py()
-        .import_bound("sys")?
+        .import("sys")?
         .getattr("modules")?
         .set_item("memgentic_native.parsers", &parsers_mod)?;
 
     // --- graph submodule ---
-    let graph_mod = PyModule::new_bound(m.py(), "graph")?;
+    let graph_mod = PyModule::new(m.py(), "graph")?;
     graph::register(&graph_mod)?;
     m.add_submodule(&graph_mod)?;
     m.py()
-        .import_bound("sys")?
+        .import("sys")?
         .getattr("modules")?
         .set_item("memgentic_native.graph", &graph_mod)?;
 

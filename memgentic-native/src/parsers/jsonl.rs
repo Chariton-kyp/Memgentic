@@ -152,7 +152,7 @@ pub fn parse_jsonl_file(file_path: &str) -> PyResult<Vec<PyObject>> {
         turns
             .into_iter()
             .map(|turn| -> PyResult<PyObject> {
-                let dict = pyo3::types::PyDict::new_bound(py);
+                let dict = pyo3::types::PyDict::new(py);
                 dict.set_item("role", &turn.role)?;
                 dict.set_item("text", &turn.text)?;
                 Ok(dict.into_any().unbind())

@@ -205,13 +205,13 @@ impl NativeKnowledgeGraph {
     /// Returns dict with 'entity', 'neighbors', and optionally 'not_found'.
     fn query_neighbors(&self, entity: &str, depth: usize) -> PyResult<PyObject> {
         Python::with_gil(|py| {
-            let result = pyo3::types::PyDict::new_bound(py);
+            let result = pyo3::types::PyDict::new(py);
             result.set_item("entity", entity)?;
 
             let start_idx = match self.name_to_index.get(entity) {
                 Some(&idx) => idx,
                 None => {
-                    result.set_item("neighbors", pyo3::types::PyList::empty_bound(py))?;
+                    result.set_item("neighbors", pyo3::types::PyList::empty(py))?;
                     result.set_item("not_found", true)?;
                     return Ok(result.into_any().unbind());
                 }
@@ -231,12 +231,7 @@ impl NativeKnowledgeGraph {
 
                 if current != start_idx {
                     let node = &self.graph[current];
-                    neighbors.push((
-                        node.name.clone(),
-                        node.node_type.clone(),
-                        node.count,
-                        d,
-                    ));
+                    neighbors.push((node.name.clone(), node.node_type.clone(), node.count, d));
                 }
 
                 if d < depth {
@@ -249,11 +244,11 @@ impl NativeKnowledgeGraph {
             }
 
             // Sort by count descending
-            neighbors.sort_by(|a, b| b.2.cmp(&a.2));
+            neighbors.sort_by_key(|n| std::cmp::Reverse(n.2));
 
-            let py_neighbors = pyo3::types::PyList::empty_bound(py);
+            let py_neighbors = pyo3::types::PyList::empty(py);
             for (name, ntype, count, d) in &neighbors {
-                let neighbor_dict = pyo3::types::PyDict::new_bound(py);
+                let neighbor_dict = pyo3::types::PyDict::new(py);
                 neighbor_dict.set_item("name", name)?;
                 neighbor_dict.set_item("type", ntype)?;
                 neighbor_dict.set_item("count", count)?;
@@ -270,13 +265,13 @@ impl NativeKnowledgeGraph {
     #[pyo3(signature = (min_weight=1))]
     fn get_graph_data(&self, min_weight: usize) -> PyResult<PyObject> {
         Python::with_gil(|py| {
-            let result = pyo3::types::PyDict::new_bound(py);
+            let result = pyo3::types::PyDict::new(py);
 
             // Nodes
-            let py_nodes = pyo3::types::PyList::empty_bound(py);
+            let py_nodes = pyo3::types::PyList::empty(py);
             for idx in self.graph.node_indices() {
                 let node = &self.graph[idx];
-                let node_dict = pyo3::types::PyDict::new_bound(py);
+                let node_dict = pyo3::types::PyDict::new(py);
                 node_dict.set_item("id", &node.name)?;
                 node_dict.set_item("type", &node.node_type)?;
                 node_dict.set_item("count", node.count)?;
@@ -285,12 +280,12 @@ impl NativeKnowledgeGraph {
             result.set_item("nodes", py_nodes)?;
 
             // Edges (filtered by min_weight)
-            let py_edges = pyo3::types::PyList::empty_bound(py);
+            let py_edges = pyo3::types::PyList::empty(py);
             for edge in self.graph.edge_indices() {
                 let edge_data = &self.graph[edge];
                 if edge_data.weight >= min_weight {
                     if let Some((a, b)) = self.graph.edge_endpoints(edge) {
-                        let edge_dict = pyo3::types::PyDict::new_bound(py);
+                        let edge_dict = pyo3::types::PyDict::new(py);
                         edge_dict.set_item("source", &self.graph[a].name)?;
                         edge_dict.set_item("target", &self.graph[b].name)?;
                         edge_dict.set_item("weight", edge_data.weight)?;
@@ -396,8 +391,10 @@ mod tests {
     #[test]
     fn test_add_memory_increments_count() {
         let mut g = make_graph();
-        g.add_memory("mem1".to_string(), vec!["python".to_string()], vec![]).unwrap();
-        g.add_memory("mem2".to_string(), vec!["python".to_string()], vec![]).unwrap();
+        g.add_memory("mem1".to_string(), vec!["python".to_string()], vec![])
+            .unwrap();
+        g.add_memory("mem2".to_string(), vec!["python".to_string()], vec![])
+            .unwrap();
         let idx = g.name_to_index["python"];
         assert_eq!(g.graph[idx].count, 2);
         assert_eq!(g.graph[idx].memory_ids.len(), 2);
@@ -406,7 +403,8 @@ mod tests {
     #[test]
     fn test_get_node_memory_ids_existing() {
         let mut g = make_graph();
-        g.add_memory("mem1".to_string(), vec!["rust".to_string()], vec![]).unwrap();
+        g.add_memory("mem1".to_string(), vec!["rust".to_string()], vec![])
+            .unwrap();
         let ids = g.get_node_memory_ids("rust");
         assert_eq!(ids, vec!["mem1".to_string()]);
     }
