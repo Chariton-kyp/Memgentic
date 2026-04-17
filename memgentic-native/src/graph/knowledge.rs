@@ -244,7 +244,7 @@ impl NativeKnowledgeGraph {
             }
 
             // Sort by count descending
-            neighbors.sort_by(|a, b| b.2.cmp(&a.2));
+            neighbors.sort_by_key(|n| std::cmp::Reverse(n.2));
 
             let py_neighbors = pyo3::types::PyList::empty(py);
             for (name, ntype, count, d) in &neighbors {
