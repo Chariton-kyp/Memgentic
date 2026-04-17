@@ -795,7 +795,13 @@ async def _doctor() -> None:
 
     import httpx
 
-    from memgentic.system_info import detect_gpu, detect_ram, get_loaded_models
+    from memgentic.system_info import (
+        detect_cpu_cores,
+        detect_gpu,
+        detect_ram,
+        get_loaded_models,
+        recommend_tier,
+    )
 
     checks: list[tuple[str, bool, str]] = []
 
@@ -917,6 +923,67 @@ async def _doctor() -> None:
                 console.print(f"  -> Will be created on first use: {settings.data_dir}")
     else:
         console.print("\n[bold green]All checks passed! Memgentic is ready.[/]")
+
+    # --- Tier recommendation based on detected hardware ---
+    cpu_cores = detect_cpu_cores()
+    rec = recommend_tier(gpu, ram, cpu_cores, multilingual=True)
+
+    tier_table = Table(title=f"Recommended tier: {rec.label}", title_justify="left")
+    tier_table.add_column("Setting", style="bold")
+    tier_table.add_column("Recommended")
+    tier_table.add_column("Current")
+    tier_table.add_column("")
+    match_cells: list[tuple[str, str, str, str]] = [
+        (
+            "Embedding model",
+            rec.embedding_model,
+            settings.embedding_model,
+            _tick(settings.embedding_model == rec.embedding_model),
+        ),
+        (
+            "Dimensions",
+            str(rec.embedding_dimensions),
+            str(settings.embedding_dimensions),
+            _tick(settings.embedding_dimensions == rec.embedding_dimensions),
+        ),
+        (
+            "Local LLM",
+            rec.local_llm_model,
+            settings.local_llm_model,
+            _tick(settings.local_llm_model == rec.local_llm_model),
+        ),
+    ]
+    for row in match_cells:
+        tier_table.add_row(*row)
+    console.print()
+    console.print(tier_table)
+    console.print(f"[dim]Reason: {rec.reason}[/]")
+    for note in rec.notes:
+        console.print(f"[yellow]Note:[/] {note}")
+
+    # Emit an actionable hint only when current != recommended.
+    mismatched = [row for row in match_cells if row[3] == "[yellow]change[/]"]
+    if mismatched:
+        console.print(
+            "\n[yellow]To apply the recommended tier:[/]"
+            f"\n  ollama pull {rec.embedding_model}"
+            f"\n  ollama pull {rec.local_llm_model}"
+            "\n  setx MEMGENTIC_EMBEDDING_MODEL "
+            f"{rec.embedding_model}  [dim]# PowerShell / cmd[/]"
+            "\n  setx MEMGENTIC_EMBEDDING_DIMENSIONS "
+            f"{rec.embedding_dimensions}"
+            f"\n  setx MEMGENTIC_LOCAL_LLM_MODEL {rec.local_llm_model}"
+            "\n  memgentic re-embed  [dim]# rebuild vectors with the new model[/]"
+        )
+
+
+def _tick(ok: bool) -> str:
+    """Rich-coloured match indicator for tier comparison cells.
+
+    Kept ASCII-only to avoid UnicodeEncodeError on Windows cp1253 consoles
+    (Greek locale). Rich's default theme will still colour these.
+    """
+    return "[green]OK[/]" if ok else "[yellow]change[/]"
 
 
 @main.command()
