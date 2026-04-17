@@ -3,9 +3,35 @@
 from __future__ import annotations
 
 import abc
+import fnmatch
+import os
 from pathlib import Path
 
 from memgentic.models import ContentType, ConversationChunk, Platform
+
+# Directories whose *name* matches one of these glob patterns are skipped
+# across all adapters. These are meta-tooling conversations (other memory
+# projects, observer sessions, synthetic test fixtures) that pollute
+# semantic search ranking without adding user-relevant context.
+#
+# Extend at runtime via `MEMGENTIC_EXCLUDE_PATHS` (comma-separated globs).
+# Matching is done against any path segment, not just the leaf, so e.g.
+# `*observer-sessions*` catches
+# `~/.claude/projects/C--Users-harit--claude-mem-observer-sessions/foo.jsonl`.
+_DEFAULT_EXCLUDE_DIR_GLOBS: tuple[str, ...] = (
+    "*claude-mem-observer-sessions*",
+    "*claude-mem*observer*",
+    "*memgentic-observer*",
+)
+
+
+def _compiled_exclude_globs() -> tuple[str, ...]:
+    """Return built-in excludes merged with user overrides from env."""
+    extra = os.environ.get("MEMGENTIC_EXCLUDE_PATHS", "").strip()
+    if not extra:
+        return _DEFAULT_EXCLUDE_DIR_GLOBS
+    user_globs = tuple(g.strip() for g in extra.split(",") if g.strip())
+    return _DEFAULT_EXCLUDE_DIR_GLOBS + user_globs
 
 
 class BaseAdapter(abc.ABC):
@@ -51,6 +77,8 @@ class BaseAdapter(abc.ABC):
     async def get_session_title(self, file_path: Path) -> str | None:
         """Extract or generate a session title."""
 
+    # --- File discovery ---
+
     @staticmethod
     def _safe_mtime(p: Path) -> float:
         """Return the file modification time, or ``0.0`` if the file has been deleted."""
@@ -60,16 +88,36 @@ class BaseAdapter(abc.ABC):
             return 0.0
 
     def discover_files(self) -> list[Path]:
-        """Find all conversation files for this adapter."""
+        """Find all conversation files for this adapter, honouring the
+        module-level exclude list (see `_DEFAULT_EXCLUDE_DIR_GLOBS`).
+
+        Files whose path contains a segment matching any exclude glob are
+        dropped — this prevents meta-tooling conversations (memory-observer
+        sessions, synthetic fixtures) from polluting semantic search.
+        """
+        excludes = _compiled_exclude_globs()
         files: list[Path] = []
         for watch_path in self.watch_paths:
             if not watch_path.exists():
                 continue
             for pattern in self.file_patterns:
-                files.extend(watch_path.rglob(pattern))
+                for candidate in watch_path.rglob(pattern):
+                    if _path_is_excluded(candidate, excludes):
+                        continue
+                    files.append(candidate)
         return sorted(files, key=self._safe_mtime, reverse=True)
 
+    def is_excluded(self, file_path: Path) -> bool:
+        """Whether this file should be skipped by the daemon watcher. The same
+        policy that `discover_files` applies — exposed so watchers can drop
+        incoming events without ingesting.
+        """
+        return _path_is_excluded(file_path, _compiled_exclude_globs())
+
     # --- Shared utility methods ---
+
+    # (module-level helpers live below the class — keeps the adapter
+    # contract surface cleaner for subclass authors to read.)
 
     @staticmethod
     def _classify_content(text: str) -> ContentType:
@@ -155,3 +203,15 @@ class BaseAdapter(abc.ABC):
         for chunk in chunks:
             all_topics.update(chunk.topics)
         return sorted(all_topics)[:15]
+
+
+def _path_is_excluded(file_path: Path, globs: tuple[str, ...]) -> bool:
+    """True when any segment of `file_path` matches any of `globs`."""
+    if not globs:
+        return False
+    parts = file_path.parts
+    for part in parts:
+        for pat in globs:
+            if fnmatch.fnmatch(part, pat):
+                return True
+    return False
