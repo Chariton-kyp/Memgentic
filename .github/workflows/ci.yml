@@ -105,3 +105,27 @@ jobs:
         run: cd dashboard && npx next build
       - name: Run tests
         run: cd dashboard && npx vitest run --passWithNoTests
+
+  rust:
+    name: Rust (memgentic-native)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: memgentic-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: memgentic-native
+      - name: Format check
+        run: cargo fmt --all -- --check
+      - name: Clippy (no warnings allowed)
+        run: cargo clippy --all-targets -- -D warnings
+      - name: Build
+        run: cargo build --release
+      - name: Test
+        run: cargo test --release

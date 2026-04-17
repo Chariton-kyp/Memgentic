@@ -42,7 +42,7 @@ fn batch_process(texts: Vec<String>) -> PyResult<Vec<PyObject>> {
         results
             .into_iter()
             .map(|(scrub, noisy, content_type, confidence, ents)| -> PyResult<PyObject> {
-                let dict = pyo3::types::PyDict::new_bound(py);
+                let dict = pyo3::types::PyDict::new(py);
                 dict.set_item("cleaned_text", &scrub.text)?;
                 dict.set_item("is_noise", noisy)?;
                 dict.set_item("content_type", &content_type)?;
