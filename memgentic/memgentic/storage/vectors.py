@@ -165,9 +165,18 @@ class VectorStore:
         # deleted but the collection wasn't rebuilt.
         info = await self._client.get_collection(self._settings.collection_name)
         vectors_config = info.config.params.vectors
+        if vectors_config is None:
+            # Collection exists with no vector config — shouldn't happen for
+            # Memgentic-created collections; skip the check rather than crash.
+            logger.warning(
+                "vector_store.embedding_config.no_vector_config",
+                collection=self._settings.collection_name,
+            )
+            return
         if isinstance(vectors_config, dict):
             # Named vectors are not a layout Memgentic uses, but guard anyway.
-            actual_dim = next(iter(vectors_config.values())).size
+            first = next(iter(vectors_config.values()))
+            actual_dim = first.size
         else:
             actual_dim = vectors_config.size
 
@@ -199,9 +208,7 @@ class VectorStore:
                     "If that's wrong, run `memgentic re-embed` to rebuild."
                 ),
             )
-            await metadata_store.set_embedding_config(
-                model=current_model, dimensions=actual_dim
-            )
+            await metadata_store.set_embedding_config(model=current_model, dimensions=actual_dim)
             return
 
         if pinned["model"] != current_model:
