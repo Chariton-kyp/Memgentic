@@ -199,7 +199,8 @@ mod tests {
 
     #[test]
     fn test_extract_strings_fallback_finds_text() {
-        let text = b"some binary \x00\x01\x02 Hello World this is text \x00\x00 more content here ok";
+        let text =
+            b"some binary \x00\x01\x02 Hello World this is text \x00\x00 more content here ok";
         let result = extract_strings_fallback_inner(text, 10);
         assert!(!result.is_empty());
     }

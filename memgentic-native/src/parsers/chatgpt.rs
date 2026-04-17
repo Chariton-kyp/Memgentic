@@ -171,8 +171,7 @@ pub fn parse_chatgpt_conversations(json_content: &str) -> PyResult<Vec<Vec<PyObj
             nodes_with_time.push((create_time, role, text));
         }
 
-        nodes_with_time
-            .sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+        nodes_with_time.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
 
         let turns = Python::with_gil(|py| -> PyResult<Vec<PyObject>> {
             nodes_with_time

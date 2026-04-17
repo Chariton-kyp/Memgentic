@@ -231,12 +231,7 @@ impl NativeKnowledgeGraph {
 
                 if current != start_idx {
                     let node = &self.graph[current];
-                    neighbors.push((
-                        node.name.clone(),
-                        node.node_type.clone(),
-                        node.count,
-                        d,
-                    ));
+                    neighbors.push((node.name.clone(), node.node_type.clone(), node.count, d));
                 }
 
                 if d < depth {
@@ -396,8 +391,10 @@ mod tests {
     #[test]
     fn test_add_memory_increments_count() {
         let mut g = make_graph();
-        g.add_memory("mem1".to_string(), vec!["python".to_string()], vec![]).unwrap();
-        g.add_memory("mem2".to_string(), vec!["python".to_string()], vec![]).unwrap();
+        g.add_memory("mem1".to_string(), vec!["python".to_string()], vec![])
+            .unwrap();
+        g.add_memory("mem2".to_string(), vec!["python".to_string()], vec![])
+            .unwrap();
         let idx = g.name_to_index["python"];
         assert_eq!(g.graph[idx].count, 2);
         assert_eq!(g.graph[idx].memory_ids.len(), 2);
@@ -406,7 +403,8 @@ mod tests {
     #[test]
     fn test_get_node_memory_ids_existing() {
         let mut g = make_graph();
-        g.add_memory("mem1".to_string(), vec!["rust".to_string()], vec![]).unwrap();
+        g.add_memory("mem1".to_string(), vec!["rust".to_string()], vec![])
+            .unwrap();
         let ids = g.get_node_memory_ids("rust");
         assert_eq!(ids, vec!["mem1".to_string()]);
     }

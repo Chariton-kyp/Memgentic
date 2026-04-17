@@ -41,17 +41,19 @@ fn batch_process(texts: Vec<String>) -> PyResult<Vec<PyObject>> {
     Python::with_gil(|py| {
         results
             .into_iter()
-            .map(|(scrub, noisy, content_type, confidence, ents)| -> PyResult<PyObject> {
-                let dict = pyo3::types::PyDict::new(py);
-                dict.set_item("cleaned_text", &scrub.text)?;
-                dict.set_item("is_noise", noisy)?;
-                dict.set_item("content_type", &content_type)?;
-                dict.set_item("confidence", confidence)?;
-                dict.set_item("entities", &ents)?;
-                dict.set_item("redaction_count", scrub.redaction_count)?;
-                dict.set_item("redacted_types", &scrub.redacted_types)?;
-                Ok(dict.into_any().unbind())
-            })
+            .map(
+                |(scrub, noisy, content_type, confidence, ents)| -> PyResult<PyObject> {
+                    let dict = pyo3::types::PyDict::new(py);
+                    dict.set_item("cleaned_text", &scrub.text)?;
+                    dict.set_item("is_noise", noisy)?;
+                    dict.set_item("content_type", &content_type)?;
+                    dict.set_item("confidence", confidence)?;
+                    dict.set_item("entities", &ents)?;
+                    dict.set_item("redaction_count", scrub.redaction_count)?;
+                    dict.set_item("redacted_types", &scrub.redacted_types)?;
+                    Ok(dict.into_any().unbind())
+                },
+            )
             .collect::<PyResult<Vec<_>>>()
     })
 }
