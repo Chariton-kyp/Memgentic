@@ -1605,14 +1605,86 @@ def _update_env(key: str, value: str, env_lines: list[str]) -> None:
     env_lines.append(f"{key}={value}")
 
 
+STORAGE_BACKEND_CHOICES: dict[str, dict[str, str]] = {
+    "1": {
+        "value": "sqlite_vec",
+        "label": "sqlite-vec (zero-config, recommended for local)",
+        "note": (
+            "  Co-locates vectors with the metadata DB. No server, "
+            "multi-process safe.\n  Requires the sqlite-vec extra — "
+            r"we can run `pip install 'memgentic\[sqlite-vec]'` for you."
+        ),
+    },
+    "2": {
+        "value": "local",
+        "label": "Qdrant file-mode (no server; upgrades to server mode if one appears)",
+        "note": "  File-based Qdrant under ~/.memgentic/data/. No extra install.",
+    },
+    "3": {
+        "value": "qdrant",
+        "label": "Qdrant server (Docker or Cloud — for multi-process/larger corpora)",
+        "note": "  You'll need MEMGENTIC_QDRANT_URL pointing at a running Qdrant.",
+    },
+}
+
+
+def _pick_storage_backend() -> tuple[str, str, bool]:
+    """Ask the user to pick a vector backend.
+
+    Returns ``(choice_key, backend_value, needs_sqlite_vec_install)`` so the
+    caller can both persist the env var and optionally install the extra.
+    """
+    console.print("[bold]Step 1: Vector storage backend[/]\n")
+    for key, opt in STORAGE_BACKEND_CHOICES.items():
+        current = opt["value"] == settings.storage_backend.value
+        marker = " [green](current)[/]" if current else ""
+        console.print(f"  [bold]{key})[/] {opt['label']}{marker}")
+        console.print(f"[dim]{opt['note']}[/]")
+    console.print()
+
+    choice = click.prompt(
+        "Select storage backend",
+        type=click.Choice(list(STORAGE_BACKEND_CHOICES.keys())),
+        default="1",
+    )
+    picked = STORAGE_BACKEND_CHOICES[choice]
+    needs_install = picked["value"] == "sqlite_vec"
+    return choice, picked["value"], needs_install
+
+
+def _install_sqlite_vec_extra() -> None:
+    """Install the sqlite-vec extra in the current Python env, pip-first."""
+    import subprocess
+    import sys as _sys
+
+    console.print("[dim]Installing sqlite-vec extra...[/]")
+    # Deliberately NOT passing shell=True: avoids the `[sqlite-vec]` glob
+    # landmine that bit users in v0.5.0 (see fix #27).
+    cmd = [_sys.executable, "-m", "pip", "install", "memgentic[sqlite-vec]"]
+    try:
+        subprocess.run(cmd, check=True)
+        console.print("[green]sqlite-vec installed.[/]")
+    except subprocess.CalledProcessError as exc:
+        console.print(
+            f"[yellow]pip install failed ({exc.returncode}). "
+            r"You can retry later with `pip install 'memgentic\[sqlite-vec]'`.[/]"
+        )
+    except FileNotFoundError:
+        console.print(
+            r"[yellow]pip not found. Install manually: "
+            r"`pip install 'memgentic\[sqlite-vec]'`[/]"
+        )
+
+
 @main.command()
 def setup():
     """Interactive setup wizard for Memgentic configuration.
 
     \b
-    Guides you through choosing models for:
-      1. Embeddings (for semantic search)
-      2. Intelligence LLM (for classification, extraction, summarization)
+    Guides you through:
+      1. Vector storage backend (sqlite-vec / Qdrant local / Qdrant server)
+      2. Embedding model (for semantic search)
+      3. Intelligence LLM (for classification, extraction, summarization)
 
     \b
     Writes settings to .env and optionally pulls models via Ollama.
@@ -1621,8 +1693,11 @@ def setup():
 
     console.print("\n[bold cyan]Memgentic Setup[/]\n")
 
-    # --- Step 1: Embedding Model ---
-    console.print("[bold]Step 1: Embedding Model[/] (for semantic search)\n")
+    # --- Step 1: Storage backend ---
+    _, backend_value, needs_sqlite_vec = _pick_storage_backend()
+
+    # --- Step 2: Embedding Model ---
+    console.print("\n[bold]Step 2: Embedding Model[/] (for semantic search)\n")
 
     for key, preset in EMBEDDING_PRESETS.items():
         marker = " [green](current)[/]" if preset["name"] == settings.embedding_model else ""
@@ -1643,9 +1718,9 @@ def setup():
         console.print("[red]Invalid choice.[/]")
         return
 
-    # --- Step 2: Intelligence LLM ---
+    # --- Step 3: Intelligence LLM ---
     console.print(
-        "\n[bold]Step 2: Intelligence LLM[/] (for classification, extraction, summarization)\n"
+        "\n[bold]Step 3: Intelligence LLM[/] (for classification, extraction, summarization)\n"
     )
     console.print("  Classifies memories, extracts entities, summarizes conversations.")
     console.print("  Runs locally via Ollama -- no API key needed.\n")
@@ -1682,6 +1757,7 @@ def setup():
     if env_path.exists():
         env_lines = env_path.read_text().splitlines()
 
+    _update_env("MEMGENTIC_STORAGE_BACKEND", backend_value, env_lines)
     _update_env("MEMGENTIC_EMBEDDING_MODEL", emb_model, env_lines)
     _update_env("MEMGENTIC_EMBEDDING_DIMENSIONS", str(emb_dims), env_lines)
 
@@ -1694,6 +1770,7 @@ def setup():
     env_path.write_text("\n".join(env_lines) + "\n")
 
     console.print("\n[green]Saved to .env:[/]")
+    console.print(f"  Storage backend: {backend_value}")
     console.print(f"  Embedding: {emb_model} ({emb_dims}d)")
     if llm_model:
         console.print(f"  Intelligence LLM: {llm_model}")
@@ -1701,6 +1778,19 @@ def setup():
         console.print("  Intelligence: Gemini API")
     else:
         console.print("  Intelligence: heuristics only")
+
+    # --- Install sqlite-vec extra if needed ---
+    if needs_sqlite_vec:
+        try:
+            import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
+
+            console.print("[dim]sqlite-vec extension already installed.[/]")
+        except ImportError:
+            if click.confirm(
+                "\nsqlite-vec backend needs the `sqlite-vec` extra. Install it now?",
+                default=True,
+            ):
+                _install_sqlite_vec_extra()
 
     # --- Pull models ---
     models_to_pull = [emb_model]
