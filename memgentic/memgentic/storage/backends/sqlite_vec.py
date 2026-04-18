@@ -77,10 +77,17 @@ class SqliteVecBackend:
         """Open connection, load sqlite-vec extension, ensure schema."""
         try:
             import sqlite_vec  # type: ignore[import-untyped]
-        except ImportError as exc:  # pragma: no cover - exercised via skip in tests
+        except ImportError as exc:
+            # Quotes matter: bash/zsh treat [sqlite-vec] as a glob pattern and
+            # will silently expand or error. Spell the install commands so a
+            # user can paste them verbatim.
             raise StorageError(
-                "sqlite-vec is not installed. Install with: "
-                "uv add memgentic[sqlite-vec]  (or pip install sqlite-vec)"
+                "sqlite-vec is not installed but MEMGENTIC_STORAGE_BACKEND=sqlite_vec.\n"
+                "Install it with one of:\n"
+                "    pip install 'memgentic[sqlite-vec]'\n"
+                "    uv add 'memgentic[sqlite-vec]'\n"
+                "Or switch back to the Qdrant backend by unsetting "
+                "MEMGENTIC_STORAGE_BACKEND (defaults to 'local')."
             ) from exc
 
         path = self._settings.sqlite_path

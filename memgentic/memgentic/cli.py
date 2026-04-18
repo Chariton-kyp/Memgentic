@@ -948,11 +948,15 @@ async def _doctor() -> None:
 
             checks.append(("sqlite-vec extension", True, "importable"))
         except ImportError:
+            # Rich renders the detail column through its markup parser, which
+            # would swallow the ``[sqlite-vec]`` extra as an (unknown) tag —
+            # escape the square brackets so the install command prints
+            # verbatim.
             checks.append(
                 (
                     "sqlite-vec extension",
                     False,
-                    "Not installed — run `uv add 'memgentic[sqlite-vec]'`",
+                    r"Not installed — run: pip install 'memgentic\[sqlite-vec]'",
                 )
             )
     else:
