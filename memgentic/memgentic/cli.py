@@ -78,9 +78,13 @@ def serve(watch: bool):
         enabled=settings.enable_observability,
     )
 
+    # MCP stdio reserves stdout for JSON-RPC framing. Every banner and warning
+    # this function prints must go to stderr, not the default stdout Console.
+    server_console = Console(stderr=True)
+
     # Plain serve — unchanged path (backwards compat).
     if not watch:
-        console.print("[bold green]Starting Memgentic MCP server...[/]")
+        server_console.print("[bold green]Starting Memgentic MCP server...[/]")
         run_server()
         return
 
@@ -103,12 +107,12 @@ def serve(watch: bool):
             acquire_lock(lock_path, role="serve-watch")
             lock_acquired = True
         except ProcessLockError as exc:
-            console.print(
+            server_console.print(
                 "[yellow]Warning:[/] could not acquire daemon lock — another "
                 "Memgentic process is already watching for conversations."
             )
-            console.print(f"[dim]{exc}[/]")
-            console.print(
+            server_console.print(f"[dim]{exc}[/]")
+            server_console.print(
                 "[yellow]Continuing as MCP-only[/] "
                 "(no file watcher in this process). "
                 "Stop the other process and re-run with --watch to fuse them."
@@ -118,12 +122,12 @@ def serve(watch: bool):
                 lock_path=str(lock_path),
                 fallback="mcp_only",
             )
-            console.print("[bold green]Starting Memgentic MCP server...[/]")
+            server_console.print("[bold green]Starting Memgentic MCP server...[/]")
             run_server()
             return
 
     try:
-        console.print(
+        server_console.print(
             "[bold green]Starting Memgentic MCP server[/] "
             "[dim](fused: serving MCP + watching for new conversations)[/]"
         )

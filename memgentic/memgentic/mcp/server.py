@@ -1394,6 +1394,11 @@ async def run_server_with_watcher(scan_existing: bool = True) -> None:
     lifespan (reusing the same stores the MCP tools use) and stops when the
     server exits. Only stdio transport is supported.
     """
+    # Same stdout-hygiene contract as run_server: MCP stdio reserves stdout
+    # for JSON-RPC. Without this the watcher + lifespan log lines (and there
+    # are many) corrupt the stream.
+    _redirect_logs_to_stderr()
+
     from memgentic.adapters import get_daemon_adapters
     from memgentic.daemon.watcher import MemgenticDaemon
 
