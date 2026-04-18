@@ -19,7 +19,9 @@ class ProcessLockError(RuntimeError):
 def _windows_pid_alive(pid: int) -> bool:
     import ctypes
 
-    kernel32 = ctypes.windll.kernel32
+    # ``ctypes.windll`` only exists in the Windows build of Python; pyright
+    # on Linux CI flags it, hence the ignore. Callers gate on os.name="nt".
+    kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
     handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
     if not handle:
         return False
