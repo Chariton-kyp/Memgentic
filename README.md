@@ -288,20 +288,21 @@ See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers.
 
 ## Roadmap
 
-**Current: v0.4.0 — Knowledge Platform**
+**Current: v0.5.0 — Zero-config Local**
 
 - [x] M1: Core memory engine
 - [x] M2: 11+ adapter ecosystem
 - [x] M3: Auto-injection layer (hooks, SKILL.md, context files)
 - [x] M4: Production hardening (credential scrubbing, WAL, write-time dedup)
-- [x] **M5: Rust native acceleration**
-- [x] **M6: Enhanced dashboard + collections + uploads + pins**
-- [x] **M7: Universal skills system + GitHub import + LLM extraction**
-- [x] **M8: Real-time activity feed + ingestion tracking**
-- [ ] M9: Authentication + workspaces + teams (Phase C)
-- [ ] M10: PostgreSQL + pgvector backend (Phase C)
-- [ ] M11: Desktop app (Electron) (Phase D)
-- [ ] M12: Browser extension
+- [x] M5: Rust native acceleration
+- [x] M6: Enhanced dashboard + collections + uploads + pins
+- [x] M7: Universal skills system + GitHub import + LLM extraction
+- [x] M8: Real-time activity feed + ingestion tracking
+- [x] **M9: Zero-config local (sqlite-vec backend, `serve --watch`, embedding safety pin)**
+- [ ] M10: Authentication + workspaces + teams (Phase C)
+- [ ] M11: PostgreSQL + pgvector backend (Phase C)
+- [ ] M12: Desktop app (Electron) (Phase D)
+- [ ] M13: Browser extension
 
 See [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md) for the full plan.
 

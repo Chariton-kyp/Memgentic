@@ -74,10 +74,10 @@ docs/                    ← Research & architecture docs
 
 ### Golden Rule: Dependency Direction
 ```
-memgentic  ←──  mneme-cloud    (cloud imports from core)
-memgentic  ←──  frontend       (frontend calls core API)
-NEVER: memgentic  ──→  cloud   (core NEVER imports from cloud)
+memgentic  ←──  frontend       (the dashboard calls core API; never the reverse)
 ```
+The OSS core is the only dependency root. Anything that builds on top of it
+imports from `memgentic`, never the other way around.
 
 ## Technology Stack
 

@@ -24,7 +24,7 @@ Memgentic supports three vector storage backends. The backend is selected via
   Qdrant's advanced features (payload indexes on the server, HNSW tuning).
 - Extra moving part: one more container / process to manage.
 
-### `sqlite_vec` (opt-in, v0.5.0+)
+### `sqlite_vec` (opt-in)
 - Co-locates vectors in the same SQLite file as the metadata/FTS5 store.
 - Good for: personal use where you want daemon + MCP + API concurrently,
   without running a separate Qdrant server. SQLite WAL mode and
