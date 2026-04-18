@@ -9,8 +9,27 @@ import os
 from pathlib import Path
 
 
+_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WINDOWS_STILL_ACTIVE = 259
+
+
 class ProcessLockError(RuntimeError):
     """Raised when a conflicting Memgentic process lock already exists."""
+
+
+def _windows_pid_alive(pid: int) -> bool:
+    import ctypes
+
+    kernel32 = ctypes.windll.kernel32
+    handle = kernel32.OpenProcess(_WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return False
+    try:
+        exit_code = ctypes.c_ulong(0)
+        ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
+        return bool(ok) and exit_code.value == _WINDOWS_STILL_ACTIVE
+    finally:
+        kernel32.CloseHandle(handle)
 
 
 def _pid_alive(pid: int) -> bool:
@@ -24,22 +43,9 @@ def _pid_alive(pid: int) -> bool:
         return False
     if os.name == "nt":
         # OpenProcess with PROCESS_QUERY_LIMITED_INFORMATION (0x1000). If it
-        # opens, the pid exists (even if we can't see its details). A
-        # zombie/terminated pid returns STILL_ACTIVE (259) while running.
-        import ctypes
-
-        _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
-        _STILL_ACTIVE = 259
-        kernel32 = ctypes.windll.kernel32
-        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-        if not handle:
-            return False
-        try:
-            exit_code = ctypes.c_ulong(0)
-            ok = kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code))
-            return bool(ok) and exit_code.value == _STILL_ACTIVE
-        finally:
-            kernel32.CloseHandle(handle)
+        # opens, the pid exists. GetExitCodeProcess returns STILL_ACTIVE
+        # (259) while the process is running; anything else = already exited.
+        return _windows_pid_alive(pid)
     # POSIX: signal 0 performs error-checking without actually sending a signal.
     try:
         os.kill(pid, 0)
@@ -81,10 +87,10 @@ def acquire_lock(lock_path: Path, role: str) -> None:
         if pid is not None and pid != os.getpid():
             if not _pid_alive(pid):
                 # Stale lock from a prior crashed/killed process — take it.
-                try:
+                import contextlib
+
+                with contextlib.suppress(OSError):
                     lock_path.unlink()
-                except OSError:
-                    pass
             else:
                 raise ProcessLockError(
                     f"Another Memgentic process holds the lock at {lock_path} "
