@@ -1,4 +1,10 @@
-"""Qdrant vector store — async, local file-based or remote server."""
+"""Vector store façade — Qdrant inline, sqlite-vec delegated.
+
+Qdrant (``LOCAL`` file mode and ``QDRANT`` server mode) remains the default
+and its logic lives inline here. ``SQLITE_VEC`` is an opt-in backend in
+:mod:`memgentic.storage.backends.sqlite_vec`; when selected the façade
+instantiates it and forwards every call.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +16,7 @@ from qdrant_client import AsyncQdrantClient, models
 from memgentic.config import MemgenticSettings, StorageBackend
 from memgentic.exceptions import EmbeddingMismatchError, StorageError
 from memgentic.models import Memory, SessionConfig
+from memgentic.storage.backends.base import VectorBackend
 
 if TYPE_CHECKING:
     from memgentic.storage.metadata import MetadataStore
@@ -66,26 +73,36 @@ def _format_mismatch_message(
 
 
 class VectorStore:
-    """Qdrant-backed vector store for semantic memory retrieval.
+    """Vector store façade for semantic memory retrieval.
 
-    Supports two modes:
+    Supports three modes:
     - LOCAL: File-based Qdrant (no server required, zero-config)
     - QDRANT: Remote Qdrant server (Docker or Qdrant Cloud)
+    - SQLITE_VEC: sqlite-vec extension in the existing SQLite DB (opt-in,
+      multi-process safe, no extra binary)
 
-    All operations are truly async via AsyncQdrantClient.
+    All operations are truly async.
     """
 
     def __init__(self, settings: MemgenticSettings) -> None:
         self._settings = settings
         self._client: AsyncQdrantClient | None = None
+        self._backend: VectorBackend | None = None
 
     async def initialize(self, metadata_store: MetadataStore | None = None) -> None:
-        """Initialize async Qdrant client and create collection if needed.
+        """Initialize backend — Qdrant client + safety-pin, or sqlite-vec.
 
         When storage_backend is LOCAL, first probes the Qdrant server URL.
         If a server is already running (e.g. via Docker), it is used
         transparently — avoiding file-lock conflicts between CLI and API.
         """
+        if self._settings.storage_backend == StorageBackend.SQLITE_VEC:
+            from memgentic.storage.backends.sqlite_vec import SqliteVecBackend
+
+            self._backend = SqliteVecBackend(self._settings)
+            await self._backend.initialize()
+            return
+
         if self._settings.storage_backend == StorageBackend.LOCAL:
             # Auto-detect: prefer a running Qdrant server over local file mode
             if await self._try_server_connection():
@@ -230,13 +247,20 @@ class VectorStore:
         )
 
     async def close(self) -> None:
-        """Close Qdrant client."""
+        """Close the underlying backend."""
+        if self._backend is not None:
+            await self._backend.close()
+            self._backend = None
+            return
         if self._client:
             await self._client.close()
             self._client = None
 
     async def upsert_memory(self, memory: Memory, embedding: list[float]) -> None:
         """Store a memory with its embedding vector."""
+        if self._backend is not None:
+            await self._backend.upsert_memory(memory, embedding)
+            return
         if not self._client:
             raise StorageError("VectorStore not initialized — call initialize() first")
 
@@ -255,6 +279,9 @@ class VectorStore:
         self, memories: list[Memory], embeddings: list[list[float]]
     ) -> None:
         """Batch upsert memories with embeddings."""
+        if self._backend is not None:
+            await self._backend.upsert_memories_batch(memories, embeddings)
+            return
         if not self._client:
             raise StorageError("VectorStore not initialized — call initialize() first")
         if len(memories) != len(embeddings):
@@ -287,6 +314,10 @@ class VectorStore:
 
         Returns list of dicts with 'id', 'score', and 'payload'.
         """
+        if self._backend is not None:
+            return await self._backend.search(
+                query_embedding, session_config=session_config, limit=limit, user_id=user_id
+            )
         if not self._client:
             raise StorageError("VectorStore not initialized — call initialize() first")
 
@@ -310,6 +341,9 @@ class VectorStore:
 
     async def delete_memory(self, memory_id: str) -> None:
         """Delete a memory vector."""
+        if self._backend is not None:
+            await self._backend.delete_memory(memory_id)
+            return
         if not self._client:
             raise StorageError("VectorStore not initialized")
         await self._client.delete(
@@ -319,6 +353,8 @@ class VectorStore:
 
     async def get_collection_info(self) -> dict:
         """Get collection statistics."""
+        if self._backend is not None:
+            return await self._backend.get_collection_info()
         if not self._client:
             raise StorageError("VectorStore not initialized")
         info = await self._client.get_collection(self._settings.collection_name)

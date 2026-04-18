@@ -14,6 +14,7 @@ class StorageBackend(StrEnum):
 
     LOCAL = "local"  # Qdrant file-based (no server)
     QDRANT = "qdrant"  # Qdrant server (Docker/Cloud)
+    SQLITE_VEC = "sqlite_vec"  # sqlite-vec extension co-located with metadata DB
 
 
 class EmbeddingProvider(StrEnum):
