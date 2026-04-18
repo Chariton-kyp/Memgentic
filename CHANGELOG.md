@@ -4,6 +4,43 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-04-18 — Zero-config Local
+
+### Added
+- **sqlite-vec backend** — opt-in zero-config vector store co-located with the
+  existing SQLite metadata DB. Multi-process safe via WAL, no extra binary,
+  no Docker. Install with `pip install 'memgentic[sqlite-vec]'` and set
+  `MEMGENTIC_STORAGE_BACKEND=sqlite_vec`. Qdrant remains the default.
+- **`memgentic serve --watch`** — fuses the MCP server and capture daemon
+  into a single asyncio process. One SQLite writer, one Qdrant handle, no
+  lock contention. Falls back to MCP-only with a clear warning when a
+  standalone daemon already holds the lock.
+- **Embedding safety pin** — changing the embedding model or dimensions
+  after a collection has been built now raises `EmbeddingMismatchError`
+  with a step-by-step recovery plan instead of silently corrupting recall.
+  Symmetric across Qdrant and sqlite-vec backends.
+- **`memgentic doctor` hardware tiers** — the doctor now detects RAM, GPU,
+  and CPU cores and recommends an embedding model + local LLM tier with
+  actionable "apply the recommended tier" commands.
+
+### Fixed
+- MCP stdio: structlog now writes to stderr (previously polluted stdout and
+  broke strict MCP clients). The `memgentic serve` banner also moved to
+  stderr — stdout stays pure JSON-RPC in both plain and `--watch` modes.
+- File adapters: memory-observer and meta-tooling conversation directories
+  are now excluded by default from ingestion — they polluted semantic
+  search ranking without adding user-relevant context.
+- `.daemon.pid` is reclaimed when its PID is dead. A crashed or killed
+  serve/daemon no longer permanently blocks future starts.
+- sqlite-vec filter handling: over-fetches a 10× KNN candidate pool when
+  payload filters are present so selective platform/content-type queries
+  don't silently starve recall compared to Qdrant.
+- Doctor `sqlite-vec` install hint escapes Rich markup so `[sqlite-vec]`
+  prints verbatim in `pip install 'memgentic[sqlite-vec]'`.
+
+### Dependencies
+- PyO3 upgraded 0.22 → 0.24 for the Rust extension (security).
+
 ## [0.4.0] — 2026-04-11 — Knowledge Platform
 
 ### Added
