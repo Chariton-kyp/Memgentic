@@ -265,6 +265,17 @@ class SqliteVecBackend:
 
     # --- reads ----------------------------------------------------------
 
+    # Multiplier used to over-fetch ANN candidates when the caller provides
+    # payload filters. sqlite-vec applies ``k = ?`` at the index layer before
+    # SQLite post-filters the JOINed payload rows, so a naive ``k = limit``
+    # can return fewer than ``limit`` results (or zero) when all top-k
+    # candidates are excluded by the filter. Qdrant's server-side filtering
+    # doesn't have this asymmetry. A 10× pool handles the common case; users
+    # with very selective filters can lean on the raw ``_K_OVERFETCH_MAX``
+    # ceiling below.
+    _K_OVERFETCH_MULTIPLIER = 10
+    _K_OVERFETCH_MAX = 1000
+
     async def search(
         self,
         query_embedding: list[float],
@@ -278,6 +289,16 @@ class SqliteVecBackend:
         where_sql, where_params = self._build_sql_where(session_config, user_id=user_id)
         packed = _pack_float32(query_embedding)
 
+        # When there are no payload filters the two limits are identical —
+        # keep k = limit to avoid pointless work. With filters, over-fetch so
+        # post-filter truncation doesn't silently starve the result set.
+        has_filters = bool(where_sql)
+        k = (
+            min(limit * self._K_OVERFETCH_MULTIPLIER, self._K_OVERFETCH_MAX)
+            if has_filters
+            else limit
+        )
+
         # sqlite-vec KNN: MATCH ? AND k = ?. Apply payload filters with AND.
         sql = (
             f"SELECT v.id, v.distance, "
@@ -288,11 +309,14 @@ class SqliteVecBackend:
             f"JOIN {self.PAYLOAD_TABLE} p ON p.id = v.id "
             "WHERE v.embedding MATCH ? AND k = ? "
         )
-        params: list[Any] = [packed, limit]
+        params: list[Any] = [packed, k]
         if where_sql:
             sql += f"AND {where_sql} "
             params.extend(where_params)
-        sql += "ORDER BY v.distance"
+        # Cap the final result set at ``limit`` — we over-fetched candidates,
+        # not results.
+        sql += "ORDER BY v.distance LIMIT ?"
+        params.append(limit)
 
         results: list[dict] = []
         async with self._conn.execute(sql, params) as cur:
