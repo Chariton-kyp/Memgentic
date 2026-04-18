@@ -37,7 +37,16 @@ def main():
 
 
 @main.command()
-def serve():
+@click.option(
+    "--watch/--no-watch",
+    default=False,
+    help=(
+        "Also run the capture daemon in the same process (single SQLite "
+        "writer, single Qdrant handle). Recommended — avoids running "
+        "'memgentic daemon' as a second process."
+    ),
+)
+def serve(watch: bool):
     """Start the MCP server (stdio transport).
 
     \b
@@ -45,11 +54,23 @@ def serve():
     Claude Code to store and retrieve memories via MCP protocol.
 
     \b
-    Example:
-      memgentic serve
+    Pass --watch to also run the file-watching daemon inside the same
+    process. This is the recommended mode for local use: it avoids the
+    two-process split and the associated SQLite/Qdrant lock contention
+    between ``memgentic serve`` and ``memgentic daemon``.
+
+    \b
+    Examples:
+      memgentic serve             Start MCP server only (back-compat)
+      memgentic serve --watch     Fused: MCP server + capture daemon
     """
-    from memgentic.mcp.server import run_server
+    from memgentic.mcp.server import run_server, run_server_with_watcher
     from memgentic.observability import init_observability
+    from memgentic.utils.process_lock import (
+        ProcessLockError,
+        acquire_lock,
+        release_lock,
+    )
 
     init_observability(
         service_name="memgentic",
@@ -57,8 +78,59 @@ def serve():
         enabled=settings.enable_observability,
     )
 
-    console.print("[bold green]Starting Memgentic MCP server...[/]")
-    run_server()
+    # Plain serve — unchanged path (backwards compat).
+    if not watch:
+        console.print("[bold green]Starting Memgentic MCP server...[/]")
+        run_server()
+        return
+
+    # --watch: try to acquire the daemon lock so we're the sole SQLite writer.
+    # If a standalone 'memgentic daemon' already holds it, warn loudly and
+    # fall back to MCP-only — do not crash, and do not silently swallow the
+    # watcher (user needs to know ingestion isn't happening in this process).
+    use_lock = False
+    lock_path: Path | None = None
+    lock_acquired = False
+    if isinstance(settings.data_dir, Path):
+        try:
+            if settings.storage_backend.value != "qdrant":
+                use_lock = True
+        except Exception:
+            use_lock = False
+    if use_lock:
+        lock_path = settings.data_dir / ".daemon.pid"
+        try:
+            acquire_lock(lock_path, role="serve-watch")
+            lock_acquired = True
+        except ProcessLockError as exc:
+            console.print(
+                "[yellow]Warning:[/] could not acquire daemon lock — another "
+                "Memgentic process is already watching for conversations."
+            )
+            console.print(f"[dim]{exc}[/]")
+            console.print(
+                "[yellow]Continuing as MCP-only[/] "
+                "(no file watcher in this process). "
+                "Stop the other process and re-run with --watch to fuse them."
+            )
+            logger.warning(
+                "serve.watch_lock_unavailable",
+                lock_path=str(lock_path),
+                fallback="mcp_only",
+            )
+            console.print("[bold green]Starting Memgentic MCP server...[/]")
+            run_server()
+            return
+
+    try:
+        console.print(
+            "[bold green]Starting Memgentic MCP server[/] "
+            "[dim](fused: serving MCP + watching for new conversations)[/]"
+        )
+        asyncio.run(run_server_with_watcher())
+    finally:
+        if lock_acquired and lock_path is not None:
+            release_lock(lock_path)
 
 
 @main.command()

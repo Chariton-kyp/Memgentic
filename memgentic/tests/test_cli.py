@@ -51,6 +51,34 @@ class TestCLIHelp:
         assert result.exit_code == 0
         assert "MCP server" in result.output
 
+    def test_serve_help_advertises_watch_flag(self):
+        runner = CliRunner()
+        result = runner.invoke(main, ["serve", "--help"])
+        assert result.exit_code == 0
+        assert "--watch" in result.output
+        assert "--no-watch" in result.output
+
+    def test_serve_watch_falls_back_to_mcp_only_when_lock_held(self):
+        """If another process holds the daemon lock, --watch must warn and
+        continue as MCP-only — never crash, never silently drop the watcher.
+        """
+        from memgentic.utils.process_lock import ProcessLockError
+
+        runner = CliRunner()
+        with (
+            patch("memgentic.utils.process_lock.acquire_lock") as acquire,
+            patch("memgentic.mcp.server.run_server") as run_server,
+            patch("memgentic.mcp.server.run_server_with_watcher") as run_fused,
+            patch("memgentic.observability.init_observability"),
+        ):
+            acquire.side_effect = ProcessLockError("pid=1234 role=daemon")
+            result = runner.invoke(main, ["serve", "--watch"])
+
+        assert result.exit_code == 0, result.output
+        assert "Continuing as MCP-only" in result.output
+        run_server.assert_called_once()
+        run_fused.assert_not_called()
+
     def test_daemon_help(self):
         runner = CliRunner()
         result = runner.invoke(main, ["daemon", "--help"])

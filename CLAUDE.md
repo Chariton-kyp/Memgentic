@@ -145,8 +145,9 @@ memgentic_pin                Pin or unpin a memory
 ## CLI Commands
 
 ```bash
-memgentic serve           # Start MCP server (stdio)
-memgentic daemon          # Start file watcher daemon
+memgentic serve --watch   # Recommended: MCP server + file watcher, one process
+memgentic serve           # MCP server only (back-compat; needs a separate daemon)
+memgentic daemon          # Standalone file watcher daemon (back-compat)
 memgentic import-existing # Import all existing conversations
 memgentic search "query"  # Semantic search
 memgentic sources         # Show source stats
