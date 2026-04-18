@@ -142,7 +142,7 @@ async def app_lifespan(server: FastMCP):
 
     logger.info("mcp_server.ready", storage=settings.storage_backend.value)
 
-    yield {
+    state = {
         "metadata_store": metadata_store,
         "vector_store": vector_store,
         "embedder": embedder,
@@ -150,11 +150,28 @@ async def app_lifespan(server: FastMCP):
         "graph": graph,
     }
 
-    if graph:
-        await graph.save()
-    await embedder.close()
-    await metadata_store.close()
-    await vector_store.close()
+    # If ``run_server_with_watcher`` asked to fuse the daemon, start it now
+    # against the same stores and register a shutdown hook. Any failure here
+    # is logged but does not abort the MCP server — MCP alone is still useful.
+    daemon_shutdown = None
+    if _watch_mode_attach is not None:
+        try:
+            _daemon, daemon_shutdown = await _watch_mode_attach(state)
+        except Exception as exc:
+            logger.error("mcp_server.watch_mode.attach_failed", error=str(exc))
+            daemon_shutdown = None
+
+    try:
+        yield state
+    finally:
+        if daemon_shutdown is not None:
+            await daemon_shutdown()
+
+        if graph:
+            await graph.save()
+        await embedder.close()
+        await metadata_store.close()
+        await vector_store.close()
 
 
 # Initialize MCP server
@@ -1341,3 +1358,62 @@ async def memgentic_skill_tool(params: SkillInput, ctx: Context) -> str:
 def run_server() -> None:
     """Run the Memgentic MCP server."""
     mcp.run(transport=settings.mcp_transport)
+
+
+# Module-level hook used by the ``--watch`` path to attach the capture daemon
+# to the MCP server's lifespan. When set, ``app_lifespan`` calls it with the
+# fully-initialised store state and expects back an async shutdown callable.
+# Starting the daemon inside the lifespan means MCP tools and the watcher
+# share a single SQLite writer and Qdrant handle (no lock contention, no
+# duplicate embedding clients). ``cli.py`` is the sole expected setter.
+_watch_mode_attach = None  # type: ignore[var-annotated]
+
+
+async def run_server_with_watcher(scan_existing: bool = True) -> None:
+    """Run the MCP stdio server with the capture daemon in the same loop.
+
+    Fuses ``memgentic serve`` and ``memgentic daemon`` into a single process
+    so there is exactly one SQLite writer and one Qdrant handle. The daemon's
+    lifecycle is bound to the server: the watcher starts inside the FastMCP
+    lifespan (reusing the same stores the MCP tools use) and stops when the
+    server exits. Only stdio transport is supported.
+    """
+    from memgentic.adapters import get_daemon_adapters
+    from memgentic.daemon.watcher import MemgenticDaemon
+
+    global _watch_mode_attach
+
+    async def _attach(state: dict):
+        adapters = get_daemon_adapters()
+        daemon = MemgenticDaemon(
+            settings,
+            state["pipeline"],
+            adapters,
+            metadata_store=state["metadata_store"],
+        )
+
+        if scan_existing:
+            logger.info("mcp_server.watch_mode.scanning_existing")
+            try:
+                count = await daemon.scan_existing()
+                logger.info("mcp_server.watch_mode.scan_complete", files=count)
+            except Exception as exc:  # non-fatal: still watch new files
+                logger.error("mcp_server.watch_mode.scan_failed", error=str(exc))
+
+        await daemon.start()
+        logger.info("mcp_server.watch_mode.daemon_started")
+
+        async def _shutdown() -> None:
+            import contextlib as _ctx
+
+            with _ctx.suppress(Exception):
+                await daemon.stop()
+            logger.info("mcp_server.watch_mode.daemon_stopped")
+
+        return daemon, _shutdown
+
+    _watch_mode_attach = _attach
+    try:
+        await mcp.run_stdio_async()
+    finally:
+        _watch_mode_attach = None

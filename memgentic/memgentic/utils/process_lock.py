@@ -28,9 +28,12 @@ def acquire_lock(lock_path: Path, role: str) -> None:
         if content and content != str(os.getpid()):
             raise ProcessLockError(
                 f"Another Memgentic process holds the lock at {lock_path} "
-                f"(pid={content}, role={role}). Stop it first, or set "
-                f"MEMGENTIC_QDRANT_URL to use Qdrant server mode which "
-                f"supports concurrent writers."
+                f"(pid={content}, role={role}). Stop it first. "
+                f"For local use, the recommended mode is now a single fused "
+                f"process: `memgentic serve --watch` (runs MCP + the capture "
+                f"daemon in one asyncio loop — no lock contention). "
+                f"Alternatively, set MEMGENTIC_QDRANT_URL to use Qdrant "
+                f"server mode which supports concurrent writers."
             )
     lock_path.write_text(f"{os.getpid()}")
 
