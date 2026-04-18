@@ -143,6 +143,37 @@ class TestFilters:
         assert len(results) == 1
         assert results[0]["id"] == hi.id
 
+    async def test_filter_does_not_silently_truncate_ann_candidates(
+        self, backend: SqliteVecBackend
+    ):
+        """Regression guard: sqlite-vec's ``k = ?`` operates at the index
+        layer BEFORE SQLite applies JOINed payload filters. Naive
+        ``k = limit`` would return 0 results here because the nearest
+        ``limit`` vectors all fail the platform filter — even though a
+        matching memory exists further down the ranked list.
+        """
+        # 10 Gemini-CLI memories with closest embeddings, then 1 Claude-Code
+        # memory far away. User filters for CLAUDE_CODE only.
+        near_distractors = [
+            _make_memory(content=f"gemini-{i}", platform=Platform.GEMINI_CLI) for i in range(10)
+        ]
+        target = _make_memory(content="claude", platform=Platform.CLAUDE_CODE)
+
+        embeddings = [_embedding(0.2 + i * 0.001) for i in range(10)]  # very close
+        embeddings.append(_embedding(0.95))  # target — far away
+
+        await backend.upsert_memories_batch(near_distractors + [target], embeddings)
+
+        cfg = SessionConfig(include_sources=[Platform.CLAUDE_CODE])
+        results = await backend.search(_embedding(0.2), session_config=cfg, limit=5)
+
+        assert len(results) == 1, (
+            f"Platform filter truncated results — would have starved recall "
+            f"in production. Got {len(results)} results, expected 1 "
+            f"(the CLAUDE_CODE memory past the 10 Gemini distractors)."
+        )
+        assert results[0]["id"] == target.id
+
 
 class TestDelete:
     async def test_delete(self, backend: SqliteVecBackend):

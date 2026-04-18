@@ -64,6 +64,17 @@ raises `StorageError` instead of silently corrupting similarity scores.
 | HNSW tuning knobs        | No           | Yes           | No         |
 | Good above ~1M vectors   | No           | Yes           | No         |
 
+### Filter handling under sqlite-vec
+
+sqlite-vec applies its KNN ``k`` cutoff at the index layer **before** SQLite
+evaluates payload predicates on the JOINed row (platform, content_type,
+user_id, min_confidence). Qdrant evaluates payload filters server-side as
+part of the same request. To keep behaviour compatible, the sqlite-vec
+backend over-fetches a 10× candidate pool when filters are present (capped
+at 1000), then applies ``LIMIT`` on the filtered result. For very selective
+filters over very large corpora you may still see fewer-than-expected
+results — if you hit that, Qdrant server mode is the right choice.
+
 ## TODO
 
 - `memgentic migrate-storage` command to copy memories + embeddings between
