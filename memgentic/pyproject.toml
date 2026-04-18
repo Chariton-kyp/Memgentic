@@ -70,6 +70,10 @@ documents = [
     "ebooklib>=0.18",
     "pdfminer.six>=20231228",
 ]
+# sqlite-vec — opt-in zero-config vector backend (multi-process safe via SQLite WAL)
+sqlite-vec = [
+    "sqlite-vec>=0.1.9",
+]
 # Native Rust acceleration is available as a separate package:
 #     pip install memgentic-native
 # It is auto-detected at runtime — no extra config needed. When present, hot

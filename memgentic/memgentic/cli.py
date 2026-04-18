@@ -11,7 +11,7 @@ from rich.console import Console
 from rich.table import Table
 
 from memgentic.__version__ import __version__
-from memgentic.config import settings
+from memgentic.config import StorageBackend, settings
 
 console = Console()
 logger = structlog.get_logger()
@@ -869,13 +869,27 @@ async def _doctor() -> None:
         checks.append((f"Embedding: {settings.embedding_model}", False, "Ollama not available"))
         checks.append((f"LLM: {settings.local_llm_model}", False, "Ollama not available"))
 
-    # 4. Qdrant server
-    try:
-        async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get(f"{settings.qdrant_url}/healthz")
-            checks.append(("Qdrant server", r.status_code == 200, settings.qdrant_url))
-    except Exception:
-        checks.append(("Qdrant server", False, "Not running (will use local file mode)"))
+    # 4. Vector backend — skip Qdrant probe when using sqlite-vec
+    if settings.storage_backend == StorageBackend.SQLITE_VEC:
+        try:
+            import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
+
+            checks.append(("sqlite-vec extension", True, "importable"))
+        except ImportError:
+            checks.append(
+                (
+                    "sqlite-vec extension",
+                    False,
+                    "Not installed — run `uv add 'memgentic[sqlite-vec]'`",
+                )
+            )
+    else:
+        try:
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"{settings.qdrant_url}/healthz")
+                checks.append(("Qdrant server", r.status_code == 200, settings.qdrant_url))
+        except Exception:
+            checks.append(("Qdrant server", False, "Not running (will use local file mode)"))
 
     # 5. Data directory + SQLite
     data_exists = settings.data_dir.exists()
