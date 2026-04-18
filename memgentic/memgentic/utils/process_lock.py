@@ -8,7 +8,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-
 _WINDOWS_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _WINDOWS_STILL_ACTIVE = 259
 
