@@ -1337,7 +1337,23 @@ async def memgentic_skill_tool(params: SkillInput, ctx: Context) -> str:
         return f"Error retrieving skill: {exc}"
 
 
+def _redirect_logs_to_stderr() -> None:
+    """Route structlog output to stderr so the MCP stdio stream stays pure
+    JSON-RPC.
+
+    The MCP stdio transport reserves stdout for the JSON-RPC framing; any
+    extraneous bytes there break strict clients. structlog's default logger
+    factory writes to stdout, so we reconfigure to stderr here. Called only
+    from the MCP entry point — interactive CLI commands (``doctor``,
+    ``search``, ...) keep their friendly stdout output.
+    """
+    import sys
+
+    structlog.configure(logger_factory=structlog.PrintLoggerFactory(file=sys.stderr))
+
+
 # Entry point
 def run_server() -> None:
     """Run the Memgentic MCP server."""
+    _redirect_logs_to_stderr()
     mcp.run(transport=settings.mcp_transport)
