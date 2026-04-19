@@ -51,6 +51,8 @@ htmlcov/
 # Private/internal working docs (not for public repo)
 cloud/
 .mneme/
+.private/
+.maintainer/
 
 # Rust
 target/

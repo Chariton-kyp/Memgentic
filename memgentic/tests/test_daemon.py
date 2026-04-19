@@ -436,8 +436,10 @@ class TestContextFileAutoUpdate:
             mock_generate,
         ):
             task = asyncio.create_task(daemon._context_update_loop())
-            # Give the loop enough time to iterate once
-            await asyncio.sleep(0.1)
+            for _ in range(100):
+                await asyncio.sleep(0.01)
+                if mock_generate.called:
+                    break
             daemon._running = False
             task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
