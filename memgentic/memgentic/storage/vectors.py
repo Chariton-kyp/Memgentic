@@ -101,6 +101,7 @@ class VectorStore:
 
             self._backend = SqliteVecBackend(self._settings)
             await self._backend.initialize()
+            self._warn_if_legacy_qdrant_data()
             return
 
         if self._settings.storage_backend == StorageBackend.LOCAL:
@@ -365,6 +366,62 @@ class VectorStore:
         }
 
     # --- Private helpers ---
+
+    def _warn_if_legacy_qdrant_data(self) -> None:
+        """Emit a one-time loud warning when an old Qdrant data directory is found.
+
+        Triggered on first sqlite-vec start when:
+          1. The legacy Qdrant local directory exists (``~/.memgentic/data/qdrant/``), AND
+          2. The sqlite-vec DB file is freshly created (size below a small threshold),
+             which implies no memories have been migrated yet.
+
+        The warning tells users what to run — it never auto-migrates.
+        """
+        qdrant_dir = self._settings.qdrant_local_path
+        sqlite_path = self._settings.sqlite_path
+
+        if not qdrant_dir.exists():
+            return
+
+        # Heuristic: newly-created SQLite DB (schema only, no memories) is small.
+        # A DB with even one memory will be larger than 100 KB.
+        try:
+            db_size = sqlite_path.stat().st_size if sqlite_path.exists() else 0
+        except OSError:
+            db_size = 0
+
+        if db_size > 102_400:  # 100 KB
+            # DB already has data — user is aware of the situation, stay silent.
+            return
+
+        logger.warning(
+            "vector_store.legacy_qdrant_data_detected",
+            qdrant_dir=str(qdrant_dir),
+            hint=(
+                "Existing Qdrant data found. Run `memgentic migrate-storage "
+                "--from qdrant_local --to sqlite_vec` to copy your memories."
+            ),
+        )
+        import rich.console
+
+        console = rich.console.Console(stderr=True)
+        console.print(
+            "\n[bold yellow]Memgentic[/bold yellow] — [yellow]data migration notice[/yellow]\n"
+            "\n"
+            f"  Existing Qdrant data found at: [cyan]{qdrant_dir}[/cyan]\n"
+            "  The default storage backend is now [bold]sqlite-vec[/bold] (zero-config,\n"
+            "  multi-process safe). Your previous memories are [bold]not[/bold] lost —\n"
+            "  they just live in the old Qdrant store and won't appear in search yet.\n"
+            "\n"
+            "  To migrate, run:\n"
+            "\n"
+            "    [bold green]memgentic migrate-storage "
+            "--from qdrant_local --to sqlite_vec[/bold green]\n"
+            "\n"
+            "  To keep using Qdrant instead, set:\n"
+            "\n"
+            "    [bold]MEMGENTIC_STORAGE_BACKEND=local[/bold]\n"
+        )
 
     async def _try_server_connection(self) -> bool:
         """Probe the Qdrant server URL; return True if it responds healthy."""

@@ -82,12 +82,12 @@ class SqliteVecBackend:
             # will silently expand or error. Spell the install commands so a
             # user can paste them verbatim.
             raise StorageError(
-                "sqlite-vec is not installed but MEMGENTIC_STORAGE_BACKEND=sqlite_vec.\n"
-                "Install it with one of:\n"
-                "    pip install 'memgentic[sqlite-vec]'\n"
-                "    uv add 'memgentic[sqlite-vec]'\n"
-                "Or switch back to the Qdrant backend by unsetting "
-                "MEMGENTIC_STORAGE_BACKEND (defaults to 'local')."
+                "sqlite-vec is not installed. This should not happen with a standard install —\n"
+                "sqlite-vec is a core dependency since 0.6.0. Try reinstalling:\n"
+                "    pip install --upgrade memgentic\n"
+                "    uv sync\n"
+                "To fall back to Qdrant file mode instead, set:\n"
+                "    MEMGENTIC_STORAGE_BACKEND=local"
             ) from exc
 
         path = self._settings.sqlite_path
