@@ -3,8 +3,14 @@ name: Release Native (Rust wheel)
 on:
   push:
     tags:
+      # Only native-v* tags release the native wheel. We used to also
+      # trigger on "v*" (core releases), but that tried to re-publish
+      # whatever was in memgentic-native/Cargo.toml every time the core
+      # bumped without matching the native crate version — causing a
+      # PyPI "400 File already exists" on every core release (observed
+      # on the v0.5.0 push). The two packages release independently
+      # now: bump Cargo.toml + pyproject.toml and push `native-vX.Y.Z`.
       - "native-v*"
-      - "v*"
 
 permissions:
   id-token: write  # required for PyPI trusted publishing
