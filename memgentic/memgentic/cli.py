@@ -27,8 +27,9 @@ def main():
 
     \b
     Quick start:
+      memgentic init            Full onboarding: detect tools, models, hooks
+      memgentic setup           Reconfigure models/backend only (no tool detect)
       memgentic doctor          Check prerequisites (Ollama, models, Qdrant)
-      memgentic setup           Interactive model selection and configuration
       memgentic import-existing Import all existing AI conversations
       memgentic daemon          Watch for new conversations in real time
       memgentic search "query"  Semantic search over your memories
@@ -1715,23 +1716,16 @@ def _install_sqlite_vec_extra() -> None:
         )
 
 
-@main.command()
-def setup():
-    """Interactive setup wizard for Memgentic configuration.
+def _run_setup_steps() -> bool:
+    """Run the interactive model/backend configuration wizard (Steps 1-4).
 
-    \b
-    Guides you through:
-      1. Vector storage backend (sqlite-vec / Qdrant local / Qdrant server)
-      2. Embedding model (for semantic search)
-      3. Intelligence LLM (for classification, extraction, summarization)
+    This is the shared implementation used by both ``memgentic init`` (where it
+    runs between tool detection and hook installation) and ``memgentic setup``
+    (standalone reconfiguration).
 
-    \b
-    Writes settings to .env and optionally pulls models via Ollama.
-    Run 'memgentic doctor' afterward to verify.
+    Returns ``True`` on success, ``False`` if the user provides an invalid
+    choice and the wizard exits early.
     """
-
-    console.print("\n[bold cyan]Memgentic Setup[/]\n")
-
     # --- Step 1: Storage backend ---
     _, backend_value, needs_sqlite_vec = _pick_storage_backend()
 
@@ -1755,7 +1749,7 @@ def setup():
         emb_dims = click.prompt("Enter embedding dimensions", type=int, default=768)
     else:
         console.print("[red]Invalid choice.[/]")
-        return
+        return False
 
     # --- Step 3: Intelligence LLM ---
     console.print(
@@ -1788,7 +1782,7 @@ def setup():
         console.print("[dim]Using heuristics only. No LLM will be used.[/]")
     else:
         console.print("[red]Invalid choice.[/]")
-        return
+        return False
 
     # --- Write to .env ---
     env_path = Path.cwd() / ".env"
@@ -1818,7 +1812,7 @@ def setup():
     else:
         console.print("  Intelligence: heuristics only")
 
-    # --- Install sqlite-vec extra if needed ---
+    # --- Step 4: Install sqlite-vec extra if needed ---
     if needs_sqlite_vec:
         try:
             import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
@@ -1840,35 +1834,83 @@ def setup():
         for m in models_to_pull:
             _pull_ollama_model(m)
 
+    return True
+
+
+@main.command()
+def setup():
+    """Reconfigure Memgentic models and storage backend.
+
+    \b
+    Escape hatch for reconfiguring an existing installation. Runs only:
+      1. Vector storage backend (sqlite-vec / Qdrant local / Qdrant server)
+      2. Embedding model (for semantic search)
+      3. Intelligence LLM (for classification, extraction, summarization)
+      4. Pull models via Ollama
+
+    \b
+    Does NOT run AI-tool detection or hook installation. Use
+    'memgentic init' for full onboarding of a new installation.
+
+    \b
+    Writes settings to .env and optionally pulls models via Ollama.
+    Run 'memgentic doctor' afterward to verify.
+    """
+
+    console.print("\n[bold cyan]Memgentic Setup[/]\n")
+    _run_setup_steps()
     console.print("\n[bold green]Setup complete![/] Run 'memgentic doctor' to verify.")
 
 
 @main.command()
 @click.option("--dry-run", is_flag=True, help="Preview changes without applying them")
 @click.option("--skip-import", is_flag=True, help="Skip importing existing conversations")
-def init(dry_run: bool, skip_import: bool):
-    """One-command setup: detect AI tools, configure MCP, enable shared memory.
+@click.option(
+    "--yes",
+    "-y",
+    "non_interactive",
+    is_flag=True,
+    default=False,
+    help="Non-interactive mode: skip model/backend prompts and use current settings",
+)
+def init(dry_run: bool, skip_import: bool, non_interactive: bool):
+    """Full onboarding: detect AI tools, configure models, install hooks.
 
     \b
-    Detects installed AI tools (Claude Code, Gemini CLI, Codex CLI),
-    configures Memgentic as their MCP memory server, and injects memory
-    instructions so every tool automatically uses shared memory.
+    Step 0: Detect installed AI tools (Claude Code, Gemini CLI, Codex CLI)
+            and configure Memgentic as their MCP memory server.
+    Step 1: Vector storage backend  (sqlite-vec / Qdrant local / server)
+    Step 2: Embedding model         (for semantic search)
+    Step 3: Intelligence LLM        (for classification and extraction)
+    Step 4: Pull models via Ollama
+    Step 5: Inject memory instructions into each tool's context file.
 
     \b
     After init, your AI tools will:
-      • Load context from past sessions automatically
-      • Save important learnings to shared memory
-      • Check memory before solving problems
+      - Load context from past sessions automatically
+      - Save important learnings to shared memory
+      - Check memory before solving problems
+
+    \b
+    Use 'memgentic setup' to reconfigure models/backend without repeating
+    tool detection or hook installation.
 
     \b
     Examples:
-      memgentic init                  Full interactive setup
+      memgentic init                  Full interactive onboarding
       memgentic init --dry-run        Preview changes without applying
       memgentic init --skip-import    Skip importing existing conversations
+      memgentic init --yes            Use current settings, skip prompts
     """
     from memgentic.init_wizard import run_init
 
-    asyncio.run(run_init(dry_run=dry_run, skip_import=skip_import))
+    asyncio.run(
+        run_init(
+            dry_run=dry_run,
+            skip_import=skip_import,
+            non_interactive=non_interactive,
+        )
+    )
 
 
 @main.command(name="install-hooks")

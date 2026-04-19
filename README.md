@@ -42,17 +42,17 @@ Every conversation with an AI assistant is **ephemeral**. What Claude figured ou
 # 1. Install
 pip install memgentic
 
-# 2. Interactive setup (detects your AI tools, pulls Ollama model, configures MCP)
-memgentic setup
+# 2. Full onboarding — detects AI tools, configures models, sets up MCP and hooks
+memgentic init
 
-# 3. Import existing conversations
-memgentic import-existing
-
-# 4. Start the capture daemon
+# 3. Start the capture daemon
 memgentic daemon
 ```
 
 That's it. Your Claude Code, Cursor, Gemini CLI, and Codex now have shared cross-tool memory via MCP.
+
+> **Tip:** Already installed and just want to change the embedding model or storage backend?
+> Run `memgentic setup` (model/backend reconfiguration only, no tool detection).
 
 ---
 

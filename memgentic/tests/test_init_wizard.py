@@ -218,13 +218,27 @@ class TestInitCLI:
     """Tests for the CLI init command."""
 
     def test_init_help(self):
-        """init --help shows correct usage."""
+        """init --help shows full onboarding scope including new flags."""
         runner = CliRunner()
         result = runner.invoke(main, ["init", "--help"])
         assert result.exit_code == 0
-        assert "One-command setup" in result.output
+        # Updated help copy — covers all 5 steps
+        assert "onboarding" in result.output.lower() or "Full onboarding" in result.output
         assert "--dry-run" in result.output
         assert "--skip-import" in result.output
+        assert "--yes" in result.output
+
+    def test_setup_help(self):
+        """setup --help advertises models/backend reconfiguration scope only."""
+        runner = CliRunner()
+        result = runner.invoke(main, ["setup", "--help"])
+        assert result.exit_code == 0
+        assert "Vector storage backend" in result.output
+        assert "sqlite-vec" in result.output
+        # Must make clear this is for reconfiguration (not full onboarding)
+        assert "reconfigure" in result.output.lower() or "Reconfigure" in result.output
+        # Must tell users to use 'init' for tool detection / hook installation
+        assert "init" in result.output
 
     @patch("memgentic.init_wizard._check_ollama", new_callable=AsyncMock)
     @patch("memgentic.init_wizard.detect_tools")
@@ -286,3 +300,144 @@ class TestInitCLI:
         runner = CliRunner()
         result = runner.invoke(main, ["--help"])
         assert "init" in result.output
+
+    @patch("memgentic.init_wizard._check_ollama", new_callable=AsyncMock)
+    @patch("memgentic.init_wizard.inject_memory_instructions")
+    @patch("memgentic.init_wizard.configure_mcp")
+    @patch("memgentic.init_wizard.detect_tools")
+    def test_init_calls_setup_steps_between_detection_and_hooks(
+        self,
+        mock_detect: MagicMock,
+        mock_configure_mcp: MagicMock,
+        mock_inject: MagicMock,
+        mock_ollama: AsyncMock,
+        tmp_path,
+    ):
+        """init calls _run_setup_steps after detection/MCP config and before hook injection."""
+        import memgentic.cli as cli_module
+
+        call_order: list[str] = []
+
+        mock_detect.return_value = [
+            DetectedTool(
+                name="Claude Code",
+                command="claude",
+                data_dir=tmp_path / ".claude",
+                context_file=tmp_path / ".claude" / "CLAUDE.md",
+                mcp_method="claude_cli",
+                detected=True,
+                command_found=True,
+                data_found=True,
+            ),
+        ]
+        mock_ollama.return_value = (False, False)
+
+        def fake_configure_mcp(tool, dry_run=False):
+            call_order.append("configure_mcp")
+            return True
+
+        def fake_inject(context_file, dry_run=False):
+            call_order.append("inject")
+            return True
+
+        def fake_setup_steps():
+            call_order.append("setup_steps")
+            return True
+
+        mock_configure_mcp.side_effect = fake_configure_mcp
+        mock_inject.side_effect = fake_inject
+
+        runner = CliRunner()
+        with patch.object(cli_module, "_run_setup_steps", side_effect=fake_setup_steps):
+            result = runner.invoke(main, ["init"])
+
+        assert result.exit_code == 0, result.output
+        # setup_steps must appear AFTER configure_mcp and BEFORE inject
+        assert "configure_mcp" in call_order
+        assert "setup_steps" in call_order
+        assert "inject" in call_order
+        mcp_idx = call_order.index("configure_mcp")
+        setup_idx = call_order.index("setup_steps")
+        inject_idx = call_order.index("inject")
+        assert mcp_idx < setup_idx < inject_idx, (
+            f"Expected configure_mcp < setup_steps < inject, got order: {call_order}"
+        )
+
+    @patch("memgentic.init_wizard._check_ollama", new_callable=AsyncMock)
+    @patch("memgentic.init_wizard.inject_memory_instructions")
+    @patch("memgentic.init_wizard.configure_mcp")
+    @patch("memgentic.init_wizard.detect_tools")
+    def test_init_yes_skips_setup_steps(
+        self,
+        mock_detect: MagicMock,
+        mock_configure_mcp: MagicMock,
+        mock_inject: MagicMock,
+        mock_ollama: AsyncMock,
+        tmp_path,
+    ):
+        """init --yes skips model/backend prompts entirely."""
+        import memgentic.cli as cli_module
+
+        mock_detect.return_value = [
+            DetectedTool(
+                name="Claude Code",
+                command="claude",
+                data_dir=tmp_path / ".claude",
+                context_file=tmp_path / ".claude" / "CLAUDE.md",
+                mcp_method="claude_cli",
+                detected=True,
+                command_found=True,
+                data_found=True,
+            ),
+        ]
+        mock_ollama.return_value = (False, False)
+        mock_configure_mcp.return_value = True
+        mock_inject.return_value = True
+
+        setup_called = {"count": 0}
+
+        def fake_setup_steps():
+            setup_called["count"] += 1
+            return True
+
+        runner = CliRunner()
+        with patch.object(cli_module, "_run_setup_steps", side_effect=fake_setup_steps):
+            result = runner.invoke(main, ["init", "--yes"])
+
+        assert result.exit_code == 0, result.output
+        assert setup_called["count"] == 0, "--yes flag must skip setup steps (got called instead)"
+
+    def test_setup_alone_does_not_run_tool_detection_or_hooks(self, monkeypatch, tmp_path):
+        """setup command must NOT call detect_tools or inject_memory_instructions."""
+        import memgentic.cli as cli_module
+        import memgentic.init_wizard as wizard_module
+
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setattr(cli_module, "_pull_ollama_model", lambda *_: None)
+        monkeypatch.setattr(cli_module, "_install_sqlite_vec_extra", lambda: None)
+
+        detect_called = {"count": 0}
+        inject_called = {"count": 0}
+
+        original_detect = wizard_module.detect_tools
+        original_inject = wizard_module.inject_memory_instructions
+
+        def spy_detect():
+            detect_called["count"] += 1
+            return original_detect()
+
+        def spy_inject(ctx_file, dry_run=False):
+            inject_called["count"] += 1
+            return original_inject(ctx_file, dry_run)
+
+        monkeypatch.setattr(wizard_module, "detect_tools", spy_detect)
+        monkeypatch.setattr(wizard_module, "inject_memory_instructions", spy_inject)
+
+        runner = CliRunner()
+        # backend=1 (sqlite-vec), embedding=1, llm=8 (heuristics),
+        # install sqlite-vec? n, pull models? n
+        result = runner.invoke(main, ["setup"], input="1\n1\n8\nn\nn\n")
+
+        assert result.exit_code == 0, result.output
+        assert detect_called["count"] == 0, "setup must NOT call detect_tools"
+        assert inject_called["count"] == 0, "setup must NOT call inject_memory_instructions"
