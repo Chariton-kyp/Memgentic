@@ -8,6 +8,7 @@ introducing a neutral ``FilterSpec`` — minimising blast radius for this PR.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import Protocol, runtime_checkable
 
 from memgentic.models import Memory, SessionConfig
@@ -52,3 +53,15 @@ class VectorBackend(Protocol):
     async def get_collection_info(self) -> dict:
         """Return a dict with ``indexed_vectors_count``, ``points_count``, ``status``."""
         ...
+
+    async def all_points(self) -> AsyncIterator[tuple[str, list[float]]]:
+        """Iterate over every (id, embedding) pair stored in the backend.
+
+        Used by ``memgentic migrate-storage`` to copy vectors between backends
+        without re-embedding. Implementations should stream results to avoid
+        loading all vectors into memory at once when the collection is large.
+        """
+        # Make mypy happy: async generators satisfy the protocol at runtime but
+        # the stub body must yield to satisfy the type checker.
+        return
+        yield  # pragma: no cover
