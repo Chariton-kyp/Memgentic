@@ -414,6 +414,11 @@ class TestContextFileAutoUpdate:
         s.context_file_interval_seconds = interval
         s.context_file_hours = hours
         s.context_file_path = path
+        # Concrete numeric values so _process_loop / _skill_sync_loop
+        # don't receive MagicMock objects in numeric comparisons.
+        s.idle_threshold = 0.05
+        s.watch_interval = 0.01
+        s.skill_sync_interval = 0  # 0 → skip skill sync loop
         return s
 
     async def test_daemon_writes_context_file_when_dirty(self, tmp_path):
