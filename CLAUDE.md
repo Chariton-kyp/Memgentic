@@ -85,7 +85,7 @@ imports from `memgentic`, never the other way around.
 |-------|-----------|
 | MCP Server | FastMCP (mcp[cli] >=1.26) |
 | Embedding | **Qwen3-Embedding-0.6B** via Ollama 0.18+ (768d MRL-truncated, Apache 2.0) |
-| Vector DB | **Qdrant** >=1.17 — file-based local (zero-config) or server |
+| Vector DB | **sqlite-vec** >=0.1.9 (default, zero-config, multi-process safe) + **Qdrant** >=1.17 (server or legacy file mode) |
 | Metadata DB | **SQLite + FTS5** via aiosqlite >=0.22 |
 | LLM Processing | **langchain-core** + **LangGraph** (pipeline orchestration) |
 | LLM Providers | **Gemini Flash Lite** (langchain-google-genai >=4.0) + **Claude** (langchain-anthropic >=1.0) |

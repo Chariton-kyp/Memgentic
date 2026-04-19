@@ -40,6 +40,9 @@ dependencies = [
     "python-dotenv>=1.0",
     "structlog>=25.0",
     "tenacity>=9.0",
+
+    # Default vector backend (zero-config, multi-process safe via SQLite WAL)
+    "sqlite-vec>=0.1.9",
 ]
 
 [project.optional-dependencies]
@@ -70,10 +73,9 @@ documents = [
     "ebooklib>=0.18",
     "pdfminer.six>=20231228",
 ]
-# sqlite-vec — opt-in zero-config vector backend (multi-process safe via SQLite WAL)
-sqlite-vec = [
-    "sqlite-vec>=0.1.9",
-]
+# sqlite-vec — kept for back-compat; sqlite-vec is now a core dependency.
+# `pip install 'memgentic[sqlite-vec]'` still works but installs nothing extra.
+sqlite-vec = []
 # Native Rust acceleration is available as a separate package:
 #     pip install memgentic-native
 # It is auto-detected at runtime — no extra config needed. When present, hot

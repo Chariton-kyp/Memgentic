@@ -40,8 +40,11 @@ class MemgenticSettings(BaseSettings):
         description="Root directory for all Memgentic data (SQLite, Qdrant files, graph)",
     )
     storage_backend: StorageBackend = Field(
-        default=StorageBackend.LOCAL,
-        description="Vector storage backend: 'local' (file-based Qdrant) or 'qdrant' (server)",
+        default=StorageBackend.SQLITE_VEC,
+        description=(
+            "Vector storage backend: 'sqlite_vec' (default, zero-config, multi-process safe), "
+            "'local' (file-based Qdrant, single-process), or 'qdrant' (Qdrant server)"
+        ),
     )
     qdrant_url: str = Field(
         default="http://localhost:6333",
