@@ -1,10 +1,15 @@
-name: Release to PyPI
+name: Release memgentic to PyPI
 
-# Fires on every vX.Y.Z tag push.
+# Fires on every vX.Y.Z tag push. Publishes ONLY the `memgentic` core
+# package. `memgentic-api` has its own workflow (release-api.yml) fired
+# by `api-v*` tags so the two packages can release independently.
+#
 # Trusted Publishing (OIDC) — no PAT or password secret required.
-# Precondition: PyPI project "memgentic" must have a Trusted Publisher
-# configured for: owner=Chariton-kyp, repo=Memgentic,
-# workflow=release.yml, environment=release.
+# Precondition: PyPI project "memgentic" already has a Trusted Publisher
+# configured for owner=Chariton-kyp, repo=Memgentic,
+# workflow=release.yml, environment=pypi. Do not rename the environment
+# without updating the PyPI publisher entry first — the OIDC claim check
+# is strict.
 on:
   push:
     tags:
@@ -89,16 +94,8 @@ jobs:
             --ignore=memgentic/tests/test_pipeline.py \
             --ignore=memgentic/tests/test_init_wizard.py
 
-      - name: Run API tests
-        timeout-minutes: 5
-        run: |
-          uv run pytest memgentic-api/tests/ -q \
-            --timeout=60 --timeout-method=thread
-
-      - name: Build packages (workspace — both memgentic + memgentic-api)
-        run: |
-          uv build --package memgentic --out-dir dist/
-          uv build --package memgentic-api --out-dir dist/
+      - name: Build memgentic (core only — memgentic-api has its own workflow)
+        run: uv build --package memgentic --out-dir dist/
 
       - name: List dist artifacts
         run: ls -lh dist/
@@ -118,7 +115,7 @@ jobs:
       id-token: write      # OIDC token for Trusted Publishing
       attestations: write  # build provenance attestation
     environment:
-      name: release        # must match PyPI trusted-publisher environment name
+      name: pypi           # must match PyPI trusted-publisher environment name
       url: https://pypi.org/p/memgentic
     steps:
       - uses: actions/download-artifact@v4
