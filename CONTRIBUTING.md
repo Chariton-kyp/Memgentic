@@ -30,6 +30,37 @@ You should see `500+ passed, 0 failed`.
 6. Commit (see commit message style below)
 7. Push and open a PR
 
+### Pre-commit hooks
+
+Memgentic ships with a `.pre-commit-config.yaml` that mirrors what CI
+enforces. Install once after clone so issues are caught locally before
+push:
+
+```bash
+pip install pre-commit
+pre-commit install                       # format + lint on every commit
+pre-commit install --hook-type commit-msg  # Conventional Commits on commit-msg
+```
+
+What runs on every commit:
+
+- File hygiene — trailing whitespace, missing EOF newline, YAML / TOML
+  / JSON validity, merge-conflict markers, accidentally-staged large
+  files (>500KB), private keys, mixed line endings.
+- Ruff lint (with `--fix`) and Ruff format on Python files.
+- Conventional Commits enforcement on the commit message — see
+  [`docs/architecture/conventional-commits.md`](docs/architecture/conventional-commits.md)
+  for the allowed types and scopes.
+
+Run on demand against the whole tree:
+
+```bash
+pre-commit run --all-files
+```
+
+The same hooks run in CI via `.github/workflows/pre-commit.yml`, so
+contributors who skip local install are still gated.
+
 ## Adding an Adapter
 
 Adapters live in `memgentic/memgentic/adapters/`. To add support for a new AI tool:
