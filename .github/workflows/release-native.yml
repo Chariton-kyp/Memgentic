@@ -25,8 +25,8 @@ jobs:
         target: [x86_64, aarch64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
@@ -36,7 +36,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter python${{ matrix.python-version }}
           manylinux: auto
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-linux-${{ matrix.target }}-${{ matrix.python-version }}
           path: memgentic-native/dist/
@@ -49,8 +49,8 @@ jobs:
         target: [x86_64, aarch64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
@@ -59,7 +59,7 @@ jobs:
           working-directory: memgentic-native
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter python${{ matrix.python-version }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-macos-${{ matrix.target }}-${{ matrix.python-version }}
           path: memgentic-native/dist/
@@ -72,8 +72,8 @@ jobs:
         target: [x64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
@@ -82,7 +82,7 @@ jobs:
           working-directory: memgentic-native
           target: ${{ matrix.target }}
           args: --release --out dist --interpreter python${{ matrix.python-version }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels-windows-${{ matrix.target }}-${{ matrix.python-version }}
           path: memgentic-native/dist/
@@ -91,14 +91,14 @@ jobs:
     name: Build sdist
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
           working-directory: memgentic-native
           command: sdist
           args: --out dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: sdist
           path: memgentic-native/dist/
@@ -111,7 +111,7 @@ jobs:
       name: pypi
       url: https://pypi.org/p/memgentic-native
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: wheels/
           merge-multiple: true
