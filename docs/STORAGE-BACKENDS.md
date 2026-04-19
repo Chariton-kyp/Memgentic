@@ -5,18 +5,25 @@ Memgentic supports three vector storage backends. The backend is selected via
 
 | Backend       | Value          | Default | Extra dep                  | Multi-process safe |
 |---------------|----------------|---------|----------------------------|--------------------|
-| Qdrant local  | `local`        | Yes     | (built-in)                 | No (file lock)     |
+| sqlite-vec    | `sqlite_vec`   | **Yes** | (built-in since 0.6.0)     | Yes (WAL)          |
+| Qdrant local  | `local`        | No      | (built-in)                 | No (file lock)     |
 | Qdrant server | `qdrant`       | No      | Docker/Qdrant Cloud        | Yes                |
-| sqlite-vec    | `sqlite_vec`   | No      | `memgentic[sqlite-vec]`    | Yes (WAL)          |
 
 ## When to pick which
 
-### `local` (default — Qdrant file mode)
-- Single process, zero config, easy getting-started.
-- Good for: first-time users running just the CLI or the MCP server.
-- Watch out: Qdrant's embedded file backend takes an exclusive lock. If you
-  run the daemon and MCP server simultaneously you will hit
-  "storage folder is already accessed by another instance".
+### `sqlite_vec` (default)
+- Co-locates vectors in the same SQLite file as the metadata/FTS5 store.
+- Good for: all personal use — single process or daemon + MCP + API concurrently.
+  SQLite WAL mode and `busy_timeout=5000` make multi-writer access safe.
+- Scale envelope: tuned for 10k–100k vectors × 768 dims on commodity hardware.
+- Works offline, ships pre-built wheels (MIT/Apache-2.0 dual-licensed), no extra binary.
+- No extra dep required since 0.6.0 — `sqlite-vec` is a core dependency.
+
+### `local` (Qdrant file mode — legacy)
+- Single process, easy rollback if you have existing 0.4.x/0.5.0 Qdrant data.
+- Watch out: takes an exclusive file lock. If you run the daemon and MCP server
+  simultaneously you will hit "storage folder is already accessed by another instance".
+- To opt in: `export MEMGENTIC_STORAGE_BACKEND=local`.
 
 ### `qdrant` (Qdrant server)
 - Run Qdrant as a separate process (e.g. via `docker compose up qdrant`).
@@ -24,30 +31,39 @@ Memgentic supports three vector storage backends. The backend is selected via
   Qdrant's advanced features (payload indexes on the server, HNSW tuning).
 - Extra moving part: one more container / process to manage.
 
-### `sqlite_vec` (opt-in)
-- Co-locates vectors in the same SQLite file as the metadata/FTS5 store.
-- Good for: personal use where you want daemon + MCP + API concurrently,
-  without running a separate Qdrant server. SQLite WAL mode and
-  `busy_timeout=5000` make multi-writer access safe.
-- Scale envelope: tuned for 10k–100k vectors × 768 dims on commodity hardware.
-- Works offline, ships only pre-built wheels (MIT/Apache-2.0 dual-licensed
-  `sqlite-vec` 0.1.9), no extra binary.
+## sqlite-vec is now the default
 
-## Enabling sqlite-vec
+Since 0.6.0, `sqlite-vec>=0.1.9` is a **core dependency** — no extra install step
+needed. A plain `pip install memgentic` gives you a fully working zero-config
+vector store out of the box.
+
+The `[sqlite-vec]` extra is kept as a no-op alias for back-compat:
 
 ```bash
-# 1. Install the optional extra
-uv add 'memgentic[sqlite-vec]'
-# or: pip install 'memgentic[sqlite-vec]'
+# Both of these work identically now:
+pip install memgentic
+pip install 'memgentic[sqlite-vec]'
+```
 
-# 2. Point Memgentic at it (env var, .env, or settings)
-export MEMGENTIC_STORAGE_BACKEND=sqlite_vec
+To confirm sqlite-vec is active:
 
-# 3. Run anything — the vec0 virtual table is created on first start.
+```bash
 memgentic doctor
 memgentic remember "hello sqlite-vec"
 memgentic search "hello"
 ```
+
+## Migrating from 0.4.x / 0.5.0 Qdrant data
+
+If you have existing memories in Qdrant local file mode, Memgentic will print a
+warning on first start pointing at the migration command:
+
+```bash
+memgentic migrate-storage --from qdrant_local --to sqlite_vec
+```
+
+Do **not** auto-migrate — always review your data first. The command is safe to
+re-run (idempotent).
 
 The first-ever initialization pins the active embedding provider, model, and
 dimension into a `vec_embedding_pin` row. Subsequent initializations verify
@@ -78,6 +94,5 @@ results — if you hit that, Qdrant server mode is the right choice.
 ## TODO
 
 - `memgentic migrate-storage` command to copy memories + embeddings between
-  backends (e.g. re-ingest from Qdrant local into sqlite-vec).
-- Field-test sqlite-vec for a cycle, then flip the default `storage_backend`
-  from `local` to `sqlite_vec` (tracked as a separate PR).
+  backends (e.g. re-ingest from Qdrant local into sqlite-vec). The migration
+  detection warning already fires on first start to guide users there.

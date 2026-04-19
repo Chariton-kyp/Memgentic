@@ -4,6 +4,25 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+### Breaking Changes
+- **Default storage backend is now `sqlite_vec`** (was `local` / Qdrant file mode).
+  Users upgrading from 0.4.x or 0.5.0 who have existing Qdrant data under
+  `~/.memgentic/data/qdrant/` must run:
+  ```
+  memgentic migrate-storage --from qdrant_local --to sqlite_vec
+  ```
+  to copy memories to the new default store. Memgentic will print a clear
+  warning on first start if legacy Qdrant data is detected. To continue using
+  Qdrant file mode instead, set `MEMGENTIC_STORAGE_BACKEND=local`.
+
+### Added
+- `sqlite-vec>=0.1.9` promoted from optional extra to core dependency — a
+  working install no longer requires `pip install 'memgentic[sqlite-vec]'`.
+  The `[sqlite-vec]` extra is retained as a no-op alias for back-compat.
+- Migration detection warning: on first sqlite-vec start, if a legacy Qdrant
+  data directory is found and the new SQLite DB is empty, a loud one-time
+  warning is printed to stderr with the exact command to run.
+
 ## [0.5.0] — 2026-04-18 — Zero-config Local
 
 ### Added

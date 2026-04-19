@@ -1101,6 +1101,7 @@ dependencies = [
     { name = "python-dotenv" },
     { name = "qdrant-client" },
     { name = "rich" },
+    { name = "sqlite-vec" },
     { name = "structlog" },
     { name = "tenacity" },
     { name = "watchdog" },
@@ -1146,9 +1147,6 @@ observability = [
     { name = "opentelemetry-instrumentation-sqlite3" },
     { name = "opentelemetry-sdk" },
 ]
-sqlite-vec = [
-    { name = "sqlite-vec" },
-]
 
 [package.metadata]
 requires-dist = [
@@ -1191,7 +1189,7 @@ requires-dist = [
     { name = "qdrant-client", specifier = ">=1.17" },
     { name = "rich", specifier = ">=14.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14" },
-    { name = "sqlite-vec", marker = "extra == 'sqlite-vec'", specifier = ">=0.1.9" },
+    { name = "sqlite-vec", specifier = ">=0.1.9" },
     { name = "striprtf", marker = "extra == 'documents'", specifier = ">=0.0.26" },
     { name = "structlog", specifier = ">=25.0" },
     { name = "tenacity", specifier = ">=9.0" },
