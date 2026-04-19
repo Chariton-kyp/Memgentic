@@ -727,6 +727,146 @@ class TestDaemonCommand:
             mock_daemon_inst.stop.assert_called_once()
 
 
+class TestDoctorCommand:
+    """Tests for `memgentic doctor` — specifically the Qdrant WARN vs FAIL logic."""
+
+    def _make_settings(self, tmp_path: Path, backend: str):
+        """Return a MagicMock that looks like MemgenticSettings."""
+        from memgentic.config import StorageBackend
+
+        data_dir = tmp_path / "data"
+        data_dir.mkdir(parents=True, exist_ok=True)
+
+        mock_settings = MagicMock()
+        mock_settings.ollama_url = "http://localhost:11434"
+        mock_settings.qdrant_url = "http://localhost:6333"
+        mock_settings.embedding_model = "qwen3-embedding:0.6b"
+        mock_settings.local_llm_model = "gemma4:e2b"
+        mock_settings.embedding_dimensions = 768
+        mock_settings.storage_backend = StorageBackend(backend)
+        mock_settings.data_dir = data_dir
+        mock_settings.sqlite_path = data_dir / "memgentic.db"
+        mock_settings.graph_path = data_dir / "graph.pkl"
+        mock_settings.context_file_path = str(tmp_path / ".memgentic-context.md")
+        return mock_settings
+
+    def _patch_doctor_deps(self, mock_settings, *, qdrant_reachable: bool):
+        """Context-manager stack that stubs out all _doctor() side-effects.
+
+        Ollama is always mocked as reachable with both models pulled so that
+        the only variable between tests is the Qdrant reachability.
+        """
+        import contextlib
+
+        import httpx
+
+        # Fake Ollama /api/tags response — both models "pulled"
+        ollama_resp = MagicMock()
+        ollama_resp.status_code = 200
+        ollama_resp.json = MagicMock(
+            return_value={
+                "models": [
+                    {"name": "qwen3-embedding:0.6b"},
+                    {"name": "gemma4:e2b"},
+                ]
+            }
+        )
+
+        qdrant_resp = MagicMock()
+        qdrant_resp.status_code = 200
+
+        def _make_client_class(ollama_r, qdrant_r, qdrant_ok):
+            """Return a mock AsyncClient class whose instances behave correctly."""
+
+            async def _get(url, **kwargs):
+                if "11434" in url or "ollama" in url:
+                    return ollama_r
+                # Qdrant healthz
+                if qdrant_ok:
+                    return qdrant_r
+                raise httpx.ConnectError("qdrant down")
+
+            client_instance = AsyncMock()
+            client_instance.get = AsyncMock(side_effect=_get)
+            client_instance.__aenter__ = AsyncMock(return_value=client_instance)
+            client_instance.__aexit__ = AsyncMock(return_value=False)
+
+            client_class = MagicMock(return_value=client_instance)
+            return client_class
+
+        mock_client_class = _make_client_class(ollama_resp, qdrant_resp, qdrant_reachable)
+
+        from memgentic.system_info import RamInfo, Tier, TierRecommendation
+
+        fake_gpu = None
+        fake_ram = RamInfo(total_mb=16_000, available_mb=8_000)
+        fake_rec = TierRecommendation(
+            tier=Tier.BALANCED,
+            label="Tier 1 — Balanced",
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=768,
+            local_llm_model="gemma4:e2b",
+            multilingual=True,
+            reason="test",
+            notes=[],
+        )
+
+        return contextlib.ExitStack(), [
+            patch("memgentic.cli.settings", mock_settings),
+            patch("httpx.AsyncClient", mock_client_class),
+            patch("memgentic.system_info.detect_gpu", return_value=fake_gpu),
+            patch("memgentic.system_info.detect_ram", return_value=fake_ram),
+            patch("memgentic.system_info.detect_cpu_cores", return_value=8),
+            patch("memgentic.system_info.get_loaded_models", AsyncMock(return_value=[])),
+            patch("memgentic.system_info.recommend_tier", return_value=fake_rec),
+        ]
+
+    def test_qdrant_warn_when_backend_local(self, tmp_path: Path):
+        """When storage_backend=LOCAL and Qdrant is unreachable, doctor shows WARN not FAIL."""
+        mock_settings = self._make_settings(tmp_path, "local")
+        _, patches = self._patch_doctor_deps(mock_settings, qdrant_reachable=False)
+
+        runner = CliRunner()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            result = runner.invoke(main, ["doctor"])
+
+        assert result.exit_code == 0, result.output
+        # WARN must appear (the Qdrant row)
+        assert "WARN" in result.output
+        # The Qdrant row detail must mention "Not running" (file-mode fallback)
+        assert "Not running" in result.output
+        # Only FAILs trigger the "Some checks failed" banner — WARN must not.
+        assert "Some checks failed" not in result.output
+        # All checks passed banner should be visible
+        assert "All checks passed" in result.output
+
+    def test_qdrant_fail_when_backend_qdrant(self, tmp_path: Path):
+        """When storage_backend=QDRANT and Qdrant is unreachable, doctor shows FAIL."""
+        mock_settings = self._make_settings(tmp_path, "qdrant")
+        _, patches = self._patch_doctor_deps(mock_settings, qdrant_reachable=False)
+
+        runner = CliRunner()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            result = runner.invoke(main, ["doctor"])
+
+        assert result.exit_code == 0, result.output
+        assert "FAIL" in result.output
+        assert "Some checks failed" in result.output
+
+    def test_qdrant_pass_when_server_running(self, tmp_path: Path):
+        """When Qdrant is reachable, doctor shows OK regardless of backend."""
+        mock_settings = self._make_settings(tmp_path, "local")
+        _, patches = self._patch_doctor_deps(mock_settings, qdrant_reachable=True)
+
+        runner = CliRunner()
+        with patches[0], patches[1], patches[2], patches[3], patches[4], patches[5], patches[6]:
+            result = runner.invoke(main, ["doctor"])
+
+        assert result.exit_code == 0, result.output
+        # Qdrant row should not be WARN or FAIL when reachable
+        assert "Not running" not in result.output
+
+
 class TestImportExistingCommand:
     """Tests for `memgentic import-existing`."""
 

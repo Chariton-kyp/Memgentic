@@ -879,11 +879,13 @@ async def _doctor() -> None:
         recommend_tier,
     )
 
-    checks: list[tuple[str, bool, str]] = []
+    # Each check is a 3-tuple: (name, state, detail)
+    # state is one of: "pass" | "warn" | "fail"
+    checks: list[tuple[str, str, str]] = []
 
     # 1. Python version
     py_ok = sys.version_info >= (3, 12)
-    checks.append(("Python >= 3.12", py_ok, f"{sys.version.split()[0]}"))
+    checks.append(("Python >= 3.12", "pass" if py_ok else "fail", f"{sys.version.split()[0]}"))
 
     # 2. System resources
     gpu = detect_gpu()
@@ -892,17 +894,17 @@ async def _doctor() -> None:
         checks.append(
             (
                 "GPU",
-                True,
+                "pass",
                 f"{gpu.name} ({gpu.vram_total_gb:.0f}GB VRAM, {gpu.vram_free_gb:.0f}GB free)",
             )
         )
     else:
-        checks.append(("GPU", False, "No NVIDIA GPU detected (will use CPU)"))
+        checks.append(("GPU", "warn", "No NVIDIA GPU detected (will use CPU)"))
     if ram.total_mb > 0:
         ram_detail = f"{ram.total_gb:.0f}GB total, {ram.available_gb:.0f}GB free"
-        checks.append(("RAM", True, ram_detail))
+        checks.append(("RAM", "pass", ram_detail))
     else:
-        checks.append(("RAM", True, "Could not detect (OK)"))
+        checks.append(("RAM", "pass", "Could not detect (OK)"))
 
     # 3. Ollama & models
     try:
@@ -912,18 +914,18 @@ async def _doctor() -> None:
             model_names = [m["name"] for m in models]
             has_emb = any(settings.embedding_model in n for n in model_names)
             has_llm = any(settings.local_llm_model in n for n in model_names)
-            checks.append(("Ollama running", True, settings.ollama_url))
+            checks.append(("Ollama running", "pass", settings.ollama_url))
             checks.append(
                 (
                     f"Embedding: {settings.embedding_model}",
-                    has_emb,
+                    "pass" if has_emb else "fail",
                     "pulled" if has_emb else "not pulled",
                 )
             )
             checks.append(
                 (
                     f"LLM: {settings.local_llm_model}",
-                    has_llm,
+                    "pass" if has_llm else "fail",
                     "pulled" if has_llm else "not pulled",
                 )
             )
@@ -936,21 +938,21 @@ async def _doctor() -> None:
                     checks.append(
                         (
                             f"  Loaded: {lm.name}",
-                            True,
+                            "pass",
                             f"{lm.size_gb:.1f}GB on {loc}",
                         )
                     )
     except Exception:
-        checks.append(("Ollama running", False, f"Not responding at {settings.ollama_url}"))
-        checks.append((f"Embedding: {settings.embedding_model}", False, "Ollama not available"))
-        checks.append((f"LLM: {settings.local_llm_model}", False, "Ollama not available"))
+        checks.append(("Ollama running", "fail", f"Not responding at {settings.ollama_url}"))
+        checks.append((f"Embedding: {settings.embedding_model}", "fail", "Ollama not available"))
+        checks.append((f"LLM: {settings.local_llm_model}", "fail", "Ollama not available"))
 
     # 4. Vector backend — skip Qdrant probe when using sqlite-vec
     if settings.storage_backend == StorageBackend.SQLITE_VEC:
         try:
             import sqlite_vec  # type: ignore[import-untyped]  # noqa: F401
 
-            checks.append(("sqlite-vec extension", True, "importable"))
+            checks.append(("sqlite-vec extension", "pass", "importable"))
         except ImportError:
             # Rich renders the detail column through its markup parser, which
             # would swallow the ``[sqlite-vec]`` extra as an (unknown) tag —
@@ -959,26 +961,52 @@ async def _doctor() -> None:
             checks.append(
                 (
                     "sqlite-vec extension",
-                    False,
+                    "fail",
                     r"Not installed — run: pip install 'memgentic\[sqlite-vec]'",
                 )
             )
     else:
+        # Probe Qdrant server.
+        # When storage_backend=LOCAL, file-mode Qdrant is the intended
+        # zero-config path — a missing server is a WARN, not a FAIL.
+        # When storage_backend=QDRANT, the user explicitly chose server mode,
+        # so a missing server is genuinely broken (FAIL).
+        qdrant_reachable = False
         try:
             async with httpx.AsyncClient(timeout=2.0) as client:
                 r = await client.get(f"{settings.qdrant_url}/healthz")
-                checks.append(("Qdrant server", r.status_code == 200, settings.qdrant_url))
+                qdrant_reachable = r.status_code == 200
         except Exception:
-            checks.append(("Qdrant server", False, "Not running (will use local file mode)"))
+            qdrant_reachable = False
+
+        if qdrant_reachable:
+            checks.append(("Qdrant server", "pass", settings.qdrant_url))
+        elif settings.storage_backend == StorageBackend.LOCAL:
+            checks.append(
+                (
+                    "Qdrant server",
+                    "warn",
+                    "Not running — will use local file mode (zero-config)",
+                )
+            )
+        else:
+            # StorageBackend.QDRANT — server mode explicitly selected but unreachable
+            checks.append(
+                (
+                    "Qdrant server",
+                    "fail",
+                    f"Not running at {settings.qdrant_url} — required when storage_backend=qdrant",
+                )
+            )
 
     # 5. Data directory + SQLite
     data_exists = settings.data_dir.exists()
-    checks.append(("Data directory", data_exists, str(settings.data_dir)))
+    checks.append(("Data directory", "pass" if data_exists else "fail", str(settings.data_dir)))
     sqlite_exists = settings.sqlite_path.exists()
     checks.append(
         (
             "SQLite database",
-            sqlite_exists,
+            "pass",
             str(settings.sqlite_path) + (" (exists)" if sqlite_exists else " (will be created)"),
         )
     )
@@ -989,19 +1017,25 @@ async def _doctor() -> None:
     table.add_column("Status")
     table.add_column("Details")
 
-    all_ok = True
-    for name, ok, detail in checks:
-        status = "[green]OK[/]" if ok else "[red]FAIL[/]"
-        if not ok:
-            all_ok = False
+    _state_to_label = {
+        "pass": "[green]OK[/]",
+        "warn": "[yellow]WARN[/]",
+        "fail": "[red]FAIL[/]",
+    }
+
+    any_fail = False
+    for name, state, detail in checks:
+        status = _state_to_label.get(state, "[red]FAIL[/]")
+        if state == "fail":
+            any_fail = True
         table.add_row(name, status, str(detail))
 
     console.print(table)
 
-    if not all_ok:
+    if any_fail:
         console.print("\n[yellow]Some checks failed. Suggestions:[/]")
-        for name, ok, detail in checks:
-            if ok:
+        for name, state, detail in checks:
+            if state != "fail":
                 continue
             is_ollama_base = "Ollama" in name and all(
                 k not in name for k in ("Model", "Embedding", "LLM")
@@ -1015,6 +1049,11 @@ async def _doctor() -> None:
                 console.print(f"  -> Pull model: ollama pull {settings.local_llm_model}")
             if "Data" in name:
                 console.print(f"  -> Will be created on first use: {settings.data_dir}")
+            if "Qdrant server" in name and "storage_backend=qdrant" in detail:
+                console.print(
+                    "  -> Start Qdrant: docker compose up qdrant -d"
+                    "\n     or set MEMGENTIC_STORAGE_BACKEND=local to use file mode"
+                )
     else:
         console.print("\n[bold green]All checks passed! Memgentic is ready.[/]")
 
