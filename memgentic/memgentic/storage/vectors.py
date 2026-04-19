@@ -382,7 +382,11 @@ class VectorStore:
                 # Named vectors (dict) — Memgentic always uses unnamed vectors
                 if isinstance(vec, dict):
                     vec = next(iter(vec.values()))
-                yield str(point.id), list(vec)
+                # ``VectorStruct`` from qdrant-client is a union type; for our
+                # unnamed-vector collections the runtime value is a sequence
+                # of floats. Rebuild as a plain list so the generator matches
+                # its declared AsyncIterator[tuple[str, list[float]]] type.
+                yield str(point.id), [float(x) for x in vec]  # type: ignore[union-attr]
             if next_offset is None:
                 break
             offset = next_offset
