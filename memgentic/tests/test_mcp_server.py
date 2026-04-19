@@ -63,15 +63,16 @@ def _make_memory(mid: str = "mem-001", content: str = "Test memory content") -> 
 
 
 def _mock_ctx(metadata_store, vector_store, embedder, pipeline, graph):
-    """Create a mock MCP Context with lifespan state."""
+    """Create a mock MCP Context with lifespan context (matches server.py)."""
     ctx = MagicMock()
-    ctx.request_context.lifespan_state = {
+    state = {
         "metadata_store": metadata_store,
         "vector_store": vector_store,
         "embedder": embedder,
         "pipeline": pipeline,
         "graph": graph,
     }
+    ctx.request_context.lifespan_context = state
     return ctx
 
 
