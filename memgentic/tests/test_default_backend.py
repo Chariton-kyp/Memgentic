@@ -53,9 +53,7 @@ class TestLegacyQdrantMigrationWarning:
 
         return VectorStore(settings)
 
-    def test_warning_fires_when_qdrant_dir_exists_and_db_empty(
-        self, tmp_path: Path, capsys
-    ):
+    def test_warning_fires_when_qdrant_dir_exists_and_db_empty(self, tmp_path: Path, capsys):
         """When old Qdrant dir exists and sqlite DB is tiny, warning is emitted."""
         settings = self._make_settings(tmp_path)
         # Create the legacy Qdrant directory (simulates 0.4.x/0.5.0 install)

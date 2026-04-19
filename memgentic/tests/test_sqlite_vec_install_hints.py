@@ -36,8 +36,9 @@ def _no_sqlite_vec(monkeypatch):
 
 async def test_missing_sqlite_vec_raises_storage_error_with_install_hint(tmp_path, _no_sqlite_vec):
     """When sqlite-vec isn't installed, initialize() must raise a StorageError
-    whose message tells the user exactly how to install it, quoted so the
-    shell doesn't glob-expand the brackets.
+    whose message tells the user how to recover: either reinstall memgentic
+    (sqlite-vec is now a core dep) or fall back to the Qdrant file backend.
+    Paths are quoted / unquoted as needed so shells don't mangle them.
     """
     settings = MemgenticSettings(
         data_dir=tmp_path / "data",
@@ -50,12 +51,11 @@ async def test_missing_sqlite_vec_raises_storage_error_with_install_hint(tmp_pat
         await backend.initialize()
 
     msg = str(exc_info.value)
-    # Verbatim install commands with quotes around the extra — shells won't
-    # glob these.
-    assert "pip install 'memgentic[sqlite-vec]'" in msg
-    assert "uv add 'memgentic[sqlite-vec]'" in msg
-    # And tell the user the env var that triggered the branch.
-    assert "MEMGENTIC_STORAGE_BACKEND" in msg
+    # Clear recovery path: reinstall (preferred) or switch back to Qdrant.
+    assert "pip install --upgrade memgentic" in msg
+    assert "MEMGENTIC_STORAGE_BACKEND=local" in msg
+    # And name the environment variable / setting that triggered the branch.
+    assert "MEMGENTIC_STORAGE_BACKEND" in msg or "storage_backend" in msg.lower()
 
 
 def test_doctor_sqlite_vec_detail_escapes_rich_markup():
