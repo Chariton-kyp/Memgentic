@@ -429,6 +429,10 @@ class TestContextFileAutoUpdate:
         daemon = MemgenticDaemon(settings, mock_pipeline, [], metadata_store=mock_store)
         daemon._running = True
         daemon._context_dirty = True
+        # Bypass the 60s throttle: time.monotonic() can be < 60 on freshly
+        # booted CI runners, which would skip the first write and break
+        # this test. Use a large negative seed so (now - last) > 60 always.
+        daemon._last_context_update = -1000.0
 
         mock_generate = AsyncMock(return_value=True)
         with patch(
