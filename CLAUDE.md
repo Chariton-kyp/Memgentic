@@ -153,7 +153,8 @@ memgentic search "query"  # Semantic search
 memgentic sources         # Show source stats
 memgentic remember "..."  # Manual memory
 memgentic doctor          # Check prerequisites (Ollama, models, Qdrant)
-memgentic setup           # Interactive model selection and configuration
+memgentic init            # Full onboarding: detect tools, configure models, install hooks
+memgentic setup           # Reconfigure models/backend only (no tool detection)
 memgentic consolidate     # Recompute importance, detect duplicates
 memgentic re-embed        # Re-generate all embeddings with current model
 memgentic graph "entity"  # Explore knowledge graph around an entity

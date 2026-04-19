@@ -224,8 +224,23 @@ async def _check_ollama(model_name: str) -> tuple[bool, bool]:
         return False, False
 
 
-async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
-    """Main init wizard orchestrator."""
+async def run_init(
+    dry_run: bool = False,
+    skip_import: bool = False,
+    non_interactive: bool = False,
+) -> None:
+    """Main init wizard orchestrator.
+
+    Flow
+    ----
+    Step 0  Detect installed AI tools and configure MCP servers.
+    Step 1  Vector storage backend        \\
+    Step 2  Embedding model                |  delegated to
+    Step 3  Intelligence LLM              |  _run_setup_steps() in cli.py
+    Step 4  Pull models via Ollama        /
+    Step 5  Inject memory instructions into each tool's context file.
+    (opt)   Import existing conversations.
+    """
     console.print(
         Panel.fit(
             "[bold cyan]Memgentic -- Universal AI Memory Layer[/]\n"
@@ -237,8 +252,8 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
     if dry_run:
         console.print("[yellow]DRY RUN -- no changes will be made[/]\n")
 
-    # Step 1: Detect tools
-    console.print("[bold]Detecting AI tools...[/]")
+    # --- Step 0: Detect tools ---
+    console.print("[bold]Step 0: Detecting AI tools...[/]")
     tools = detect_tools()
 
     detected_count = 0
@@ -263,7 +278,7 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
 
     console.print()
 
-    # Step 2: Configure MCP + inject instructions
+    # --- Step 0 (cont.): Configure MCP servers ---
     console.print("[bold]Configuring MCP servers...[/]")
     for tool in tools:
         if not tool.detected:
@@ -279,7 +294,21 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
         console.print(f"  {status} {tool.name}: MCP server {'configured' if ok else 'FAILED'}")
 
     console.print()
-    console.print("[bold]Adding memory instructions...[/]")
+
+    # --- Steps 1-4: Model / backend selection (skipped in non-interactive / dry-run) ---
+    if not non_interactive and not dry_run:
+        console.print("[bold]Step 1-4: Configure storage and models[/]\n")
+        from memgentic.cli import _run_setup_steps
+
+        _run_setup_steps()
+        console.print()
+    elif dry_run:
+        console.print("[dim]Skipping model/backend prompts in dry-run mode (no .env changes)[/]\n")
+    else:
+        console.print("[dim]Skipping model/backend prompts (--yes / non-interactive)[/]\n")
+
+    # --- Step 5: Inject memory instructions into context files ---
+    console.print("[bold]Step 5: Adding memory instructions...[/]")
     for tool in tools:
         if not tool.detected:
             continue
@@ -289,7 +318,7 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
 
     console.print()
 
-    # Step 3: Check Ollama + model
+    # --- Check Ollama + model (informational) ---
     console.print("[bold]Checking embedding model...[/]")
     ollama_ok, model_ok = await _check_ollama(settings.embedding_model)
 
@@ -305,18 +334,17 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
         console.print(f"  [yellow]![/] Ollama not running at {settings.ollama_url}")
         console.print("  [cyan]Install: https://ollama.com/download[/]")
 
-    # Step 4: Ensure data directory
+    # Ensure data directory
     if not dry_run:
         settings.data_dir.mkdir(parents=True, exist_ok=True)
     console.print(f"\n  [green]OK[/] Data directory: {settings.data_dir}")
 
-    # Step 5: Import (optional)
+    # --- Optional: Import existing conversations ---
     if not skip_import and not dry_run and ollama_ok and model_ok:
         import click as click_mod
 
         if click_mod.confirm("\nImport existing conversations now?", default=True):
             console.print("\n[cyan]Importing existing conversations...[/]")
-            # Reuse existing import logic
             from memgentic.adapters import get_import_adapters
             from memgentic.graph.knowledge import create_knowledge_graph
             from memgentic.processing.embedder import Embedder
@@ -374,7 +402,7 @@ async def run_init(dry_run: bool = False, skip_import: bool = False) -> None:
     elif skip_import:
         console.print("\n[dim]Skipping import (--skip-import)[/]")
 
-    # Step 6: Summary
+    # --- Summary ---
     console.print()
     console.print(
         Panel.fit(
