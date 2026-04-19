@@ -439,7 +439,7 @@ class VectorStore:
             qdrant_dir=str(qdrant_dir),
             hint=(
                 "Existing Qdrant data found. Run `memgentic migrate-storage "
-                "--from qdrant_local --to sqlite_vec` to copy your memories."
+                "--from local --to sqlite_vec` to copy your memories."
             ),
         )
         import rich.console
@@ -456,7 +456,7 @@ class VectorStore:
             "  To migrate, run:\n"
             "\n"
             "    [bold green]memgentic migrate-storage "
-            "--from qdrant_local --to sqlite_vec[/bold green]\n"
+            "--from local --to sqlite_vec[/bold green]\n"
             "\n"
             "  To keep using Qdrant instead, set:\n"
             "\n"

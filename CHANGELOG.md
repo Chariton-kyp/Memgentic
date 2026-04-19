@@ -4,12 +4,14 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-04-19 — Zero-config by default
+
 ### Breaking Changes
 - **Default storage backend is now `sqlite_vec`** (was `local` / Qdrant file mode).
   Users upgrading from 0.4.x or 0.5.0 who have existing Qdrant data under
   `~/.memgentic/data/qdrant/` must run:
   ```
-  memgentic migrate-storage --from qdrant_local --to sqlite_vec
+  memgentic migrate-storage --from local --to sqlite_vec
   ```
   to copy memories to the new default store. Memgentic will print a clear
   warning on first start if legacy Qdrant data is detected. To continue using
@@ -22,6 +24,35 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 - Migration detection warning: on first sqlite-vec start, if a legacy Qdrant
   data directory is found and the new SQLite DB is empty, a loud one-time
   warning is printed to stderr with the exact command to run.
+- **`memgentic migrate-storage`** — new CLI command that copies every memory
+  + embedding between vector backends (`local` / `qdrant` / `sqlite_vec`).
+  Supports `--dry-run`, `--force`, and streams a rich progress bar. Metadata
+  (SQLite) is shared and untouched; migration is purely additive.
+- **Consolidated onboarding**: `memgentic init` is now the one full-onboarding
+  command (detect AI tools → backend/embedding/LLM picker → inject memory
+  instructions → optional import). New `--yes/-y` flag skips interactive
+  prompts for scripted use. `memgentic setup` stays as a reconfigure-only
+  escape hatch (steps 1-4 without tool detection or hook installation).
+- **Tag-triggered release workflow**: pushing `v*` tags builds both packages
+  with `uv build`, publishes via PyPI Trusted Publishing (OIDC — no PAT),
+  and creates a GitHub Release with the matching CHANGELOG section as body.
+  New `build-sanity` workflow satisfies the required `build` status check.
+
+### Changed
+- `memgentic doctor` check output is now tri-state (`OK`/`WARN`/`FAIL`).
+  Qdrant unreachable under the default `local` backend renders as `WARN`
+  (the tool transparently falls back to file mode — nothing is broken);
+  only genuine misconfigurations still render red. GPU detection also
+  downgraded to `WARN` since GPU is optional.
+
+### Fixed
+- Pre-existing test suite drift: `test_mcp_server.py` fixture drifted after
+  the v0.5.0 lifespan rename (wrong dict key) and `test_daemon.py` fixture
+  left `MagicMock` instances on numeric settings fields, causing an async
+  spin-loop that hung the suite. Suite now goes from ~531 passing / ~23
+  failing to 589 passing / 0 failing.
+- `ossf/scorecard-action` pin repointed at a real SHA (`v2.4.3` — the prior
+  pin was a hallucinated commit that broke every weekly Scorecard run).
 
 ## [0.5.0] — 2026-04-18 — Zero-config Local
 

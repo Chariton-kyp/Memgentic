@@ -32,6 +32,14 @@ jobs:
       - name: Install workspace dependencies
         run: uv sync --dev
 
+      - name: Run core tests
+        # Guards against test regressions on `main` between tags. The
+        # ignore list mirrors release.yml — benchmark suites and the
+        # legacy MCP-server harness are not part of the release gate.
+        run: |
+          uv run pytest memgentic/tests/ -q --timeout=30 \
+            --ignore=memgentic/tests/test_benchmarks.py
+
       - name: Build packages (dry-run — no publish)
         run: |
           uv build --package memgentic --out-dir dist/

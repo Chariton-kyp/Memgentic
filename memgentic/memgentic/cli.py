@@ -1654,7 +1654,7 @@ def migrate_storage(
 
     \b
     Examples:
-      memgentic migrate-storage --from qdrant_local --to sqlite_vec
+      memgentic migrate-storage --from local --to sqlite_vec
       memgentic migrate-storage --from sqlite_vec --to sqlite_vec --dry-run
     """
 
@@ -1696,7 +1696,8 @@ def migrate_storage(
                         f"{dst_count} vector(s).[/]\n"
                         "[yellow]Pass --force to overwrite, or choose an empty backend.[/]"
                     )
-                    return
+                    # Non-zero exit so scripts checking $? notice the refusal.
+                    raise click.Abort()
 
             # Count source memories for the progress bar.
             all_memories = await metadata_store.get_memories_by_filter(limit=1_000_000)

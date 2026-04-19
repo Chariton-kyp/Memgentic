@@ -59,7 +59,7 @@ If you have existing memories in Qdrant local file mode, Memgentic will print a
 warning on first start pointing at the migration command:
 
 ```bash
-memgentic migrate-storage --from qdrant_local --to sqlite_vec
+memgentic migrate-storage --from local --to sqlite_vec
 ```
 
 Do **not** auto-migrate — always review your data first. The command is safe to

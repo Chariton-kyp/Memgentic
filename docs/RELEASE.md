@@ -1,6 +1,8 @@
 # Release Process
 
-Memgentic uses PyPI Trusted Publishing via GitHub Actions. No API tokens are stored in the repo.
+Memgentic uses PyPI Trusted Publishing via GitHub Actions. No API tokens are
+stored in the repo — the `release` GitHub Environment obtains a short-lived
+OIDC token at publish time.
 
 ## One-time PyPI Setup
 
@@ -9,24 +11,30 @@ Memgentic uses PyPI Trusted Publishing via GitHub Actions. No API tokens are sto
 3. Fill in:
    - **PyPI Project Name:** `memgentic`
    - **Owner:** `Chariton-kyp`
-   - **Repository name:** `memgentic`
+   - **Repository name:** `Memgentic`
    - **Workflow name:** `release.yml`
-   - **Environment name:** `pypi`
+   - **Environment name:** `release`
 4. Save.
+5. Repeat the same four steps for a second publisher with **PyPI Project
+   Name:** `memgentic-api` (same repo / workflow / environment).
 
-Then in GitHub repo settings, create an environment named `pypi` (Settings → Environments → New environment → `pypi`).
+Then in the GitHub repo settings create an environment named `release`
+(Settings → Environments → New environment → `release`). Add branch
+protection on the environment so only `main`/tags can deploy.
 
 ## Cutting a Release
 
-1. Update `CHANGELOG.md`: move `[Unreleased]` items under a new version header with today's date.
-2. Bump version in `memgentic/memgentic/__version__.py`.
-3. Commit the version bump: `git commit -am "Release vX.Y.Z"`.
-4. Tag: `git tag vX.Y.Z && git push && git push --tags`.
-5. GitHub Actions `release.yml` runs on tag push:
-   - Builds sdist + wheel via `uv build`.
-   - Runs tests.
-   - Publishes to PyPI via trusted publishing.
-6. Create a GitHub Release from the tag, copying the CHANGELOG excerpt into the release notes.
+1. Update `CHANGELOG.md`: move `[Unreleased]` items under a new
+   `## [X.Y.Z] — YYYY-MM-DD — Title` header.
+2. Bump `memgentic/memgentic/__version__.py` to match.
+3. Commit: `git commit -am "chore(release): vX.Y.Z"`.
+4. Tag + push: `git tag vX.Y.Z && git push && git push --tags`.
+5. GitHub Actions `release.yml` runs on tag push and:
+   - Verifies the tag version matches `__version__.py` (fails loudly otherwise).
+   - Builds sdist + wheel for both `memgentic` and `memgentic-api` via `uv build`.
+   - Runs the test suite (with the same `--ignore` list the PR workflow uses).
+   - Publishes both to PyPI via trusted publishing (environment: `release`).
+   - Creates a GitHub Release with the matching CHANGELOG section as body.
 
 ## Verifying a Release
 
