@@ -157,18 +157,21 @@ jobs:
       - name: Extract CHANGELOG section
         id: changelog
         run: |
-          TAG="${GITHUB_REF_NAME}"       # v0.5.0
-          VERSION="${TAG#v}"             # 0.5.0
+          TAG="${GITHUB_REF_NAME}"       # v0.6.0
+          VERSION="${TAG#v}"             # 0.6.0
 
-          # Parse the CHANGELOG for the matching ## [X.Y.Z] section.
-          # Captures everything between this heading and the next ## heading.
-          BODY=$(python3 - <<'PYEOF'
-          import re, sys, pathlib
+          # Pass VERSION as argv[1] to avoid shell-expansion games inside a
+          # quoted heredoc; keeps the Python body hermetic.
+          BODY=$(python3 - "$VERSION" <<'PYEOF'
+          import re
+          import sys
+          import pathlib
 
-          version = "$VERSION"
+          version = sys.argv[1]
           text = pathlib.Path("CHANGELOG.md").read_text()
 
-          # Match "## [0.5.0]" with optional date / title suffix, capture body
+          # Match "## [0.6.0]" with optional date / title suffix, capture body
+          # up to (but not including) the next "## " heading or end-of-file.
           pattern = (
               r"^##\s+\[" + re.escape(version) + r"\][^\n]*\n"
               r"(.*?)"

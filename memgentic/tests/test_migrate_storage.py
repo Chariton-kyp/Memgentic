@@ -129,6 +129,25 @@ def _cli_env(tmp_path) -> dict[str, str]:
     }
 
 
+@pytest.fixture()
+def _patch_cli_settings(tmp_path, monkeypatch):
+    """Point ``memgentic.config.settings`` (the module-level singleton the CLI
+    imports) at our tmp-path settings.
+
+    ``CliRunner(env=...)`` only injects os.environ and does **not** re-import
+    the already-loaded ``settings`` module. Without this patch, the migrate
+    command talks to ``~/.memgentic/data/memgentic.db`` on the CI runner —
+    which is empty, so the "no memories" guard fires before the code paths
+    the tests are trying to exercise.
+    """
+    import memgentic.cli as cli_module
+    import memgentic.config as config_module
+
+    patched = _settings(tmp_path)
+    monkeypatch.setattr(config_module, "settings", patched)
+    monkeypatch.setattr(cli_module, "settings", patched)
+
+
 # ---------------------------------------------------------------------------
 # CLI Tests  (sync — so asyncio.run() inside the command works fine)
 # ---------------------------------------------------------------------------
@@ -137,7 +156,7 @@ def _cli_env(tmp_path) -> dict[str, str]:
 class TestMigrateStorageSqliteVecToSqliteVec:
     """sqlite_vec → sqlite_vec: exercises the whole wiring end-to-end."""
 
-    def test_all_ids_present_in_destination(self, tmp_path):
+    def test_all_ids_present_in_destination(self, tmp_path, _patch_cli_settings):
         """Every id from source appears in destination after migration."""
         settings = _settings(tmp_path)
 
@@ -165,7 +184,7 @@ class TestMigrateStorageSqliteVecToSqliteVec:
         src_ids = {m.id for m in memories}
         assert src_ids.issubset(dest_points.keys()), f"Missing ids: {src_ids - dest_points.keys()}"
 
-    def test_embeddings_match_within_fp_precision(self, tmp_path):
+    def test_embeddings_match_within_fp_precision(self, tmp_path, _patch_cli_settings):
         """Embeddings in destination match source to float32 precision."""
         settings = _settings(tmp_path)
 
@@ -197,7 +216,7 @@ class TestMigrateStorageSqliteVecToSqliteVec:
 class TestDryRun:
     """--dry-run must not write any vectors."""
 
-    def test_dry_run_writes_nothing(self, tmp_path):
+    def test_dry_run_writes_nothing(self, tmp_path, _patch_cli_settings):
         """After --dry-run, the backend's point count stays the same."""
         settings = _settings(tmp_path)
 
@@ -228,7 +247,7 @@ class TestDryRun:
 class TestForceFlag:
     """--force allows overwriting a non-empty destination."""
 
-    def test_refuses_without_force_when_destination_has_data(self, tmp_path):
+    def test_refuses_without_force_when_destination_has_data(self, tmp_path, _patch_cli_settings):
         """Without --force the command exits cleanly with a refusal message."""
         settings = _settings(tmp_path)
 
@@ -241,15 +260,14 @@ class TestForceFlag:
             main,
             # No --force: destination is non-empty → should refuse
             ["migrate-storage", "--from", "sqlite_vec", "--to", "sqlite_vec"],
-            catch_exceptions=False,
             env=_cli_env(tmp_path),
         )
-        # Command exits cleanly (exit 0) but prints a refusal message
-        assert result.exit_code == 0, result.output
+        # Non-zero exit so shell scripts that check $? notice the refusal.
+        assert result.exit_code != 0, result.output
         output_lower = result.output.lower()
         assert "force" in output_lower or "already contains" in output_lower
 
-    def test_succeeds_with_force(self, tmp_path):
+    def test_succeeds_with_force(self, tmp_path, _patch_cli_settings):
         """With --force the command copies everything even when dest has data."""
         settings = _settings(tmp_path)
 
