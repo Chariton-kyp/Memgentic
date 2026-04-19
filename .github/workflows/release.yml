@@ -1,10 +1,13 @@
-name: Release to PyPI
+name: Release memgentic to PyPI
 
-# Fires on every vX.Y.Z tag push.
+# Fires on every vX.Y.Z tag push. Publishes ONLY the `memgentic` core
+# package. `memgentic-api` ships via release-api.yml on `api-v*` tags.
+#
 # Trusted Publishing (OIDC) — no PAT or password secret required.
-# Precondition: PyPI project "memgentic" must have a Trusted Publisher
-# configured for: owner=Chariton-kyp, repo=Memgentic,
-# workflow=release.yml, environment=release.
+# Precondition: PyPI project "memgentic" has a Trusted Publisher
+# configured for owner=Chariton-kyp, repo=Memgentic,
+# workflow=release.yml, environment=pypi. Do not rename either without
+# updating the PyPI publisher first — the OIDC claim check is strict.
 on:
   push:
     tags:
@@ -89,16 +92,8 @@ jobs:
             --ignore=memgentic/tests/test_pipeline.py \
             --ignore=memgentic/tests/test_init_wizard.py
 
-      - name: Run API tests
-        timeout-minutes: 5
-        run: |
-          uv run pytest memgentic-api/tests/ -q \
-            --timeout=60 --timeout-method=thread
-
-      - name: Build packages (workspace — both memgentic + memgentic-api)
-        run: |
-          uv build --package memgentic --out-dir dist/
-          uv build --package memgentic-api --out-dir dist/
+      - name: Build memgentic (core only — memgentic-api ships via release-api.yml)
+        run: uv build --package memgentic --out-dir dist/
 
       - name: List dist artifacts
         run: ls -lh dist/
@@ -118,7 +113,7 @@ jobs:
       id-token: write      # OIDC token for Trusted Publishing
       attestations: write  # build provenance attestation
     environment:
-      name: release        # must match PyPI trusted-publisher environment name
+      name: pypi           # must match PyPI trusted-publisher environment name
       url: https://pypi.org/p/memgentic
     steps:
       - uses: actions/download-artifact@v4
@@ -160,15 +155,19 @@ jobs:
           TAG="${GITHUB_REF_NAME}"       # v0.5.0
           VERSION="${TAG#v}"             # 0.5.0
 
-          # Parse the CHANGELOG for the matching ## [X.Y.Z] section.
-          # Captures everything between this heading and the next ## heading.
-          BODY=$(python3 - <<'PYEOF'
-          import re, sys, pathlib
+          # Pass VERSION as argv[1] so the quoted heredoc doesn't swallow
+          # the shell variable expansion. Otherwise `version = "$VERSION"`
+          # stays literal and the regex never matches.
+          BODY=$(python3 - "$VERSION" <<'PYEOF'
+          import re
+          import sys
+          import pathlib
 
-          version = "$VERSION"
+          version = sys.argv[1]
           text = pathlib.Path("CHANGELOG.md").read_text()
 
           # Match "## [0.5.0]" with optional date / title suffix, capture body
+          # up to (but not including) the next "## " heading or end-of-file.
           pattern = (
               r"^##\s+\[" + re.escape(version) + r"\][^\n]*\n"
               r"(.*?)"
