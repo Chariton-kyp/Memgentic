@@ -1606,6 +1606,228 @@ def re_embed(model_name: str | None, reembed_all: bool, batch_size: int):
     asyncio.run(_run())
 
 
+@main.command("migrate-storage")
+@click.option(
+    "--from",
+    "from_backend",
+    required=True,
+    type=click.Choice([b.value for b in StorageBackend], case_sensitive=False),
+    help="Source backend to read memories from.",
+)
+@click.option(
+    "--to",
+    "to_backend",
+    required=True,
+    type=click.Choice([b.value for b in StorageBackend], case_sensitive=False),
+    help="Destination backend to write memories into.",
+)
+@click.option(
+    "--batch-size",
+    default=100,
+    show_default=True,
+    help="Number of (id, embedding) pairs to copy per batch.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    default=False,
+    help="Print what would be migrated without writing anything.",
+)
+@click.option(
+    "--force",
+    is_flag=True,
+    default=False,
+    help="Overwrite destination even if it already contains vectors.",
+)
+def migrate_storage(
+    from_backend: str,
+    to_backend: str,
+    batch_size: int,
+    dry_run: bool,
+    force: bool,
+) -> None:
+    """Copy every memory + embedding from one vector backend to another.
+
+    \b
+    The metadata (SQLite) is shared and untouched — only vectors are copied.
+    The source backend is never modified; migration is purely additive.
+
+    \b
+    Examples:
+      memgentic migrate-storage --from qdrant_local --to sqlite_vec
+      memgentic migrate-storage --from sqlite_vec --to sqlite_vec --dry-run
+    """
+
+    async def _run() -> None:
+        from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
+
+        from memgentic.storage.metadata import MetadataStore
+        from memgentic.storage.vectors import VectorStore
+
+        src_backend_enum = StorageBackend(from_backend)
+        dst_backend_enum = StorageBackend(to_backend)
+
+        # Build ad-hoc settings for each backend, inheriting everything except
+        # the storage_backend field.
+        src_settings = settings.model_copy(update={"storage_backend": src_backend_enum})
+        dst_settings = settings.model_copy(update={"storage_backend": dst_backend_enum})
+
+        # Shared metadata store (same SQLite file for both backends).
+        metadata_store = MetadataStore(settings.sqlite_path)
+        src_store = VectorStore(src_settings)
+        dst_store = VectorStore(dst_settings)
+
+        await metadata_store.initialize()
+
+        try:
+            # Initialize source — read the existing pin to validate.
+            await src_store.initialize(metadata_store)
+
+            # Check destination for existing data and refuse unless --force.
+            if not dry_run:
+                # Initialize the destination without passing metadata_store so
+                # we don't accidentally re-pin or validate the src pin.
+                await dst_store.initialize()
+                dst_info = await dst_store.get_collection_info()
+                dst_count = dst_info.get("points_count", 0) or 0
+                if dst_count > 0 and not force:
+                    console.print(
+                        f"[red]Destination '{to_backend}' already contains "
+                        f"{dst_count} vector(s).[/]\n"
+                        "[yellow]Pass --force to overwrite, or choose an empty backend.[/]"
+                    )
+                    return
+
+            # Count source memories for the progress bar.
+            all_memories = await metadata_store.get_memories_by_filter(limit=1_000_000)
+            total = len(all_memories)
+
+            if total == 0:
+                console.print("[yellow]No memories found in source — nothing to migrate.[/]")
+                return
+
+            if dry_run:
+                console.print(
+                    f"[cyan]Dry run:[/] would migrate [bold]{total}[/] "
+                    f"memories from [bold]{from_backend}[/] → [bold]{to_backend}[/]."
+                )
+                return
+
+            console.print(
+                f"[cyan]Migrating [bold]{total}[/] memories from "
+                f"[bold]{from_backend}[/] → [bold]{to_backend}[/]...[/]"
+            )
+
+            # Build an id→memory lookup so we can pass Memory objects to upsert_memories_batch.
+            memory_by_id = {m.id: m for m in all_memories}
+
+            migrated = 0
+            failed = 0
+
+            with Progress(
+                TextColumn("[bold blue]{task.description}"),
+                BarColumn(),
+                TextColumn("{task.completed}/{task.total}"),
+                TimeElapsedColumn(),
+                console=console,
+            ) as progress:
+                task = progress.add_task("Migrating", total=total)
+
+                batch_memories: list = []
+                batch_embeddings: list = []
+
+                try:
+                    async for mem_id, embedding in src_store.all_points():
+                        mem = memory_by_id.get(mem_id)
+                        if mem is None:
+                            # Vector exists in source but not in metadata — skip orphan.
+                            logger.warning("migrate_storage.orphan_vector", id=mem_id)
+                            continue
+
+                        batch_memories.append(mem)
+                        batch_embeddings.append(embedding)
+
+                        if len(batch_memories) >= batch_size:
+                            try:
+                                await dst_store.upsert_memories_batch(
+                                    batch_memories, batch_embeddings
+                                )
+                                migrated += len(batch_memories)
+                            except Exception as exc:
+                                logger.error(
+                                    "migrate_storage.batch_failed",
+                                    error=str(exc),
+                                    count=len(batch_memories),
+                                )
+                                failed += len(batch_memories)
+                                console.print(
+                                    f"\n[red]Batch failed: {exc}[/]\n"
+                                    "[yellow]Destination may be in a partial state. "
+                                    "Delete the partial data and retry.[/]"
+                                )
+                                return
+                            finally:
+                                progress.advance(task, len(batch_memories))
+                                batch_memories = []
+                                batch_embeddings = []
+
+                    # Flush any remaining items.
+                    if batch_memories:
+                        try:
+                            await dst_store.upsert_memories_batch(batch_memories, batch_embeddings)
+                            migrated += len(batch_memories)
+                        except Exception as exc:
+                            logger.error(
+                                "migrate_storage.final_batch_failed",
+                                error=str(exc),
+                                count=len(batch_memories),
+                            )
+                            failed += len(batch_memories)
+                            console.print(
+                                f"\n[red]Final batch failed: {exc}[/]\n"
+                                "[yellow]Destination may be in a partial state. "
+                                "Delete the partial data and retry.[/]"
+                            )
+                            return
+                        finally:
+                            progress.advance(task, len(batch_memories))
+
+                except Exception as exc:
+                    logger.error("migrate_storage.stream_failed", error=str(exc))
+                    console.print(
+                        f"\n[red]Migration stream error: {exc}[/]\n"
+                        "[yellow]Destination may be in a partial state. "
+                        "Delete the partial data and retry.[/]"
+                    )
+                    return
+
+            # Safety pin check: destination pin should match source.
+            src_pin = await metadata_store.get_embedding_config()
+            if src_pin:
+                dst_info_final = await dst_store.get_collection_info()
+                dst_count_final = dst_info_final.get("points_count", 0) or 0
+                if dst_count_final != migrated:
+                    console.print(
+                        f"[yellow]Warning: destination has {dst_count_final} points "
+                        f"but {migrated} were written — possible partial overlap from --force.[/]"
+                    )
+
+            console.print(
+                f"\n[bold green]Migration complete![/] "
+                f"{migrated} migrated, {failed} failed.\n"
+                f"[dim]Tip: update MEMGENTIC_STORAGE_BACKEND={to_backend} in your .env "
+                "to switch permanently.[/]"
+            )
+
+        finally:
+            await src_store.close()
+            if not dry_run:
+                await dst_store.close()
+            await metadata_store.close()
+
+    asyncio.run(_run())
+
+
 def _pull_ollama_model(model_name: str) -> None:
     """Try to pull an Ollama model (Docker first, then local)."""
     import subprocess as sp

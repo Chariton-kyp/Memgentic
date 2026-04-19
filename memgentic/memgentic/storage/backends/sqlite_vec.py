@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import struct
+from collections.abc import AsyncIterator
 from typing import Any
 
 import aiosqlite
@@ -379,6 +380,23 @@ class SqliteVecBackend:
             "points_count": count,
             "status": "green",
         }
+
+    async def all_points(self) -> AsyncIterator[tuple[str, list[float]]]:
+        """Yield every (id, embedding) pair stored in the vec table.
+
+        Used by ``memgentic migrate-storage`` to copy vectors without re-embedding.
+        Rows are streamed via the aiosqlite cursor to avoid loading the entire
+        collection into memory at once.
+        """
+        if self._conn is None:
+            raise StorageError("SqliteVecBackend not initialized")
+        dim = self._settings.embedding_dimensions
+        async with self._conn.execute(f"SELECT id, embedding FROM {self.VEC_TABLE}") as cur:
+            async for row in cur:
+                mid, raw = row
+                # sqlite-vec stores vectors as little-endian float32 bytes
+                floats = list(struct.unpack(f"<{dim}f", raw))
+                yield str(mid), floats
 
     # --- filter translation --------------------------------------------
 

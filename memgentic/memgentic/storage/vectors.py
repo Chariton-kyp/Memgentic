@@ -8,6 +8,7 @@ instantiates it and forwards every call.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 import structlog
@@ -350,6 +351,45 @@ class VectorStore:
             collection_name=self._settings.collection_name,
             points_selector=models.PointIdsList(points=[memory_id]),
         )
+
+    async def all_points(self) -> AsyncIterator[tuple[str, list[float]]]:
+        """Yield every (id, embedding) pair from the underlying backend.
+
+        Used by ``memgentic migrate-storage`` to copy vectors between backends
+        without re-embedding.
+        """
+        if self._backend is not None:
+            async for point in self._backend.all_points():
+                yield point
+            return
+
+        if not self._client:
+            raise StorageError("VectorStore not initialized")
+
+        # Qdrant scroll API: page through all points with_vectors=True
+        offset = None
+        while True:
+            result, next_offset = await self._client.scroll(
+                collection_name=self._settings.collection_name,
+                limit=256,
+                offset=offset,
+                with_vectors=True,
+            )
+            for point in result:
+                vec = point.vector
+                if vec is None:
+                    continue
+                # Named vectors (dict) — Memgentic always uses unnamed vectors
+                if isinstance(vec, dict):
+                    vec = next(iter(vec.values()))
+                # ``VectorStruct`` from qdrant-client is a union type; for our
+                # unnamed-vector collections the runtime value is a sequence
+                # of floats. Rebuild as a plain list so the generator matches
+                # its declared AsyncIterator[tuple[str, list[float]]] type.
+                yield str(point.id), [float(x) for x in vec]  # type: ignore[union-attr]
+            if next_offset is None:
+                break
+            offset = next_offset
 
     async def get_collection_info(self) -> dict:
         """Get collection statistics."""
