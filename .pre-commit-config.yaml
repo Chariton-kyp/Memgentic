@@ -25,6 +25,7 @@ repos:
         args: [--maxkb=500]
       - id: check-merge-conflict
       - id: detect-private-key
+        exclude: '^memgentic/tests/test_scrubber\.py$'
       - id: mixed-line-ending
         args: [--fix=lf]
 
