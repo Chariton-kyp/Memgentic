@@ -6,12 +6,75 @@ on:
       - "api-v*"
 
 permissions:
-  id-token: write
-  contents: write
-  attestations: write
+  contents: read   # base — jobs escalate as needed
+
+concurrency:
+  group: release-api-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  # ── 1. Version guard ────────────────────────────────────────────────
+  # Fail fast if the pushed tag (e.g. api-v0.7.0) doesn't match
+  # memgentic-api/pyproject.toml — prevents publishing the wrong version.
+  verify-version:
+    name: Verify tag matches pyproject.toml
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"               # api-v0.7.0
+          VERSION="${TAG#api-v}"                 # 0.7.0
+          FILE_VERSION=$(python3 -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('memgentic-api/pyproject.toml').read_text())
+          print(data['project']['version'])
+          ")
+          INIT_VERSION=$(python3 -c "
+          import re, pathlib
+          text = pathlib.Path('memgentic-api/memgentic_api/__init__.py').read_text()
+          m = re.search(r'__version__\s*=\s*[\x22\x27]([^\x22\x27]+)[\x22\x27]', text)
+          print(m.group(1) if m else '')
+          ")
+          echo "Tag version : $VERSION"
+          echo "pyproject   : $FILE_VERSION"
+          echo "__init__.py : $INIT_VERSION"
+          if [ "$VERSION" != "$FILE_VERSION" ] || [ "$VERSION" != "$INIT_VERSION" ]; then
+            echo "::error::Tag '$TAG' does not match in-tree version. Aborting."
+            exit 1
+          fi
+
+      - name: Check version not already on PyPI
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#api-v}"
+          python3 - "$VERSION" <<'PYEOF'
+          import sys, json, urllib.request, urllib.error
+          version = sys.argv[1]
+          try:
+              with urllib.request.urlopen(
+                  "https://pypi.org/pypi/memgentic-api/json", timeout=15
+              ) as r:
+                  data = json.load(r)
+              if version in data.get("releases", {}):
+                  sys.stderr.write(
+                      f"::error::memgentic-api=={version} already on PyPI. Refusing to re-publish.\n"
+                  )
+                  sys.exit(1)
+          except urllib.error.HTTPError as e:
+              # 404 on first publish is fine.
+              if e.code != 404:
+                  raise
+          print(f"OK — memgentic-api=={version} not yet on PyPI")
+          PYEOF
+
+  # ── 2. Build ────────────────────────────────────────────────────────
   build:
+    name: Build sdist + wheel + SBOM
+    needs: verify-version
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -20,7 +83,7 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v3
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
 
       - name: Set up Python
         run: uv python install 3.12
@@ -67,14 +130,16 @@ jobs:
           path: memgentic-api/sbom/
           if-no-files-found: error
 
+  # ── 3. Publish ──────────────────────────────────────────────────────
   publish:
+    name: Publish to PyPI (Trusted Publishing)
     needs: build
     runs-on: ubuntu-24.04
     permissions:
-      id-token: write
-      attestations: write
+      id-token: write      # OIDC for Trusted Publishing
+      attestations: write  # SLSA provenance
     environment:
-      name: pypi-api
+      name: pypi-api       # must match PyPI trusted-publisher environment
       url: https://pypi.org/p/memgentic-api
     steps:
       - uses: actions/download-artifact@v4
@@ -95,7 +160,12 @@ jobs:
           packages-dir: dist/
           attestations: true
 
-  release:
+  # ── 4. GitHub Release ───────────────────────────────────────────────
+  # Extracts the matching ## [X.Y.Z] section from memgentic-api/CHANGELOG.md
+  # (maintained by release-please) so the release body matches exactly what
+  # release-please generated, instead of a re-computed "auto" note.
+  github-release:
+    name: Create GitHub Release
     needs: publish
     runs-on: ubuntu-24.04
     permissions:
@@ -120,9 +190,52 @@ jobs:
           cp sbom/*.cdx.json release-assets/
           ls -lh release-assets/
 
+      - name: Extract CHANGELOG section
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"         # api-v0.6.0
+          VERSION="${TAG#api-v}"           # 0.6.0
+
+          # Try package-local CHANGELOG first (written by release-please);
+          # fall back to the root CHANGELOG.md if the per-package one is
+          # absent (monorepo linked-version config may emit either shape).
+          CHANGELOG_PATH="memgentic-api/CHANGELOG.md"
+          if [ ! -f "$CHANGELOG_PATH" ]; then
+            CHANGELOG_PATH="CHANGELOG.md"
+          fi
+
+          BODY=$(python3 - "$VERSION" "$CHANGELOG_PATH" <<'PYEOF'
+          import re, sys, pathlib
+          version = sys.argv[1]
+          path = pathlib.Path(sys.argv[2])
+          text = path.read_text() if path.exists() else ""
+          pattern = (
+              r"^##\s+\[" + re.escape(version) + r"\][^\n]*\n"
+              r"(.*?)"
+              r"(?=^##\s|\Z)"
+          )
+          m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+          if m:
+              body = m.group(1).strip()
+              print(body if body else "See CHANGELOG.md")
+          else:
+              print("See CHANGELOG.md")
+          PYEOF
+          )
+
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
-          generate_release_notes: true
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          body: ${{ steps.changelog.outputs.body }}
           files: release-assets/*
           fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

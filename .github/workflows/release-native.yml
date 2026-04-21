@@ -13,24 +13,83 @@ on:
       - "native-v*"
 
 permissions:
-  id-token: write  # required for PyPI trusted publishing
-  contents: read
+  contents: read   # base — jobs escalate as needed
+
+concurrency:
+  group: release-native-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
+  # ── 1. Version guard ────────────────────────────────────────────────
+  verify-version:
+    name: Verify tag matches native Cargo.toml + pyproject.toml
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Check version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"             # native-v0.7.0
+          VERSION="${TAG#native-v}"            # 0.7.0
+          CARGO_VERSION=$(python3 -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('memgentic-native/Cargo.toml').read_text())
+          print(data['package']['version'])
+          ")
+          PY_VERSION=$(python3 -c "
+          import tomllib, pathlib
+          data = tomllib.loads(pathlib.Path('memgentic-native/pyproject.toml').read_text())
+          print(data['project']['version'])
+          ")
+          echo "Tag version  : $VERSION"
+          echo "Cargo.toml   : $CARGO_VERSION"
+          echo "pyproject    : $PY_VERSION"
+          if [ "$VERSION" != "$CARGO_VERSION" ] || [ "$VERSION" != "$PY_VERSION" ]; then
+            echo "::error::Tag '$TAG' does not match in-tree version. Aborting."
+            exit 1
+          fi
+
+      - name: Check version not already on PyPI
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#native-v}"
+          python3 - "$VERSION" <<'PYEOF'
+          import sys, json, urllib.request, urllib.error
+          version = sys.argv[1]
+          try:
+              with urllib.request.urlopen(
+                  "https://pypi.org/pypi/memgentic-native/json", timeout=15
+              ) as r:
+                  data = json.load(r)
+              if version in data.get("releases", {}):
+                  sys.stderr.write(
+                      f"::error::memgentic-native=={version} already on PyPI. Refusing to re-publish.\n"
+                  )
+                  sys.exit(1)
+          except urllib.error.HTTPError as e:
+              if e.code != 404:
+                  raise
+          print(f"OK — memgentic-native=={version} not yet on PyPI")
+          PYEOF
+
+  # ── 2. Build wheels on each platform ───────────────────────────────
   linux:
     name: Build Linux wheels
+    needs: verify-version
     runs-on: ubuntu-24.04
     strategy:
       matrix:
         target: [x86_64, aarch64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: memgentic-native
           target: ${{ matrix.target }}
@@ -43,18 +102,19 @@ jobs:
 
   macos:
     name: Build macOS wheels
-    runs-on: macos-latest
+    needs: verify-version
+    runs-on: macos-14
     strategy:
       matrix:
         target: [x86_64, aarch64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: memgentic-native
           target: ${{ matrix.target }}
@@ -66,18 +126,19 @@ jobs:
 
   windows:
     name: Build Windows wheels
-    runs-on: windows-latest
+    needs: verify-version
+    runs-on: windows-2022
     strategy:
       matrix:
         target: [x64]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
       - name: Build wheels with maturin
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: memgentic-native
           target: ${{ matrix.target }}
@@ -89,11 +150,12 @@ jobs:
 
   sdist:
     name: Build sdist
+    needs: verify-version
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - name: Build sdist
-        uses: PyO3/maturin-action@v1
+        uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
           working-directory: memgentic-native
           command: sdist
@@ -108,7 +170,7 @@ jobs:
     needs: sdist
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -179,6 +241,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
       - uses: actions/download-artifact@v4
         with:
           path: artifacts/
@@ -187,11 +250,45 @@ jobs:
           mkdir -p release-assets
           find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" -o -name "*.cdx.json" \) -exec cp {} release-assets/ \;
           ls -lh release-assets/
+      - name: Extract CHANGELOG section
+        id: changelog
+        run: |
+          TAG="${GITHUB_REF_NAME}"         # native-v0.6.0
+          VERSION="${TAG#native-v}"        # 0.6.0
+          CHANGELOG_PATH="memgentic-native/CHANGELOG.md"
+          if [ ! -f "$CHANGELOG_PATH" ]; then
+            CHANGELOG_PATH="CHANGELOG.md"
+          fi
+          BODY=$(python3 - "$VERSION" "$CHANGELOG_PATH" <<'PYEOF'
+          import re, sys, pathlib
+          version = sys.argv[1]
+          path = pathlib.Path(sys.argv[2])
+          text = path.read_text() if path.exists() else ""
+          pattern = (
+              r"^##\s+\[" + re.escape(version) + r"\][^\n]*\n"
+              r"(.*?)"
+              r"(?=^##\s|\Z)"
+          )
+          m = re.search(pattern, text, re.MULTILINE | re.DOTALL)
+          if m:
+              body = m.group(1).strip()
+              print(body if body else "See CHANGELOG.md")
+          else:
+              print("See CHANGELOG.md")
+          PYEOF
+          )
+          {
+            echo "body<<CHANGELOG_EOF"
+            echo "$BODY"
+            echo "CHANGELOG_EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
-          generate_release_notes: true
+          body: ${{ steps.changelog.outputs.body }}
           files: release-assets/*
           fail_on_unmatched_files: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

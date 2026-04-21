@@ -12,7 +12,7 @@ permissions:
 jobs:
   pre-commit:
     name: Run pre-commit on changed files
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -22,4 +22,4 @@ jobs:
         with:
           python-version: '3.12'
 
-      - uses: pre-commit/action@v3.0.1
+      - uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
