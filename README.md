@@ -151,6 +151,37 @@ tags: [deploy, ops]
 
 ---
 
+## How Memgentic compares
+
+Memgentic sits in the **end-user cross-tool memory** space — built for people who use 3+ AI tools daily and want one brain across all of them. That's a different market than API-first agent-memory backends like Mem0, Letta, or Zep (those target developers building AI products, not developers using AI products).
+
+The closest direct neighbors are **claude-mem** and **MemPalace**:
+
+| Capability | Memgentic | claude-mem | MemPalace |
+|---|---|---|---|
+| License | **Apache 2.0** | AGPL-3.0 + PolyForm NC | MIT |
+| AI tools captured | **10+** incl. ChatGPT, Aider, Codex CLI, Antigravity, Copilot | 5–6 coding tools | 5 |
+| ChatGPT history import | **✓** | ✗ | ✓ |
+| Knowledge graph (entity-level) | **✓** NetworkX / petgraph | ✗ | ✗ |
+| Skills distribution (Agent Skills std) | **✓** 26+ tools via filesystem | ✗ | ✗ |
+| Web dashboard | Next.js 16 full CRUD | Stream viewer | Basic |
+| REST API | 11 routes, auth-ready FastAPI | Internal, no auth | Limited |
+| MCP tools exposed | 13 | 3 (progressive disclosure) | ~5 |
+| Native acceleration | **✓** Rust/PyO3 (5–50× on hot paths) | ✗ | ✗ |
+| Source provenance | Per-memory (platform + method + session + timestamp) | Per-session | Limited |
+| Capture model | Passive file watcher + hooks | Lifecycle hooks (Claude Code–first) | MCP only |
+| Security model | Local-first, no exposed HTTP by default | HTTP API on `:37777` (no auth — audited HIGH risk Feb 2026) | Local-first |
+
+**When to pick claude-mem:** you live inside Claude Code and only Claude Code. Its progressive-disclosure retrieval is clever and its 46K-star ecosystem is real.
+
+**When to pick MemPalace:** you want cross-tool memory and MIT fits your distribution policy.
+
+**When to pick Memgentic:** you use multiple AI tools, you want Apache 2.0 for enterprise/team use, you care about a real web dashboard + REST API + knowledge graph + skills distribution, and you don't want an unauthenticated HTTP port open on your laptop.
+
+For the full breakdown — including what we learned from the competitive landscape and why our architecture looks the way it does — see [docs/why-memgentic.md](docs/why-memgentic.md).
+
+---
+
 ## CLI Usage
 
 ```bash
@@ -288,7 +319,7 @@ See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers.
 
 ## Roadmap
 
-**Current: v0.5.0 — Zero-config Local**
+**Current: v0.6.0 — Zero-config Local + Release Automation**
 
 - [x] M1: Core memory engine
 - [x] M2: 11+ adapter ecosystem
@@ -298,11 +329,12 @@ See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers.
 - [x] M6: Enhanced dashboard + collections + uploads + pins
 - [x] M7: Universal skills system + GitHub import + LLM extraction
 - [x] M8: Real-time activity feed + ingestion tracking
-- [x] **M9: Zero-config local (sqlite-vec backend, `serve --watch`, embedding safety pin)**
-- [ ] M10: Authentication + workspaces + teams (Phase C)
-- [ ] M11: PostgreSQL + pgvector backend (Phase C)
-- [ ] M12: Desktop app (Electron) (Phase D)
-- [ ] M13: Browser extension
+- [x] M9: Zero-config local (sqlite-vec backend, `serve --watch`, embedding safety pin)
+- [x] **M10: Release automation (release-please + linked versions + Conventional Commits + SBOM + SLSA L3)**
+- [ ] M11: Authentication + workspaces + teams (Phase C)
+- [ ] M12: PostgreSQL + pgvector backend (Phase C)
+- [ ] M13: Desktop app (Electron) (Phase D)
+- [ ] M14: Browser extension
 
 See [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md) for the full plan.
 
