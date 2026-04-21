@@ -30,6 +30,11 @@ select = ["E", "F", "I", "N", "UP", "B", "SIM"]
 
 [tool.ruff.lint.per-file-ignores]
 "memgentic-native/*" = ["E", "F"]  # Rust crate — no Python to lint
+"benchmarks/tests/*" = ["E501"]  # Allow long lines in benchmark test fixtures
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+# Root-level pytest config is used when the benchmarks suite is invoked from
+# the repo root (`uv run pytest benchmarks/tests`). The per-package pytest
+# configs in memgentic/ and memgentic-api/ still take precedence when tests
+# are invoked from inside those directories.
