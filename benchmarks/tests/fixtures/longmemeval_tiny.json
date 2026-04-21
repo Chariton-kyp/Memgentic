@@ -1,0 +1,35 @@
+[
+    {
+        "question_id": "q-001",
+        "question": "What vector store did we pick for Memgentic?",
+        "question_type": "single-session-user",
+        "haystack_session_ids": ["s-alpha", "s-beta"],
+        "haystack_sessions": [
+            [
+                {"role": "user", "content": "We decided to pick sqlite-vec for the default backend because it is zero-config and multi-process safe."},
+                {"role": "assistant", "content": "Great. I've logged the decision and updated the docs."}
+            ],
+            [
+                {"role": "user", "content": "Today we cleaned up the pipeline test suite."},
+                {"role": "assistant", "content": "Nice — regressions should be harder now."}
+            ]
+        ],
+        "answer_session_ids": ["s-alpha"]
+    },
+    {
+        "question_id": "q-002",
+        "question": "Which embedding model is the default?",
+        "question_type": "single-session-user",
+        "haystack_session_ids": ["s-gamma", "s-delta"],
+        "haystack_sessions": [
+            [
+                {"role": "user", "content": "Weekend project: reorganise the dashboard sidebar."}
+            ],
+            [
+                {"role": "user", "content": "The embedding model is Qwen3-Embedding-0.6B served via Ollama with 768d MRL truncation."},
+                {"role": "assistant", "content": "Acknowledged."}
+            ]
+        ],
+        "answer_session_ids": ["s-delta"]
+    }
+]
