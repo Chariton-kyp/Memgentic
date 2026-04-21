@@ -10,9 +10,10 @@ ConvoMem, MemBench, and Cross-Tool Transfer without branching.
 The ``profile`` argument accepts ``"raw"``, ``"enriched"``, ``"dual"`` and
 a small set of synonyms documented in :meth:`BenchmarkHarness.__init__`.
 Today it only gates LLM-backed classification (off for ``raw``, on
-otherwise). When the Capture Profiles work lands (see
-``memgentic-strategy/07`` for the full plan), the harness will wire in
-the real profile-selection hook without runner changes.
+otherwise). Capture Profiles have since landed end-to-end in the
+pipeline; wiring the harness to route through the ingestion pipeline's
+``capture_profile`` argument is a Week-4 follow-up tracked in the
+project roadmap.
 """
 
 from __future__ import annotations

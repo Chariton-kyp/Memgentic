@@ -39,8 +39,10 @@ Memgentic from a pinned commit and the embedding model from a pinned
 Ollama tag. Re-running the benchmark with the same image on comparable
 hardware should produce numbers within ±0.5 percentage points.
 
-See `memgentic-strategy/11-PLAN-BENCHMARKS.md` §8 for the detailed
-rationale behind each of these requirements.
+The rationale behind each of these requirements (pinned image,
+pinned model, seed, required report fields) is that benchmark
+numbers are only useful if a third party can reproduce them on
+comparable hardware and get the same answer.
 
 ## Results
 

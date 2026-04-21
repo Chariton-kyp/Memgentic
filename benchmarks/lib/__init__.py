@@ -1,7 +1,7 @@
 """Shared benchmark harness, corpus loaders, and scorers.
 
-See ``memgentic-strategy/11-PLAN-BENCHMARKS.md`` for the full methodology
-(maintainer-only notes; not included in the public repo).
+See :doc:`/benchmarks/BENCHMARKS` for the public methodology and
+reproducibility contract.
 """
 
 from benchmarks.lib.harness import BenchmarkHarness

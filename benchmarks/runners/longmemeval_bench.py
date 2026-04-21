@@ -1,7 +1,6 @@
 """LongMemEval runner.
 
-Implements the §6 pseudo-code from ``memgentic-strategy/11-PLAN-BENCHMARKS.md``.
-The runner is a thin shell over :class:`benchmarks.lib.harness.BenchmarkHarness`
+A thin shell over :class:`benchmarks.lib.harness.BenchmarkHarness`
 plus :func:`benchmarks.lib.corpus_loader.load_longmemeval`; everything
 reusable lives in those modules so the same pattern drives LoCoMo,
 ConvoMem, MemBench and Cross-Tool Transfer in later PRs.
