@@ -25,6 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { CaptureProfileSelector } from "@/components/capture-profile-selector";
+import type { CaptureProfile } from "@/lib/types";
 
 function TopicInput({
   topics,
@@ -103,6 +105,7 @@ function WriteTab({ onSuccess }: { onSuccess: () => void }) {
   const [content, setContent] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
   const [contentType, setContentType] = useState<string>("fact");
+  const [captureProfile, setCaptureProfile] = useState<CaptureProfile>("enriched");
   const createMemory = useCreateMemory();
 
   const handleSave = () => {
@@ -113,6 +116,7 @@ function WriteTab({ onSuccess }: { onSuccess: () => void }) {
         content_type: contentType,
         topics,
         source: "dashboard",
+        capture_profile: captureProfile,
       },
       {
         onSuccess: () => {
@@ -150,6 +154,14 @@ function WriteTab({ onSuccess }: { onSuccess: () => void }) {
           </SelectContent>
         </Select>
       </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Capture Profile</label>
+        <CaptureProfileSelector
+          compact
+          value={captureProfile}
+          onChange={setCaptureProfile}
+        />
+      </div>
       <Button
         onClick={handleSave}
         disabled={!content.trim() || createMemory.isPending}
@@ -166,6 +178,10 @@ function FileTab({ onSuccess }: { onSuccess: () => void }) {
   const [file, setFile] = useState<File | null>(null);
   const [topics, setTopics] = useState<string[]>([]);
   const [contentType, setContentType] = useState<string>("fact");
+  // NOTE: /api/v1/upload/file does not accept capture_profile yet (follow-up).
+  // Selector is shown here for forward-compat + plan §10 parity; it falls back
+  // to whatever the server-side default is for this upload.
+  const [captureProfile, setCaptureProfile] = useState<CaptureProfile>("enriched");
   const uploadFile = useUploadFile();
 
   const onDrop = useCallback((acceptedFiles: File[]) => {
@@ -258,6 +274,17 @@ function FileTab({ onSuccess }: { onSuccess: () => void }) {
           </SelectContent>
         </Select>
       </div>
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Capture Profile</label>
+        <CaptureProfileSelector
+          compact
+          value={captureProfile}
+          onChange={setCaptureProfile}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Applies once the upload endpoint accepts per-action profiles.
+        </p>
+      </div>
       <Button
         onClick={handleImport}
         disabled={!file || uploadFile.isPending}
@@ -273,6 +300,7 @@ function FileTab({ onSuccess }: { onSuccess: () => void }) {
 function UrlTab({ onSuccess }: { onSuccess: () => void }) {
   const [url, setUrl] = useState("");
   const [topics, setTopics] = useState<string[]>([]);
+  const [captureProfile, setCaptureProfile] = useState<CaptureProfile>("enriched");
   const [loading, setLoading] = useState(false);
 
   const handleFetch = async () => {
@@ -303,6 +331,17 @@ function UrlTab({ onSuccess }: { onSuccess: () => void }) {
         />
       </div>
       <TopicInput topics={topics} onChange={setTopics} />
+      <div className="space-y-2">
+        <label className="text-sm font-medium">Capture Profile</label>
+        <CaptureProfileSelector
+          compact
+          value={captureProfile}
+          onChange={setCaptureProfile}
+        />
+        <p className="text-[11px] text-muted-foreground">
+          Applies once the upload endpoint accepts per-action profiles.
+        </p>
+      </div>
       <Button
         onClick={handleFetch}
         disabled={!url.trim() || loading}

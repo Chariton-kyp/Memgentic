@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -42,6 +43,8 @@ class MemoryResponse(BaseModel):
     source: SourceResponse
     is_pinned: bool = False
     pinned_at: datetime | None = None
+    capture_profile: Literal["raw", "enriched", "dual"] = "enriched"
+    dual_sibling_id: str | None = None
 
 
 class MemoryListResponse(BaseModel):
@@ -127,6 +130,33 @@ class CreateMemoryRequest(BaseModel):
     topics: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     source: str = Field(default="unknown")
+    capture_profile: Literal["raw", "enriched", "dual"] | None = Field(
+        default=None,
+        description=(
+            "Override the configured default capture profile for this write. "
+            "'raw' stores verbatim with no LLM enrichment; 'dual' writes a "
+            "paired raw+enriched sibling set."
+        ),
+    )
+
+
+# --- Settings (runtime-mutable) ---
+
+
+class CaptureProfileSettingResponse(BaseModel):
+    """Current default capture profile."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    profile: Literal["raw", "enriched", "dual"]
+
+
+class UpdateCaptureProfileRequest(BaseModel):
+    """Change the default capture profile."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    profile: Literal["raw", "enriched", "dual"]
 
 
 class UpdateMemoryRequest(BaseModel):

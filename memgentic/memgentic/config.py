@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 from pathlib import Path
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -145,6 +146,17 @@ class MemgenticSettings(BaseSettings):
     enable_corroboration: bool = Field(
         default=True,
         description="Boost confidence when multiple platforms confirm the same fact",
+    )
+    default_capture_profile: Literal["raw", "enriched", "dual"] = Field(
+        default="enriched",
+        description=(
+            "Default capture profile for new memories when the ingestion call "
+            "does not specify one. 'raw' stores verbatim chunks with no LLM "
+            "enrichment. 'enriched' (default) runs the full intelligence "
+            "pipeline. 'dual' writes both rows paired via dual_sibling_id "
+            "(2x storage). Can also be overridden at runtime; the runtime "
+            "value is persisted in the ``runtime_settings`` table."
+        ),
     )
     corroboration_threshold: float = Field(
         default=0.85,

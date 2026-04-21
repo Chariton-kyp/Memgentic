@@ -31,6 +31,9 @@ from memgentic_api.routes import (
     uploads,
     websocket,
 )
+from memgentic_api.routes import (
+    settings as settings_routes,
+)
 
 logger = structlog.get_logger()
 
@@ -197,6 +200,16 @@ async def lifespan(app: FastAPI):
     await metadata_store.initialize()
     await vector_store.initialize()
 
+    # Hydrate runtime-mutable settings (e.g. default_capture_profile) from the
+    # ``runtime_settings`` table into the in-process ``settings`` singleton so
+    # every subsequent ingestion call sees the latest override.
+    try:
+        stored_profile = await metadata_store.get_runtime_setting("default_capture_profile")
+        if stored_profile in ("raw", "enriched", "dual"):
+            settings.default_capture_profile = stored_profile  # type: ignore[assignment]
+    except Exception as exc:
+        logger.warning("api.runtime_settings_hydrate_failed", error=str(exc))
+
     app.state.metadata_store = metadata_store
     app.state.vector_store = vector_store
     app.state.embedder = embedder
@@ -259,6 +272,7 @@ app.include_router(collections.router, prefix="/api/v1", tags=["collections"], d
 app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"], dependencies=_auth)
 app.include_router(skills.router, prefix="/api/v1", tags=["skills"], dependencies=_auth)
 app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"], dependencies=_auth)
+app.include_router(settings_routes.router, prefix="/api/v1", tags=["settings"], dependencies=_auth)
 app.include_router(persona.router, prefix="/api/v1", tags=["persona"], dependencies=_auth)
 
 # WebSocket — no auth dependency (clients authenticate via initial message if needed)
