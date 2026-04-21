@@ -1447,6 +1447,200 @@ async def memgentic_skill_tool(params: SkillInput, ctx: Context) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Chronograph — bitemporal triple store (query, add, invalidate, timeline, stats)
+# ---------------------------------------------------------------------------
+
+
+class GraphQueryInput(BaseModel):
+    """Input for :func:`memgentic_graph_query`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    entity: str = Field(
+        ...,
+        description="Entity name to query (matches subject and/or object).",
+        min_length=1,
+    )
+    as_of: str | None = Field(
+        default=None,
+        description="Optional ISO 8601 date (YYYY-MM-DD). Defaults to today.",
+    )
+    direction: Literal["subject", "object", "both"] = Field(default="both")
+    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(
+        default="accepted",
+        description=(
+            "Triple status filter. 'accepted' (default) hides proposed rows "
+            "until a user validates them via the dashboard."
+        ),
+    )
+
+
+class GraphAddInput(BaseModel):
+    """Input for :func:`memgentic_graph_add`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    subject: str = Field(..., min_length=1)
+    predicate: str = Field(..., min_length=1)
+    object: str = Field(..., min_length=1)
+    valid_from: str | None = Field(default=None, description="ISO date when the fact began")
+    confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+    source_memory_id: str | None = Field(default=None)
+
+
+class GraphInvalidateInput(BaseModel):
+    """Input for :func:`memgentic_graph_invalidate`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    subject: str = Field(..., min_length=1)
+    predicate: str = Field(..., min_length=1)
+    object: str = Field(..., min_length=1)
+    ended: str | None = Field(
+        default=None,
+        description="Optional ISO date when the fact stopped being true. Defaults to today.",
+    )
+
+
+class GraphTimelineInput(BaseModel):
+    """Input for :func:`memgentic_graph_timeline`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    entity: str | None = Field(default=None, description="Filter to triples about this entity")
+    limit: int = Field(default=100, ge=1, le=500)
+    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(
+        default="accepted"
+    )
+
+
+@mcp.tool(
+    name="memgentic_graph_query",
+    annotations={
+        "title": "Graph Query",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_graph_query_tool(params: GraphQueryInput, ctx: Context) -> dict:
+    """Return currently-valid (or historical) triples touching an entity."""
+    from memgentic.graph import get_chronograph
+
+    cg = await get_chronograph()
+    triples = await cg.query_entity(
+        params.entity,
+        as_of=params.as_of,
+        direction=params.direction,
+        status=params.status,
+    )
+    return {
+        "entity": params.entity,
+        "as_of": params.as_of,
+        "count": len(triples),
+        "triples": [t.to_dict() for t in triples],
+    }
+
+
+@mcp.tool(
+    name="memgentic_graph_add",
+    annotations={
+        "title": "Graph Add",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_graph_add_tool(params: GraphAddInput, ctx: Context) -> dict:
+    """Add a user-accepted triple to the Chronograph."""
+    from memgentic.graph import get_chronograph
+
+    cg = await get_chronograph()
+    triple = await cg.add_triple(
+        subject=params.subject,
+        predicate=params.predicate,
+        object=params.object,
+        valid_from=params.valid_from,
+        confidence=params.confidence,
+        source_memory_id=params.source_memory_id,
+        proposer="user",
+        status="accepted",
+    )
+    return {"triple": triple.to_dict()}
+
+
+@mcp.tool(
+    name="memgentic_graph_invalidate",
+    annotations={
+        "title": "Graph Invalidate",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_graph_invalidate_tool(
+    params: GraphInvalidateInput, ctx: Context
+) -> dict:
+    """Close the validity window for a matching open triple."""
+    from memgentic.graph import get_chronograph
+
+    cg = await get_chronograph()
+    await cg.invalidate(params.subject, params.predicate, params.object, ended=params.ended)
+    return {
+        "invalidated": {
+            "subject": params.subject,
+            "predicate": params.predicate,
+            "object": params.object,
+            "ended": params.ended,
+        }
+    }
+
+
+@mcp.tool(
+    name="memgentic_graph_timeline",
+    annotations={
+        "title": "Graph Timeline",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_graph_timeline_tool(params: GraphTimelineInput, ctx: Context) -> dict:
+    """Return triples in chronological order for an entity (or all)."""
+    from memgentic.graph import get_chronograph
+
+    cg = await get_chronograph()
+    triples = await cg.timeline(entity=params.entity, status=params.status, limit=params.limit)
+    return {
+        "entity": params.entity,
+        "count": len(triples),
+        "triples": [t.to_dict() for t in triples],
+    }
+
+
+@mcp.tool(
+    name="memgentic_graph_stats",
+    annotations={
+        "title": "Graph Stats",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_graph_stats_tool(ctx: Context) -> dict:
+    """Return counts for the Chronograph (entities / triples / status)."""
+    from memgentic.graph import get_chronograph
+
+    cg = await get_chronograph()
+    return await cg.stats()
+
+
+# ---------------------------------------------------------------------------
 # Persona (T0 Recall Tier) — two read/write tools
 # ---------------------------------------------------------------------------
 

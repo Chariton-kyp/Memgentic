@@ -58,6 +58,9 @@ intelligence = [
     "google-genai>=1.50",
     "langgraph>=1.1",
     "networkx>=3.4",
+    # Fuzzy entity resolution for the Chronograph triple extractor
+    # (falls back to stdlib difflib when this is not installed).
+    "rapidfuzz>=3.9",
 ]
 # Observability — OpenTelemetry tracing + metrics (opt-in)
 observability = [

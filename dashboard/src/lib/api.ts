@@ -661,3 +661,130 @@ export async function acceptPersonaBootstrap(
     body: JSON.stringify({ persona }),
   });
 }
+
+// --- Chronograph (bitemporal triple store) ---
+
+export type ChronographTriple = {
+  id: string;
+  subject: string;
+  predicate: string;
+  object: string;
+  valid_from: string | null;
+  valid_to: string | null;
+  confidence: number;
+  source_memory_id: string | null;
+  status: "proposed" | "accepted" | "rejected" | "edited";
+  proposer: string | null;
+  accepted_by: string | null;
+  accepted_at: string | null;
+  workspace_id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type ChronographEntity = {
+  id: string;
+  name: string;
+  type: string | null;
+  aliases: string[];
+  properties: Record<string, unknown>;
+  workspace_id: string | null;
+  created_at: string | null;
+};
+
+export type ChronographStats = {
+  entities: number;
+  triples: number;
+  predicates: number;
+  accepted: number;
+  proposed: number;
+  rejected: number;
+  edited: number;
+  triples_by_status: Record<string, number>;
+};
+
+export async function getChronographStats(): Promise<ChronographStats> {
+  return fetchJson<ChronographStats>(`${API_BASE}/chronograph`);
+}
+
+export async function listProposedTriples(
+  limit = 50,
+): Promise<{ count: number; triples: ChronographTriple[] }> {
+  return fetchJson(`${API_BASE}/chronograph/proposed?limit=${limit}`);
+}
+
+export async function listTriples(params: {
+  subject?: string;
+  predicate?: string;
+  object?: string;
+  status?: "proposed" | "accepted" | "rejected" | "edited" | "any";
+  as_of?: string;
+  limit?: number;
+}): Promise<{ count: number; triples: ChronographTriple[] }> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  return fetchJson(`${API_BASE}/chronograph/triples?${qs.toString()}`);
+}
+
+export async function getChronographTimeline(params: {
+  entity?: string;
+  status?: "proposed" | "accepted" | "rejected" | "edited" | "any";
+  limit?: number;
+}): Promise<{ count: number; triples: ChronographTriple[] }> {
+  const qs = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null && v !== "") qs.set(k, String(v));
+  }
+  return fetchJson(`${API_BASE}/chronograph/timeline?${qs.toString()}`);
+}
+
+export async function acceptTriple(
+  tripleId: string,
+): Promise<ChronographTriple> {
+  return fetchJson<ChronographTriple>(
+    `${API_BASE}/chronograph/triples/${tripleId}/accept`,
+    { method: "POST" },
+  );
+}
+
+export async function rejectTriple(
+  tripleId: string,
+): Promise<ChronographTriple> {
+  return fetchJson<ChronographTriple>(
+    `${API_BASE}/chronograph/triples/${tripleId}/reject`,
+    { method: "POST" },
+  );
+}
+
+export async function editTriple(
+  tripleId: string,
+  patch: Partial<
+    Pick<
+      ChronographTriple,
+      "subject" | "predicate" | "object" | "valid_from" | "valid_to" | "confidence"
+    >
+  >,
+): Promise<ChronographTriple> {
+  return fetchJson<ChronographTriple>(
+    `${API_BASE}/chronograph/triples/${tripleId}`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    },
+  );
+}
+
+export async function invalidateTripleApi(
+  tripleId: string,
+  ended?: string,
+): Promise<ChronographTriple> {
+  return fetchJson<ChronographTriple>(
+    `${API_BASE}/chronograph/triples/${tripleId}/invalidate`,
+    {
+      method: "POST",
+      body: JSON.stringify({ ended: ended ?? null }),
+    },
+  );
+}
