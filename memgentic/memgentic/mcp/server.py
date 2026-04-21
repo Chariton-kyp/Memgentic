@@ -142,6 +142,16 @@ async def app_lifespan(server: FastMCP):
     await metadata_store.initialize()
     await vector_store.initialize(metadata_store)
 
+    # Hydrate runtime-mutable settings (default capture profile) from the
+    # ``runtime_settings`` kv table so MCP tools respect the latest override
+    # even after a restart.
+    try:
+        stored_profile = await metadata_store.get_runtime_setting("default_capture_profile")
+        if stored_profile in ("raw", "enriched", "dual"):
+            settings.default_capture_profile = stored_profile  # type: ignore[assignment]
+    except Exception as exc:
+        logger.warning("mcp_server.runtime_settings_hydrate_failed", error=str(exc))
+
     logger.info("mcp_server.ready", storage=settings.storage_backend.value)
 
     state = {
@@ -266,6 +276,29 @@ class RememberInput(BaseModel):
     source: str = Field(
         default="unknown",
         description="Source platform (e.g., 'claude_code', 'chatgpt'). Auto-detected.",
+    )
+    capture_profile: Literal["raw", "enriched", "dual"] | None = Field(
+        default=None,
+        description=(
+            "Optional capture profile override: 'raw' stores verbatim (no LLM), "
+            "'enriched' runs the full intelligence pipeline (default), "
+            "'dual' writes both rows paired via dual_sibling_id."
+        ),
+    )
+
+
+class CaptureProfileInput(BaseModel):
+    """Input for ``memgentic_capture_profile`` (get/set the default profile)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    action: Literal["get", "set"] = Field(
+        ...,
+        description="Whether to read the current default ('get') or change it ('set').",
+    )
+    profile: Literal["raw", "enriched", "dual"] | None = Field(
+        default=None,
+        description="Required when action='set'. New default profile to persist.",
     )
 
 
@@ -563,18 +596,75 @@ async def memgentic_remember(params: RememberInput, ctx: Context) -> str:
             platform=platform,
             topics=params.topics,
             entities=params.entities,
+            capture_profile=params.capture_profile,
         )
 
         return (
             f"Remembered! Memory ID: `{memory.id}`\n\n"
             f"- **Type:** {memory.content_type.value}\n"
             f"- **Source:** {memory.source.platform.value}\n"
+            f"- **Profile:** {memory.capture_profile}\n"
             f"- **Topics:** {', '.join(memory.topics) if memory.topics else 'none'}\n"
             f"- **Content preview:** {memory.content[:100]}..."
         )
     except Exception as exc:
         logger.error("memgentic_remember.error", error=str(exc))
         return f"Error storing memory: {exc}"
+
+
+@mcp.tool(
+    name="memgentic_capture_profile",
+    annotations={
+        "title": "Get or Set Capture Profile",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_capture_profile_tool(params: CaptureProfileInput, ctx: Context) -> str:
+    """Get or set the default capture profile.
+
+    Profiles:
+        - raw: verbatim chunks, no LLM enrichment
+        - enriched: current default (topics/entities/LLM importance)
+        - dual: both rows stored and paired via dual_sibling_id (2x storage)
+
+    Args:
+        params: action ('get' or 'set') and, when setting, the new profile.
+
+    Returns:
+        Markdown describing the current (and previous, when set) profile.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        stored = await metadata_store.get_runtime_setting("default_capture_profile")
+        current = (
+            stored if stored in ("raw", "enriched", "dual") else settings.default_capture_profile
+        )
+
+        if params.action == "get":
+            return (
+                f"Current default capture profile: **{current}**\n\n"
+                f"- Persisted override: {stored or 'none (using config default)'}\n"
+                f"- Config baseline: {settings.default_capture_profile}"
+            )
+
+        if params.profile is None:
+            return "Error: 'set' action requires a 'profile' value (raw, enriched, or dual)."
+
+        await metadata_store.set_runtime_setting("default_capture_profile", params.profile)
+        settings.default_capture_profile = params.profile  # type: ignore[assignment]
+        return (
+            f"Capture profile updated.\n\n"
+            f"- **Previous:** {current}\n"
+            f"- **Current:** {params.profile}"
+        )
+    except Exception as exc:
+        logger.error("memgentic_capture_profile.error", error=str(exc))
+        return f"Error managing capture profile: {exc}"
 
 
 @mcp.tool(

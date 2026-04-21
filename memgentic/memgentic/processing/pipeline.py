@@ -13,7 +13,9 @@ import structlog
 from memgentic.config import MemgenticSettings
 from memgentic.exceptions import EmbeddingError
 from memgentic.models import (
+    CAPTURE_PROFILES,
     CaptureMethod,
+    CaptureProfile,
     ContentType,
     ConversationChunk,
     Memory,
@@ -43,6 +45,26 @@ except ImportError:
     check_corroboration = None  # type: ignore[assignment]
 
 logger = structlog.get_logger()
+
+
+def _resolve_capture_profile(
+    override: CaptureProfile | None,
+    settings: MemgenticSettings,
+) -> CaptureProfile:
+    """Pick the effective capture profile for an ingestion call.
+
+    Falls back to the configured default when no explicit override is given.
+    Unknown values are replaced with ``"enriched"`` to keep legacy callers safe.
+    """
+    candidate = override if override is not None else settings.default_capture_profile
+    if candidate not in CAPTURE_PROFILES:
+        logger.warning(
+            "pipeline.invalid_capture_profile",
+            value=candidate,
+            fallback="enriched",
+        )
+        return "enriched"
+    return candidate
 
 
 class IngestionPipeline:
@@ -87,6 +109,7 @@ class IngestionPipeline:
         file_path: str | None = None,
         platform_version: str | None = None,
         user_id: str = "",
+        capture_profile: CaptureProfile | None = None,
     ) -> list[Memory]:
         """Ingest a parsed conversation into Memgentic.
 
@@ -98,14 +121,18 @@ class IngestionPipeline:
             capture_method: How this was captured.
             file_path: Source file path (for deduplication).
             platform_version: Model/tool version.
+            capture_profile: Override the configured default capture profile
+                for this ingestion call. One of ``raw`` / ``enriched`` / ``dual``.
 
         Returns:
             List of created Memory objects.
         """
+        profile = _resolve_capture_profile(capture_profile, self._settings)
         with trace_span(
             "pipeline.ingest",
             chunks=len(chunks),
             platform=platform.value,
+            capture_profile=profile,
         ):
             _ingest_start = time.perf_counter()
             result = await self._ingest_conversation_impl(
@@ -117,6 +144,7 @@ class IngestionPipeline:
                 file_path=file_path,
                 platform_version=platform_version,
                 user_id=user_id,
+                capture_profile=profile,
             )
             record_counter(
                 "memgentic.memories.ingested",
@@ -140,6 +168,7 @@ class IngestionPipeline:
         file_path: str | None = None,
         platform_version: str | None = None,
         user_id: str = "",
+        capture_profile: CaptureProfile = "enriched",
     ) -> list[Memory]:
         # Step 1: Deduplication check — compute hash ONCE and reuse
         file_hash: str | None = None
@@ -163,19 +192,42 @@ class IngestionPipeline:
             file_path=file_path,
         )
 
-        memories = [
-            Memory(
-                content=chunk.content,
-                content_type=chunk.content_type,
-                source=source,
-                topics=chunk.topics,
-                entities=chunk.entities,
-                confidence=chunk.confidence,
-                user_id=user_id,
-            )
-            for chunk in chunks
-            if chunk.content.strip()  # Skip empty chunks
-        ]
+        # Raw-profile memories store verbatim content with no LLM-derived
+        # metadata. They get a neutral importance so downstream ranking falls
+        # back to pure vector + recency scoring.
+        if capture_profile == "raw":
+            memories = [
+                Memory(
+                    content=chunk.content,
+                    content_type=chunk.content_type,
+                    source=source,
+                    topics=[],
+                    entities=[],
+                    confidence=chunk.confidence,
+                    user_id=user_id,
+                    importance_score=0.5,
+                    capture_profile="raw",
+                )
+                for chunk in chunks
+                if chunk.content.strip()  # Skip empty chunks
+            ]
+        else:
+            # enriched / dual both start with enriched rows; dual spawns raw
+            # siblings after the enriched path completes.
+            memories = [
+                Memory(
+                    content=chunk.content,
+                    content_type=chunk.content_type,
+                    source=source,
+                    topics=chunk.topics,
+                    entities=chunk.entities,
+                    confidence=chunk.confidence,
+                    user_id=user_id,
+                    capture_profile=capture_profile,
+                )
+                for chunk in chunks
+                if chunk.content.strip()  # Skip empty chunks
+            ]
 
         if not memories:
             logger.info("pipeline.no_memories", file=file_path)
@@ -206,8 +258,16 @@ class IngestionPipeline:
             logger.info("pipeline.no_memories_after_noise", file=file_path)
             return []
 
-        # Step 2c: Run intelligence pipeline (requires intelligence extras)
-        if HAS_INTELLIGENCE and self._llm_client and self._llm_client.available:
+        # Step 2c: Run intelligence pipeline (requires intelligence extras).
+        # Raw-profile ingestion deliberately bypasses LLM classification /
+        # extraction so the content is stored verbatim with no LLM-derived
+        # metadata — this is the guarantee raw mode advertises.
+        if (
+            capture_profile != "raw"
+            and HAS_INTELLIGENCE
+            and self._llm_client
+            and self._llm_client.available
+        ):
             try:
                 intel_graph = build_intelligence_graph(
                     enable_distillation=getattr(self._settings, "enable_fact_distillation", True)
@@ -266,6 +326,12 @@ class IngestionPipeline:
                     )
             except Exception as exc:
                 logger.warning("pipeline.intelligence_failed", error=str(exc))
+        elif capture_profile == "raw":
+            logger.info(
+                "pipeline.raw_profile",
+                msg="Raw capture profile — skipping LLM classification/extraction.",
+                count=len(memories),
+            )
         else:
             if not HAS_INTELLIGENCE:
                 logger.info(
@@ -296,8 +362,9 @@ class IngestionPipeline:
             return []
         embed_elapsed = time.perf_counter() - t0
 
-        # Step 3b: Corroboration — check if similar memories exist from other platforms
-        if HAS_INTELLIGENCE and self._settings.enable_corroboration:
+        # Step 3b: Corroboration — check if similar memories exist from other platforms.
+        # Raw-profile rows bypass corroboration so they stay verbatim-only.
+        if capture_profile != "raw" and HAS_INTELLIGENCE and self._settings.enable_corroboration:
             for memory, embedding in zip(memories, embeddings, strict=False):
                 await check_corroboration(
                     memory, embedding, self._vectors, self._metadata, self._settings
@@ -355,9 +422,63 @@ class IngestionPipeline:
                 if memory.topics or memory.entities:
                     await self._graph.add_memory(memory.id, memory.topics, memory.entities)
 
-        # Step 4c: Contradiction detection — check new memories against existing ones
-        if HAS_INTELLIGENCE and self._llm_client and self._llm_client.available:
+        # Step 4c: Contradiction detection — check new memories against existing ones.
+        # Skipped for raw-profile writes (no LLM allowed).
+        if (
+            capture_profile != "raw"
+            and HAS_INTELLIGENCE
+            and self._llm_client
+            and self._llm_client.available
+        ):
             await self._detect_contradictions(memories)
+
+        # Step 4d: Dual-profile sibling — for every enriched memory just stored,
+        # write a matching raw sibling containing the verbatim chunk text, no
+        # topics/entities, importance 0.5. Pair them both ways via
+        # ``dual_sibling_id`` so the dashboard can collapse the pair to one row.
+        if capture_profile == "dual" and memories:
+            raw_siblings: list[Memory] = []
+            raw_texts: list[str] = []
+            original_chunks = [c for c in chunks if c.content.strip()]
+            for enriched_mem, orig_chunk in zip(memories, original_chunks, strict=False):
+                raw_sibling = Memory(
+                    content=orig_chunk.content,
+                    content_type=orig_chunk.content_type,
+                    source=enriched_mem.source,
+                    topics=[],
+                    entities=[],
+                    confidence=orig_chunk.confidence,
+                    user_id=user_id,
+                    importance_score=0.5,
+                    capture_profile="dual",
+                    dual_sibling_id=enriched_mem.id,
+                )
+                raw_siblings.append(raw_sibling)
+                raw_texts.append(orig_chunk.content)
+
+            if raw_siblings:
+                try:
+                    raw_embeddings = await self._embedder.embed_batch(raw_texts)
+                except (EmbeddingError, Exception) as exc:
+                    logger.warning(
+                        "pipeline.dual_sibling_embedding_failed",
+                        error=str(exc),
+                        count=len(raw_texts),
+                    )
+                    raw_embeddings = []
+
+                if raw_embeddings:
+                    await self._metadata.save_memories_batch(raw_siblings)
+                    await self._vectors.upsert_memories_batch(raw_siblings, raw_embeddings)
+                    # Patch enriched rows so both sides of the pair reference each other.
+                    for enriched_mem, raw_sibling in zip(memories, raw_siblings, strict=False):
+                        enriched_mem.dual_sibling_id = raw_sibling.id
+                        await self._metadata.update_dual_sibling(enriched_mem.id, raw_sibling.id)
+                    logger.info(
+                        "pipeline.dual_siblings_stored",
+                        count=len(raw_siblings),
+                    )
+                    memories = memories + raw_siblings
 
         # Step 5: Mark file as processed — reuse the hash computed in Step 1
         if file_path and file_hash is not None:
@@ -391,8 +512,15 @@ class IngestionPipeline:
         entities: list[str] | None = None,
         user_id: str = "",
         capture_method: CaptureMethod = CaptureMethod.MCP_TOOL,
+        capture_profile: CaptureProfile | None = None,
     ) -> Memory:
-        """Quick-ingest a single memory (e.g., from MCP 'remember' tool)."""
+        """Quick-ingest a single memory (e.g., from MCP 'remember' tool).
+
+        Respects ``capture_profile``: raw drops supplied topics/entities and
+        uses a neutral importance; dual spawns an extra raw sibling linked via
+        ``dual_sibling_id``.
+        """
+        profile = _resolve_capture_profile(capture_profile, self._settings)
         source = SourceMetadata(
             platform=platform,
             capture_method=capture_method,
@@ -405,14 +533,27 @@ class IngestionPipeline:
                 content = result.text
                 logger.info("pipeline.single_credentials_scrubbed", count=result.redaction_count)
 
-        memory = Memory(
-            content=content,
-            content_type=content_type,
-            source=source,
-            topics=topics or [],
-            entities=entities or [],
-            user_id=user_id,
-        )
+        if profile == "raw":
+            memory = Memory(
+                content=content,
+                content_type=content_type,
+                source=source,
+                topics=[],
+                entities=[],
+                user_id=user_id,
+                importance_score=0.5,
+                capture_profile="raw",
+            )
+        else:
+            memory = Memory(
+                content=content,
+                content_type=content_type,
+                source=source,
+                topics=topics or [],
+                entities=entities or [],
+                user_id=user_id,
+                capture_profile=profile,
+            )
 
         t0 = time.perf_counter()
         try:
@@ -431,10 +572,35 @@ class IngestionPipeline:
         if self._graph and (memory.topics or memory.entities):
             await self._graph.add_memory(memory.id, memory.topics, memory.entities)
 
+        # Dual profile: spawn a verbatim raw sibling paired with this memory.
+        if profile == "dual":
+            raw_sibling = Memory(
+                content=content,
+                content_type=content_type,
+                source=source,
+                topics=[],
+                entities=[],
+                user_id=user_id,
+                importance_score=0.5,
+                capture_profile="dual",
+                dual_sibling_id=memory.id,
+            )
+            try:
+                raw_embedding = await self._embedder.embed(content)
+            except (EmbeddingError, Exception) as exc:
+                logger.warning("pipeline.single_dual_sibling_embedding_failed", error=str(exc))
+            else:
+                await self._metadata.save_memory(raw_sibling)
+                await self._vectors.upsert_memory(raw_sibling, raw_embedding)
+                memory.dual_sibling_id = raw_sibling.id
+                await self._metadata.update_dual_sibling(memory.id, raw_sibling.id)
+                await self._emit_memory_created_events([raw_sibling])
+
         logger.info(
             "pipeline.single_ingested",
             id=memory.id,
             type=content_type.value,
+            capture_profile=profile,
             embed_ms=round(embed_elapsed * 1000, 1),
             storage_ms=round(storage_elapsed * 1000, 1),
         )

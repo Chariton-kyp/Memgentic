@@ -178,6 +178,40 @@ class MetadataStore:
         await self._db.execute("DELETE FROM embedding_config")
         await self._db.commit()
 
+    # --- Runtime settings (persistent across restarts, mutable via CLI/REST/MCP) ---
+
+    async def get_runtime_setting(self, key: str) -> str | None:
+        """Return a runtime setting value, or None if unset."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        cursor = await self._db.execute(
+            "SELECT value FROM runtime_settings WHERE key = ?",
+            (key,),
+        )
+        row = await cursor.fetchone()
+        return row["value"] if row else None
+
+    async def set_runtime_setting(self, key: str, value: str) -> None:
+        """Upsert a runtime setting."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        now = datetime.now(UTC).isoformat()
+        await self._db.execute(
+            "INSERT OR REPLACE INTO runtime_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, now),
+        )
+        await self._db.commit()
+
+    async def update_dual_sibling(self, memory_id: str, sibling_id: str) -> None:
+        """Record the ``dual_sibling_id`` pointer for a dual-profile memory."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized — call initialize() first")
+        await self._db.execute(
+            "UPDATE memories SET dual_sibling_id = ? WHERE id = ?",
+            (sibling_id, memory_id),
+        )
+        await self._db.commit()
+
     async def save_memory(self, memory: Memory) -> None:
         """Insert or update a memory record."""
         if not self._db:
@@ -189,8 +223,8 @@ class MetadataStore:
              session_title, capture_method, original_timestamp, file_path,
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
-             user_id, is_pinned, pinned_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory.id,
@@ -218,6 +252,8 @@ class MetadataStore:
                 memory.user_id,
                 1 if memory.is_pinned else 0,
                 memory.pinned_at.isoformat() if memory.pinned_at else None,
+                memory.capture_profile,
+                memory.dual_sibling_id,
             ),
         )
         await self._db.commit()
@@ -251,6 +287,8 @@ class MetadataStore:
                 m.user_id,
                 1 if m.is_pinned else 0,
                 m.pinned_at.isoformat() if m.pinned_at else None,
+                m.capture_profile,
+                m.dual_sibling_id,
             )
             for m in memories
         ]
@@ -261,8 +299,8 @@ class MetadataStore:
              session_title, capture_method, original_timestamp, file_path,
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
-             user_id, is_pinned, pinned_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -647,6 +685,21 @@ class MetadataStore:
         except (IndexError, KeyError):
             pinned_at = None
 
+        # capture_profile/dual_sibling_id are added in migration 8. Older rows
+        # (pre-migration snapshots, test fixtures) may lack them — fall back to
+        # the default rather than crashing deserialisation.
+        try:
+            capture_profile = row["capture_profile"] or "enriched"
+            if capture_profile not in ("raw", "enriched", "dual"):
+                capture_profile = "enriched"
+        except (IndexError, KeyError):
+            capture_profile = "enriched"
+
+        try:
+            dual_sibling_id = row["dual_sibling_id"]
+        except (IndexError, KeyError):
+            dual_sibling_id = None
+
         return Memory(
             id=row["id"],
             user_id=user_id or "",
@@ -677,6 +730,8 @@ class MetadataStore:
             corroborated_by=json.loads(row["corroborated_by"]) if row["corroborated_by"] else [],
             is_pinned=is_pinned,
             pinned_at=pinned_at,
+            capture_profile=capture_profile,
+            dual_sibling_id=dual_sibling_id,
         )
 
     # ── Collection methods ──────────────────────────────────────────────

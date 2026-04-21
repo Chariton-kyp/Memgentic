@@ -162,6 +162,32 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             )""",
         ],
     ),
+    (
+        8,
+        "capture_profile — raw / enriched / dual per-memory + runtime settings kv",
+        [
+            # Per-memory capture profile selector. 'enriched' keeps the historic
+            # default (topics/entities/LLM importance). 'raw' stores verbatim
+            # chunks with no LLM enrichment. 'dual' writes both rows and links
+            # them through dual_sibling_id for dashboard de-duplication.
+            "ALTER TABLE memories ADD COLUMN capture_profile TEXT "
+            "NOT NULL DEFAULT 'enriched' "
+            "CHECK (capture_profile IN ('raw', 'enriched', 'dual'))",
+            # Sibling pointer used only by dual-profile pairs. For raw/enriched
+            # standalones it remains NULL.
+            "ALTER TABLE memories ADD COLUMN dual_sibling_id TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_memories_capture_profile ON memories(capture_profile)",
+            # Lightweight key/value table for runtime-mutable settings that must
+            # persist across restarts (e.g. the default capture profile changed
+            # via CLI / REST / MCP). Kept deliberately minimal — not a general
+            # config dumping ground.
+            """CREATE TABLE IF NOT EXISTS runtime_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )""",
+        ],
+    ),
 ]
 
 SCHEMA_VERSION_TABLE = """
