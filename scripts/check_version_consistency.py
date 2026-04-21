@@ -47,9 +47,7 @@ def read_native_cargo_version() -> str:
 
 
 def read_native_pyproject_version() -> str:
-    data = tomllib.loads(
-        (ROOT / "memgentic-native" / "pyproject.toml").read_text(encoding="utf-8")
-    )
+    data = tomllib.loads((ROOT / "memgentic-native" / "pyproject.toml").read_text(encoding="utf-8"))
     return data["project"]["version"]
 
 
