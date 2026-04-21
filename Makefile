@@ -1,4 +1,4 @@
-.PHONY: dev up up-gpu down build logs test lint fmt serve daemon import search sources pull-models api api-prod backup restore native
+.PHONY: dev up up-gpu down build logs test lint fmt serve daemon import search sources pull-models api api-prod backup restore native check-versions
 
 # --- Docker (primary deployment) ---
 
@@ -113,3 +113,8 @@ backup:  ## Backup all Memgentic data
 
 restore:  ## Restore from backup: make restore FILE=backup.tar.gz
 	uv run memgentic restore "$(FILE)"
+
+# --- Release tooling ---
+
+check-versions:  ## Verify all package versions agree (core + api + native)
+	@python scripts/check_version_consistency.py
