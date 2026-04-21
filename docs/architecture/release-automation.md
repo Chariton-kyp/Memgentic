@@ -206,11 +206,57 @@ PyPI fails fast if `$PROJECT==$VERSION` already exists — prevents the
 
 ### 4. Branch protection on `main`
 
-- Required status checks: `build`, `test`, `typecheck`, `lint`,
-  `commitlint`, `version-consistency`, `CodeQL`
-- release-please bot is allowed to push Release PRs and tags
-  (GitHub App authentication or a scoped `GITHUB_TOKEN` with
-  `contents: write` + `pull-requests: write`)
+Branch protection is a GitHub repository setting (not a tracked file)
+so it cannot be provisioned in code. Configure it once, per repo, in
+**Settings → Branches → Add rule → `main`**:
+
+- **Require a pull request before merging** → ✓
+- **Require status checks to pass before merging** → ✓ with the
+  following required:
+  - `build`
+  - `test`
+  - `typecheck`
+  - `lint`
+  - `Validate PR title` (from `commitlint.yml`)
+  - `All packages agree on version` (from `version-consistency.yml`)
+  - `CodeQL`
+  - `Run pre-commit on changed files` (optional — allows contributors
+    to skip local install without a hard block)
+- **Require branches to be up to date before merging** → ✓
+- **Require linear history** → recommended (clean squash-merge log)
+- **Do not allow bypassing the above settings** → ✓
+- **Restrict who can push to matching branches** → empty (release-please
+  bot pushes via PR; tags go via the Release PR merge commit, not direct
+  push)
+
+Equivalent one-shot via `gh api`:
+
+```bash
+gh api --method PUT \
+  "repos/:owner/:repo/branches/main/protection" \
+  --input - <<'JSON'
+{
+  "required_status_checks": {
+    "strict": true,
+    "contexts": [
+      "build", "test", "typecheck", "lint",
+      "Validate PR title",
+      "All packages agree on version",
+      "CodeQL"
+    ]
+  },
+  "enforce_admins": false,
+  "required_pull_request_reviews": null,
+  "restrictions": null,
+  "required_linear_history": true,
+  "allow_force_pushes": false,
+  "allow_deletions": false
+}
+JSON
+```
+
+release-please uses `secrets.GITHUB_TOKEN` (no PAT, no GitHub App) and
+its PRs go through the same protection — no bypass list needed.
 
 ### 5. Pre-commit hooks (optional but recommended)
 

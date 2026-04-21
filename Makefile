@@ -118,3 +118,4 @@ restore:  ## Restore from backup: make restore FILE=backup.tar.gz
 
 check-versions:  ## Verify all package versions agree (core + api + native)
 	@python scripts/check_version_consistency.py
+	@python scripts/check_changelog_drift.py

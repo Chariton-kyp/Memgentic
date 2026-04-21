@@ -10,7 +10,7 @@ permissions:
 jobs:
   check:
     name: All packages agree on version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -20,3 +20,6 @@ jobs:
 
       - name: Check version consistency
         run: python scripts/check_version_consistency.py
+
+      - name: Check CHANGELOG / manifest drift
+        run: python scripts/check_changelog_drift.py
