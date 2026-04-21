@@ -155,30 +155,35 @@ tags: [deploy, ops]
 
 Memgentic sits in the **end-user cross-tool memory** space — built for people who use 3+ AI tools daily and want one brain across all of them. That's a different market than API-first agent-memory backends like Mem0, Letta, or Zep (those target developers building AI products, not developers using AI products).
 
-The closest direct neighbors are **claude-mem** and **MemPalace**:
+The nearest neighbors are **claude-mem** (persistent-memory compression system for Claude Code, also installable for Gemini CLI and OpenCode) and **MemPalace** (local-first verbatim memory with published retrieval benchmarks). Both are established — each has tens of thousands of stars and active development. Memgentic is pre-launch.
+
+Feature comparison based on each project's current public README (verified April 2026):
 
 | Capability | Memgentic | claude-mem | MemPalace |
 |---|---|---|---|
-| License | **Apache 2.0** | AGPL-3.0 + PolyForm NC | MIT |
-| AI tools captured | **10+** incl. ChatGPT, Aider, Codex CLI, Antigravity, Copilot | 5–6 coding tools | 5 |
-| ChatGPT history import | **✓** | ✗ | ✓ |
-| Knowledge graph (entity-level) | **✓** NetworkX / petgraph | ✗ | ✗ |
-| Skills distribution (Agent Skills std) | **✓** 26+ tools via filesystem | ✗ | ✗ |
-| Web dashboard | Next.js 16 full CRUD | Stream viewer | Basic |
-| REST API | 11 routes, auth-ready FastAPI | Internal, no auth | Limited |
-| MCP tools exposed | 13 | 3 (progressive disclosure) | ~5 |
-| Native acceleration | **✓** Rust/PyO3 (5–50× on hot paths) | ✗ | ✗ |
-| Source provenance | Per-memory (platform + method + session + timestamp) | Per-session | Limited |
-| Capture model | Passive file watcher + hooks | Lifecycle hooks (Claude Code–first) | MCP only |
-| Security model | Local-first, no exposed HTTP by default | HTTP API on `:37777` (no auth — audited HIGH risk Feb 2026) | Local-first |
+| License | Apache 2.0 | AGPL-3.0 (+ PolyForm NC for `ragtime/`) | MIT |
+| Primary positioning | Universal cross-tool memory + Skills distribution | Persistent memory compression for Claude Code | Local-first verbatim memory with benchmarks |
+| Storage model | LLM-distilled summaries + dedup + noise filter | Semantic summaries (compression) | **Verbatim** (no summarization, no paraphrase) |
+| AI tools with active capture | 10 adapters (Claude Code, Cursor, Gemini CLI, Codex CLI, Copilot CLI, Aider, Antigravity, OpenCode) + JSON import (ChatGPT, Claude Web) | Claude Code (primary), Gemini CLI, OpenCode | Claude Code, Gemini CLI, any MCP-compatible tool |
+| ChatGPT history import (JSON export) | Yes | Not documented | Not documented |
+| Knowledge graph | Entity co-occurrence graph (NetworkX / petgraph) | Not documented | Temporal entity-relationship graph with validity windows (local SQLite) |
+| Skills distribution | Filesystem write of `SKILL.md` to 26+ tools via [Agent Skills](https://agentskills.io) standard | Skill concept exists (`mem-search`, Claude Desktop Skill) — different model, not Agent-Skills-standard filesystem distribution | Not documented |
+| Web dashboard | Next.js 16 full CRUD (collections, uploads, skills editor, batch ops) | Local Web Viewer UI | Docs site only |
+| REST API | 11 FastAPI routes | HTTP API (local worker) | Not documented |
+| MCP tools exposed | 13 | Search-focused set (`mem-search`) | **29 tools** (palace reads/writes, knowledge graph, agent diaries) |
+| Rust native acceleration | Optional PyO3 module (5–50× on hot paths) | Not documented | Not documented |
+| Published benchmarks | Internal perf targets (see [BENCHMARKS.md](docs/BENCHMARKS.md)) | Not in README | **Yes — 96.6% R@5 raw on LongMemEval** (no LLM), 98.4% hybrid, ≥99% with rerank |
+| Source provenance | Per-memory (platform + method + session_id + timestamp) | Per-session | Wing/room/drawer structure |
 
-**When to pick claude-mem:** you live inside Claude Code and only Claude Code. Its progressive-disclosure retrieval is clever and its 46K-star ecosystem is real.
+### When each one is the right pick
 
-**When to pick MemPalace:** you want cross-tool memory and MIT fits your distribution policy.
+- **Pick claude-mem** if your workflow is mostly Claude Code (with Gemini CLI or OpenCode as secondaries) and you want a mature, heavily-starred compression-based memory with a simple install (`npx claude-mem install`). You accept AGPL-3.0.
+- **Pick MemPalace** if you want **verbatim** storage (every turn kept as authored, searched semantically, never paraphrased), a graph with temporal validity windows, and you care about published retrieval benchmarks you can reproduce locally. MIT license.
+- **Pick Memgentic** if you want the widest set of active adapters (including ChatGPT JSON history + Aider + Antigravity + Codex + Copilot, which the others don't currently document), Agent-Skills-standard distribution to 26+ AI tools, optional Rust acceleration, and an Apache 2.0 license for commercial or team use.
 
-**When to pick Memgentic:** you use multiple AI tools, you want Apache 2.0 for enterprise/team use, you care about a real web dashboard + REST API + knowledge graph + skills distribution, and you don't want an unauthenticated HTTP port open on your laptop.
+None of these are "better" in the abstract — they make different architectural bets. Our bet is breadth of tool coverage + Skills as a first-class export, at the cost of being the newest project of the three.
 
-For the full breakdown — including what we learned from the competitive landscape and why our architecture looks the way it does — see [docs/why-memgentic.md](docs/why-memgentic.md).
+For a deeper breakdown of the architectural tradeoffs, see [docs/why-memgentic.md](docs/why-memgentic.md).
 
 ---
 
