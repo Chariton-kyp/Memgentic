@@ -1,9 +1,9 @@
 """Pydantic models for the Persona card.
 
-The schema deliberately mirrors the YAML layout documented in
-``05-PLAN-PERSONA.md §2``. A ``version`` field sits at the top so future
-migrations have a stable anchor; everything else is optional, with safe
-defaults, so a minimally-specified persona still validates.
+The schema maps the YAML layout of ``~/.memgentic/persona.yaml`` onto
+type-safe Pydantic models. A ``version`` field sits at the top so
+future migrations have a stable anchor; everything else is optional,
+with safe defaults, so a minimally-specified persona still validates.
 """
 
 from __future__ import annotations
