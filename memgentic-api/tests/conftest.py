@@ -26,6 +26,7 @@ from memgentic_api.routes import (
     import_export,
     ingestion,
     memories,
+    persona,
     skills,
     sources,
     stats,
@@ -77,6 +78,7 @@ def _create_test_app(
     app.include_router(uploads.router, prefix="/api/v1")
     app.include_router(skills.router, prefix="/api/v1")
     app.include_router(ingestion.router, prefix="/api/v1")
+    app.include_router(persona.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     async def health_check():

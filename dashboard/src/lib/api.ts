@@ -11,6 +11,8 @@ import type {
   IngestionJobListResponse,
   Memory,
   MemoryListResponse,
+  Persona,
+  PersonaBootstrapResponse,
   SearchResultResponse,
   Skill,
   SkillFile,
@@ -600,5 +602,46 @@ export async function getIngestionJob(id: string): Promise<IngestionJob> {
 export async function cancelIngestionJob(id: string): Promise<void> {
   await fetchJson(`${API_BASE}/ingestion/jobs/${id}/cancel`, {
     method: "POST",
+  });
+}
+
+// --- Persona (T0 Recall Tier) ---
+
+export async function getPersona(): Promise<Persona> {
+  return fetchJson<Persona>(`${API_BASE}/persona`);
+}
+
+export async function putPersona(persona: Persona): Promise<Persona> {
+  return fetchJson<Persona>(`${API_BASE}/persona`, {
+    method: "PUT",
+    body: JSON.stringify(persona),
+  });
+}
+
+export async function patchPersona(patch: Partial<Persona>): Promise<Persona> {
+  return fetchJson<Persona>(`${API_BASE}/persona`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function bootstrapPersona(
+  body: { source?: "recent" | "skills"; limit?: number } = {},
+): Promise<PersonaBootstrapResponse> {
+  return fetchJson<PersonaBootstrapResponse>(`${API_BASE}/persona/bootstrap`, {
+    method: "POST",
+    body: JSON.stringify({
+      source: body.source ?? "recent",
+      limit: body.limit ?? 100,
+    }),
+  });
+}
+
+export async function acceptPersonaBootstrap(
+  persona: Persona,
+): Promise<Persona> {
+  return fetchJson<Persona>(`${API_BASE}/persona/bootstrap/accept`, {
+    method: "POST",
+    body: JSON.stringify({ persona }),
   });
 }

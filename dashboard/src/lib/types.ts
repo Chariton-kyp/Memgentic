@@ -220,3 +220,50 @@ export interface ActivityEvent {
   timestamp: string;
   data: Record<string, unknown>;
 }
+
+// Persona (T0 Recall Tier)
+export interface PersonaIdentity {
+  name: string;
+  role?: string | null;
+  tone?: string | null;
+  pronouns?: string | null;
+  voice_sample?: string | null;
+}
+
+export interface PersonaPerson {
+  name: string;
+  relationship?: string | null;
+  preferences?: string[];
+  do_not?: string[];
+}
+
+export interface PersonaProject {
+  name: string;
+  status: "active" | "paused" | "archived";
+  stack?: string[];
+  tldr?: string | null;
+}
+
+export interface PersonaPreferences {
+  remember: string[];
+  avoid: string[];
+}
+
+export interface PersonaMetadata {
+  workspace_inherit: boolean;
+  updated_at?: string | null;
+  generated_by: "bootstrap" | "manual" | "edited";
+}
+
+export interface Persona {
+  version: number;
+  identity: PersonaIdentity;
+  people: PersonaPerson[];
+  projects: PersonaProject[];
+  preferences: PersonaPreferences;
+  metadata: PersonaMetadata;
+}
+
+export interface PersonaBootstrapResponse {
+  persona: Persona;
+}
