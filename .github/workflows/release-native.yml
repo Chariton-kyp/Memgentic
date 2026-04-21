@@ -139,13 +139,25 @@ jobs:
       id-token: write
       attestations: write
     environment:
-      name: pypi
+      # Must match the Trusted Publisher environment registered for
+      # `memgentic-native` on PyPI. Core uses `pypi`, api uses
+      # `pypi-api`, native uses `pypi-native` — one GitHub environment
+      # per PyPI project so the OIDC claim (which includes the env
+      # name) is distinct per publisher.
+      name: pypi-native
       url: https://pypi.org/p/memgentic-native
     steps:
+      # Pull wheels + sdist ONLY. The `sbom` artifact must NOT land here
+      # or twine will try to upload the .cdx.json as a distribution.
       - uses: actions/download-artifact@v4
         with:
           path: wheels/
+          pattern: "wheels-*"
           merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          name: sdist
+          path: wheels/
       - name: List artifacts
         run: ls -lh wheels/
       - name: Attest build provenance (SLSA)
