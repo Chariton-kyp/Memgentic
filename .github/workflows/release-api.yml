@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -41,15 +41,35 @@ jobs:
         working-directory: memgentic-api
         run: uv build --package memgentic-api --out-dir dist
 
+      - name: Generate SBOM (CycloneDX)
+        working-directory: memgentic-api
+        run: |
+          uv pip install --system cyclonedx-bom
+          mkdir -p sbom
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#api-v}"
+          cyclonedx-py environment \
+            --output-format json \
+            --output-file "sbom/sbom-memgentic-api-${VERSION}.cdx.json" \
+            --spec-version 1.6 \
+            .
+          ls -lh sbom/
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: memgentic-api/dist/
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: memgentic-api/sbom/
+          if-no-files-found: error
+
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write
       attestations: write
@@ -62,10 +82,12 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Attest build provenance
+      - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "dist/*"
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -75,7 +97,7 @@ jobs:
 
   release:
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -86,9 +108,21 @@ jobs:
           name: dist
           path: dist/
 
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Assemble release assets
+        run: |
+          mkdir -p release-assets
+          cp dist/*.whl dist/*.tar.gz release-assets/
+          cp sbom/*.cdx.json release-assets/
+          ls -lh release-assets/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/*
+          files: release-assets/*
           fail_on_unmatched_files: true

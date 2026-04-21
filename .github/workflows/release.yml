@@ -29,7 +29,7 @@ jobs:
   # memgentic/memgentic/__version__.py — prevents accidental mismatched tags.
   verify-version:
     name: Verify tag matches __version__.py
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
     steps:
@@ -62,7 +62,7 @@ jobs:
   build:
     name: Build sdist + wheel
     needs: verify-version
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -100,17 +100,36 @@ jobs:
       - name: List dist artifacts
         run: ls -lh dist/
 
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          uv pip install --system cyclonedx-bom
+          mkdir -p sbom
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#v}"
+          cyclonedx-py environment \
+            --output-format json \
+            --output-file "sbom/sbom-memgentic-${VERSION}.cdx.json" \
+            --spec-version 1.6 \
+            .
+          ls -lh sbom/
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+          if-no-files-found: error
+
   # ── 3. Publish ──────────────────────────────────────────────────────────────
   publish:
     name: Publish to PyPI (Trusted Publishing)
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       id-token: write      # OIDC token for Trusted Publishing
       attestations: write  # build provenance attestation
@@ -123,10 +142,12 @@ jobs:
           name: dist
           path: dist/
 
-      - name: Attest build provenance
+      - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@v2
         with:
-          subject-path: "dist/*"
+          subject-path: |
+            dist/*.whl
+            dist/*.tar.gz
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -140,7 +161,7 @@ jobs:
   github-release:
     name: Create GitHub Release
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write      # create releases + upload assets
     steps:
@@ -150,6 +171,18 @@ jobs:
         with:
           name: dist
           path: dist/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: sbom
+          path: sbom/
+
+      - name: Assemble release assets
+        run: |
+          mkdir -p release-assets
+          cp dist/*.whl dist/*.tar.gz release-assets/
+          cp sbom/*.cdx.json release-assets/
+          ls -lh release-assets/
 
       - name: Extract CHANGELOG section
         id: changelog
@@ -196,7 +229,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body: ${{ steps.changelog.outputs.body }}
-          files: dist/*
+          files: release-assets/*
           fail_on_unmatched_files: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}  # e.g. v0.6.0-rc.1
