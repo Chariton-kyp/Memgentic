@@ -5,8 +5,15 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+# Per-memory capture profile. ``raw`` = verbatim chunk, no LLM enrichment.
+# ``enriched`` = current default (topics/entities/LLM importance).
+# ``dual`` = both, paired via ``Memory.dual_sibling_id``.
+CaptureProfile = Literal["raw", "enriched", "dual"]
+CAPTURE_PROFILES: tuple[CaptureProfile, ...] = ("raw", "enriched", "dual")
 
 
 class ContentType(StrEnum):
@@ -184,6 +191,23 @@ class Memory(BaseModel):
     pinned_at: datetime | None = Field(
         default=None,
         description="When this memory was pinned",
+    )
+
+    # Capture profile provenance — which ingestion path produced this row
+    capture_profile: CaptureProfile = Field(
+        default="enriched",
+        description=(
+            "How this memory was captured: 'raw' (verbatim, no LLM), "
+            "'enriched' (current default, LLM-classified), or 'dual' "
+            "(paired with a sibling of the opposite profile)."
+        ),
+    )
+    dual_sibling_id: str | None = Field(
+        default=None,
+        description=(
+            "For dual-profile memories: the ID of the paired sibling row "
+            "(raw <-> enriched). NULL for standalone raw or enriched memories."
+        ),
     )
 
 

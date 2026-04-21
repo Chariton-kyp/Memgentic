@@ -15,8 +15,14 @@ import {
   getMe,
   clearApiKey,
   hasApiKey,
+  getCaptureProfileSetting,
+  updateCaptureProfileSetting,
 } from "@/lib/api";
-import type { HealthResponse, StatsResponse } from "@/lib/types";
+import type {
+  CaptureProfile,
+  HealthResponse,
+  StatsResponse,
+} from "@/lib/types";
 import { toast } from "sonner";
 import {
   Wifi,
@@ -32,7 +38,12 @@ import {
   FileUp,
   LogOut,
   User,
+  Layers,
 } from "lucide-react";
+import {
+  ApplyCaptureProfileButton,
+  CaptureProfileSelector,
+} from "@/components/capture-profile-selector";
 
 interface UserInfo {
   authenticated: boolean;
@@ -55,6 +66,10 @@ export default function SettingsPage() {
   const [importText, setImportText] = useState("");
   const [importing, setImporting] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [captureProfile, setCaptureProfile] = useState<CaptureProfile | null>(null);
+  const [pendingProfile, setPendingProfile] = useState<CaptureProfile | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
 
   const apiUrl =
     process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100/api/v1";
@@ -95,6 +110,37 @@ export default function SettingsPage() {
     }
   }, []);
 
+  const fetchCaptureProfile = useCallback(async () => {
+    try {
+      const setting = await getCaptureProfileSetting();
+      setCaptureProfile(setting.profile);
+      setPendingProfile(setting.profile);
+    } catch {
+      // Non-critical; UI falls back to "enriched" display
+      setCaptureProfile("enriched");
+      setPendingProfile("enriched");
+    }
+  }, []);
+
+  async function handleApplyCaptureProfile() {
+    if (!pendingProfile || pendingProfile === captureProfile) return;
+    setSavingProfile(true);
+    try {
+      const result = await updateCaptureProfileSetting(pendingProfile);
+      setCaptureProfile(result.profile);
+      setPendingProfile(result.profile);
+      toast.success("Capture profile updated", {
+        description: `New writes will use: ${result.profile}`,
+      });
+    } catch (err) {
+      toast.error("Failed to update capture profile", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
   function handleLogout() {
     clearApiKey();
     router.push("/login");
@@ -104,7 +150,8 @@ export default function SettingsPage() {
     checkHealth();
     fetchStats();
     fetchUser();
-  }, [checkHealth, fetchStats, fetchUser]);
+    fetchCaptureProfile();
+  }, [checkHealth, fetchStats, fetchUser, fetchCaptureProfile]);
 
   async function handleExport() {
     setExporting(true);
@@ -366,6 +413,51 @@ export default function SettingsPage() {
             </CardContent>
           </Card>
         )}
+
+        {/* Section 3b: Capture Profile */}
+        <Card className="md:col-span-2">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Layers className="size-4" />
+              Capture Profile
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Controls how new memories are stored. Raw keeps verbatim
+              content with no LLM calls; enriched (default) adds LLM-extracted
+              topics and importance; dual keeps both as paired rows. Changes
+              apply going forward — existing memories keep their original
+              profile.
+            </p>
+            {pendingProfile ? (
+              <CaptureProfileSelector
+                value={pendingProfile}
+                onChange={setPendingProfile}
+                disabled={savingProfile || captureProfile === null}
+              />
+            ) : (
+              <Skeleton className="h-28" />
+            )}
+            <div className="flex items-center justify-between">
+              <div className="text-xs text-muted-foreground">
+                {captureProfile && (
+                  <>
+                    Current: <span className="font-mono">{captureProfile}</span>
+                  </>
+                )}
+              </div>
+              {captureProfile && pendingProfile && (
+                <ApplyCaptureProfileButton
+                  current={captureProfile}
+                  pending={pendingProfile}
+                  saving={savingProfile}
+                  onApply={handleApplyCaptureProfile}
+                />
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         {/* Section 4: Quick Actions */}
         <Card className="md:col-span-2">

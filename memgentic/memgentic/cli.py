@@ -16,6 +16,27 @@ from memgentic.config import StorageBackend, settings
 console = Console()
 logger = structlog.get_logger()
 
+# Key used to persist the default capture profile in ``runtime_settings``.
+_CAPTURE_PROFILE_SETTING_KEY = "default_capture_profile"
+_VALID_CAPTURE_PROFILES = ("raw", "enriched", "dual")
+
+
+async def _apply_persisted_capture_profile(metadata_store) -> None:
+    """Load the persisted default capture profile (if any) into ``settings``.
+
+    Kept here — rather than in ``config.py`` — because Pydantic Settings is
+    constructed once at import time and has no DB access. Each CLI command
+    that touches the ingestion pipeline calls this after opening the
+    metadata store so runtime mutations via ``memgentic capture-profile set``
+    take effect without requiring an env-var restart.
+    """
+    try:
+        stored = await metadata_store.get_runtime_setting(_CAPTURE_PROFILE_SETTING_KEY)
+    except Exception:
+        stored = None
+    if stored and stored in _VALID_CAPTURE_PROFILES:
+        settings.default_capture_profile = stored  # type: ignore[assignment]
+
 
 @click.group()
 @click.version_option(version=__version__, prog_name="memgentic")
@@ -456,7 +477,20 @@ def sources():
     help="Source platform (e.g., claude_code, chatgpt)",
 )
 @click.option("--topics", default=None, help="Comma-separated topic tags")
-def remember(content: str, content_type: str, source: str, topics: str | None):
+@click.option(
+    "--profile",
+    "capture_profile",
+    type=click.Choice(["raw", "enriched", "dual"]),
+    default=None,
+    help="Capture profile override (raw skips LLM, dual stores both).",
+)
+def remember(
+    content: str,
+    content_type: str,
+    source: str,
+    topics: str | None,
+    capture_profile: str | None,
+):
     """Manually store a memory with optional metadata.
 
     \b
@@ -464,6 +498,7 @@ def remember(content: str, content_type: str, source: str, topics: str | None):
       memgentic remember "Always use UTC for timestamps"
       memgentic remember "Use Qdrant for vectors" -t decision -s claude_code
       memgentic remember "Python 3.12 supports type syntax" --topics python,types
+      memgentic remember "Verbatim note" --profile raw
     """
 
     async def _run():
@@ -481,6 +516,7 @@ def remember(content: str, content_type: str, source: str, topics: str | None):
 
         await metadata_store.initialize()
         await vector_store.initialize(metadata_store)
+        await _apply_persisted_capture_profile(metadata_store)
 
         try:
             topic_list = [t.strip() for t in topics.split(",")] if topics else []
@@ -501,13 +537,17 @@ def remember(content: str, content_type: str, source: str, topics: str | None):
                     content_type=ct,
                     platform=plat,
                     topics=topic_list,
+                    capture_profile=capture_profile,  # type: ignore[arg-type]
                 )
             except EmbeddingError as e:
                 console.print(f"[red]Embedding error:[/] {e}")
                 console.print("[yellow]Run 'memgentic doctor' to check your setup.[/]")
                 return
 
-            console.print(f"[green]Remembered![/] ID: {memory.id}")
+            console.print(
+                f"[green]Remembered![/] ID: {memory.id} "
+                f"(profile: [cyan]{memory.capture_profile}[/])"
+            )
         finally:
             await metadata_store.close()
             await vector_store.close()
@@ -522,7 +562,14 @@ def remember(content: str, content_type: str, source: str, topics: str | None):
     default=None,
     help="Only import from this platform (e.g., claude_code)",
 )
-def import_existing(source: str | None):
+@click.option(
+    "--profile",
+    "capture_profile",
+    type=click.Choice(["raw", "enriched", "dual"]),
+    default=None,
+    help="Capture profile for imported memories (raw skips LLM, dual stores both).",
+)
+def import_existing(source: str | None, capture_profile: str | None):
     """Import all existing conversations from supported AI tools.
 
     \b
@@ -534,6 +581,7 @@ def import_existing(source: str | None):
     Examples:
       memgentic import-existing                Import from all tools
       memgentic import-existing -s claude_code  Import only Claude Code
+      memgentic import-existing --profile raw   Verbatim-only bulk import
     """
 
     async def _run():
@@ -552,6 +600,7 @@ def import_existing(source: str | None):
 
         await metadata_store.initialize()
         await vector_store.initialize(metadata_store)
+        await _apply_persisted_capture_profile(metadata_store)
 
         try:
             adapters = get_import_adapters()
@@ -576,6 +625,7 @@ def import_existing(source: str | None):
                             platform=adapter.platform,
                             session_id=session_id,
                             file_path=str(file_path),
+                            capture_profile=capture_profile,  # type: ignore[arg-type]
                         )
                         count = len(memories)
                         if count > 0:
@@ -2219,6 +2269,84 @@ def update_context(hours: int, output: str):
                     console.print(f"[dim]No memories found in the last {hours} hours.[/]")
             else:
                 console.print("[red]Failed to generate context file.[/]")
+        finally:
+            await metadata_store.close()
+
+    asyncio.run(_run())
+
+
+@main.group("capture-profile")
+def capture_profile():
+    """Inspect or change the default memory capture profile.
+
+    \b
+    Profiles:
+      raw       Verbatim chunks, no LLM enrichment (~0 LLM calls)
+      enriched  Current default — topics, entities, LLM importance
+      dual      Both rows written and linked (2x storage, best fidelity)
+
+    \b
+    Examples:
+      memgentic capture-profile show
+      memgentic capture-profile set raw
+    """
+
+
+@capture_profile.command("show")
+def capture_profile_show():
+    """Print the effective default capture profile."""
+
+    async def _run():
+        from memgentic.storage.metadata import MetadataStore
+
+        metadata_store = MetadataStore(settings.sqlite_path)
+        await metadata_store.initialize()
+        try:
+            stored = await metadata_store.get_runtime_setting(_CAPTURE_PROFILE_SETTING_KEY)
+            effective = (
+                stored if stored in _VALID_CAPTURE_PROFILES else (settings.default_capture_profile)
+            )
+            console.print(f"Default capture profile: [cyan]{effective}[/]")
+            if stored:
+                console.print(
+                    f"(persisted via 'capture-profile set'; env baseline "
+                    f"is [dim]{settings.default_capture_profile}[/])"
+                )
+            else:
+                console.print("[dim](from config / env — not overridden at runtime)[/]")
+        finally:
+            await metadata_store.close()
+
+    asyncio.run(_run())
+
+
+@capture_profile.command("set")
+@click.argument("profile", type=click.Choice(list(_VALID_CAPTURE_PROFILES)))
+def capture_profile_set(profile: str):
+    """Persist ``profile`` as the new default capture profile.
+
+    The value is written to the ``runtime_settings`` table and picked up by
+    all subsequent ingestion calls (CLI, REST API, MCP). Env var
+    ``MEMGENTIC_DEFAULT_CAPTURE_PROFILE`` is still honoured as the baseline
+    when no runtime override exists.
+    """
+
+    async def _run():
+        from memgentic.storage.metadata import MetadataStore
+
+        metadata_store = MetadataStore(settings.sqlite_path)
+        await metadata_store.initialize()
+        try:
+            previous = await metadata_store.get_runtime_setting(_CAPTURE_PROFILE_SETTING_KEY)
+            await metadata_store.set_runtime_setting(_CAPTURE_PROFILE_SETTING_KEY, profile)
+            settings.default_capture_profile = profile  # type: ignore[assignment]
+            console.print(
+                f"[green]OK[/] default capture profile: "
+                f"[dim]{previous or settings.default_capture_profile}[/] -> "
+                f"[cyan]{profile}[/]"
+            )
+            if profile == "dual":
+                console.print("[yellow]Note:[/] 'dual' doubles storage per ingested memory.")
         finally:
             await metadata_store.close()
 

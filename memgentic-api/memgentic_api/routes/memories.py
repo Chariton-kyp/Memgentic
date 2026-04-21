@@ -62,6 +62,8 @@ def _memory_to_response(memory) -> MemoryResponse:
         ),
         is_pinned=memory.is_pinned,
         pinned_at=memory.pinned_at,
+        capture_profile=memory.capture_profile,
+        dual_sibling_id=memory.dual_sibling_id,
     )
 
 
@@ -228,6 +230,7 @@ async def create_memory(
         platform=platform,
         topics=body.topics,
         entities=body.entities,
+        capture_profile=body.capture_profile,
     )
     return _memory_to_response(memory)
 

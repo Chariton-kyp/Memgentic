@@ -1,6 +1,8 @@
 /** Memgentic API client — typed fetch wrapper for the REST API. */
 
 import type {
+  CaptureProfile,
+  CaptureProfileSetting,
   Collection,
   CollectionListResponse,
   CreateSkillRequest,
@@ -96,10 +98,24 @@ export async function createMemory(body: {
   content_type?: string;
   topics?: string[];
   source?: string;
+  capture_profile?: CaptureProfile;
 }): Promise<Memory> {
   return fetchJson(`${API_BASE}/memories`, {
     method: "POST",
     body: JSON.stringify(body),
+  });
+}
+
+export async function getCaptureProfileSetting(): Promise<CaptureProfileSetting> {
+  return fetchJson(`${API_BASE}/settings/capture-profile`);
+}
+
+export async function updateCaptureProfileSetting(
+  profile: CaptureProfile,
+): Promise<CaptureProfileSetting> {
+  return fetchJson(`${API_BASE}/settings/capture-profile`, {
+    method: "PUT",
+    body: JSON.stringify({ profile }),
   });
 }
 

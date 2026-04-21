@@ -10,6 +10,8 @@ export interface SourceMetadata {
   file_path: string | null;
 }
 
+export type CaptureProfile = "raw" | "enriched" | "dual";
+
 export interface Memory {
   id: string;
   content: string;
@@ -25,6 +27,12 @@ export interface Memory {
   last_accessed: string | null;
   access_count: number;
   source: SourceMetadata;
+  capture_profile?: CaptureProfile;
+  dual_sibling_id?: string | null;
+}
+
+export interface CaptureProfileSetting {
+  profile: CaptureProfile;
 }
 
 export interface MemoryListResponse {
