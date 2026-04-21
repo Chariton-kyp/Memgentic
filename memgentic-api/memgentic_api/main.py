@@ -24,6 +24,7 @@ from memgentic_api.routes import (
     import_export,
     ingestion,
     memories,
+    persona,
     skills,
     sources,
     stats,
@@ -272,6 +273,7 @@ app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"], dependenc
 app.include_router(skills.router, prefix="/api/v1", tags=["skills"], dependencies=_auth)
 app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"], dependencies=_auth)
 app.include_router(settings_routes.router, prefix="/api/v1", tags=["settings"], dependencies=_auth)
+app.include_router(persona.router, prefix="/api/v1", tags=["persona"], dependencies=_auth)
 
 # WebSocket — no auth dependency (clients authenticate via initial message if needed)
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])

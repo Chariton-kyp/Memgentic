@@ -43,6 +43,9 @@ dependencies = [
 
     # Default vector backend (zero-config, multi-process safe via SQLite WAL)
     "sqlite-vec>=0.1.9",
+
+    # YAML parsing (persona card)
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]

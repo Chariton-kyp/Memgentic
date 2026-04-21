@@ -9,6 +9,8 @@ Tools:
 - memgentic_recent: Get recent memories
 - memgentic_stats: Memory statistics
 - memgentic_briefing: Cross-agent briefing of recent memories
+- memgentic_persona_get: Read the current persona card (T0)
+- memgentic_persona_update: Update a persona field via dotted path
 
 Prompts (slash commands):
 - briefing: Get a cross-tool memory briefing of recent activity
@@ -1442,6 +1444,122 @@ async def memgentic_skill_tool(params: SkillInput, ctx: Context) -> str:
     except Exception as exc:
         logger.error("memgentic_skill.error", error=str(exc))
         return f"Error retrieving skill: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Persona (T0 Recall Tier) — two read/write tools
+# ---------------------------------------------------------------------------
+
+
+class PersonaUpdateInput(BaseModel):
+    """Input for :func:`memgentic_persona_update`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    field: str = Field(
+        ...,
+        description="Dotted path, e.g. 'identity.name' or 'metadata.workspace_inherit'",
+        min_length=1,
+    )
+    value: str | int | float | bool | list[str] | None = Field(
+        ...,
+        description="New value. Scalars and string lists are accepted.",
+    )
+
+
+@mcp.tool(
+    name="memgentic_persona_get",
+    annotations={
+        "title": "Get Persona",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_persona_get(ctx: Context) -> str:
+    """Return the current persona card as JSON.
+
+    Falls back to a safe default when ``~/.memgentic/persona.yaml`` is
+    missing. The T0 Recall Tier calls this at session start.
+
+    Returns:
+        str: JSON representation of ``{identity, people, projects, preferences, metadata}``.
+    """
+    try:
+        import json
+
+        from memgentic.persona import load_or_default
+
+        persona = load_or_default()
+        return json.dumps(persona.model_dump(mode="json"), indent=2)
+    except Exception as exc:
+        logger.error("memgentic_persona_get.error", error=str(exc))
+        return f"Error loading persona: {exc}"
+
+
+@mcp.tool(
+    name="memgentic_persona_update",
+    annotations={
+        "title": "Update Persona",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_persona_update(params: PersonaUpdateInput, ctx: Context) -> str:
+    """Update a single field on the persona via a dotted path.
+
+    Validates the full persona after the write; invalid updates are
+    rejected without touching disk.
+
+    Args:
+        params (PersonaUpdateInput):
+            - field (str): dotted path, e.g. 'identity.name'
+            - value: new value (scalar or list of strings)
+
+    Returns:
+        str: JSON of the updated persona, or an error message.
+    """
+    try:
+        import json
+
+        from memgentic.persona import default_persona, load, save
+        from memgentic.persona.schema import validate
+
+        try:
+            persona = load()
+        except Exception as exc:
+            return f"Error: existing persona.yaml is invalid: {exc}"
+        if persona is None:
+            persona = default_persona()
+
+        parts = params.field.split(".")
+        if not parts or not all(parts):
+            return "Error: field must be a non-empty dotted path"
+
+        data = persona.model_dump(mode="json")
+        cursor = data
+        for part in parts[:-1]:
+            if not isinstance(cursor, dict) or part not in cursor:
+                return f"Error: path '{params.field}' does not exist in the persona"
+            cursor = cursor[part]
+        if not isinstance(cursor, dict):
+            return f"Error: path '{params.field}' resolves to a non-mapping node"
+        cursor[parts[-1]] = params.value
+
+        try:
+            updated = validate(data)
+        except Exception as exc:
+            return f"Error: update would make the persona invalid: {exc}"
+
+        updated.metadata.generated_by = "edited"
+        save(updated)
+        return json.dumps(updated.model_dump(mode="json"), indent=2)
+    except Exception as exc:
+        logger.error("memgentic_persona_update.error", error=str(exc))
+        return f"Error updating persona: {exc}"
 
 
 def _redirect_logs_to_stderr() -> None:

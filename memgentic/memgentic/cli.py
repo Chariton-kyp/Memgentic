@@ -2353,5 +2353,386 @@ def capture_profile_set(profile: str):
     asyncio.run(_run())
 
 
+# ---------------------------------------------------------------------------
+# memgentic persona ...
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="persona")
+def persona_group():
+    """Manage the Persona card (T0 of Recall Tiers).
+
+    \b
+    The persona is a structured "who is this agent" card stored at
+    ~/.memgentic/persona.yaml. It's loaded at the top of every session
+    and sets identity, people, projects, and behavioural preferences.
+
+    \b
+    Subcommands:
+      init          Bootstrap a persona from recent memories (LLM)
+      show          Print the current persona (raw or rendered)
+      edit          Open the persona in $EDITOR
+      validate      Schema-check the current file
+      path          Print the on-disk file path
+      set           Set a field via a dotted path
+      add-person    Add a person to the persona
+      add-project   Add a project to the persona
+    """
+
+
+def _run_async(coro):
+    """Run an async coroutine from a Click command."""
+    return asyncio.run(coro)
+
+
+def _format_persona_yaml(persona) -> str:
+    """Render a Persona as YAML for CLI display."""
+    from memgentic.persona.loader import _persona_to_yaml
+
+    return _persona_to_yaml(persona)
+
+
+def _diff_personas(old, new) -> str:
+    """Return a unified diff between two personas (for bootstrap preview)."""
+    import difflib
+
+    old_text = _format_persona_yaml(old) if old is not None else ""
+    new_text = _format_persona_yaml(new)
+    diff = difflib.unified_diff(
+        old_text.splitlines(keepends=True),
+        new_text.splitlines(keepends=True),
+        fromfile="current",
+        tofile="proposed",
+    )
+    return "".join(diff)
+
+
+@persona_group.command("init")
+@click.option("--yes", is_flag=True, help="Auto-accept the LLM bootstrap without prompting")
+@click.option(
+    "--from",
+    "source",
+    type=click.Choice(["recent", "skills"]),
+    default="recent",
+    help="What the LLM should scan: recent memories (default) or top skills",
+)
+@click.option("--limit", default=100, help="How many items to feed the LLM (default 100)")
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Overwrite an existing persona.yaml without confirmation",
+)
+def persona_init(yes: bool, source: str, limit: int, force: bool):
+    """LLM-powered bootstrap from recent memories or skills.
+
+    \b
+    Examples:
+      memgentic persona init                LLM proposes a draft (requires confirmation)
+      memgentic persona init --yes          Auto-accept the bootstrap
+      memgentic persona init --from skills  Use the skills list instead of memories
+    """
+    from memgentic.persona import bootstrap as bootstrap_persona
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import save as persona_save
+    from memgentic.persona.loader import PersonaLockError
+
+    async def _run():
+        try:
+            current = persona_load()
+        except Exception as exc:
+            console.print(f"[yellow]Warning:[/] existing persona is invalid: {exc}")
+            current = None
+
+        if current is not None and not force and not yes:
+            console.print(
+                "[yellow]A persona already exists.[/] "
+                "Re-run with --force to overwrite, or `memgentic persona edit` to tweak."
+            )
+            return 1
+
+        console.print("[bold]Asking the LLM to propose a persona...[/]")
+        try:
+            proposed = await bootstrap_persona(source=source, limit=limit)  # type: ignore[arg-type]
+        except Exception as exc:
+            console.print(f"[red]Bootstrap failed:[/] {exc}")
+            return 1
+
+        if proposed is None:
+            console.print(
+                "[red]Bootstrap could not produce a persona.[/] "
+                "Check that GOOGLE_API_KEY or a local Ollama LLM is configured, "
+                "then try again. Falling back: `memgentic persona edit`."
+            )
+            return 1
+
+        console.print("\n[bold]Proposed persona:[/]")
+        console.print(_format_persona_yaml(proposed))
+
+        if current is not None:
+            console.print("\n[bold]Diff vs. current:[/]")
+            diff = _diff_personas(current, proposed)
+            console.print(diff or "(identical)")
+
+        if not yes and not click.confirm("Save this persona?", default=True):
+            console.print("[dim]Aborted. Nothing written.[/]")
+            return 1
+
+        try:
+            path = persona_save(proposed)
+        except PersonaLockError as exc:
+            console.print(f"[red]Could not acquire persona lock:[/] {exc}")
+            return 1
+        console.print(f"[green]OK[/] Wrote {path}")
+        return 0
+
+    raise SystemExit(_run_async(_run()) or 0)
+
+
+@persona_group.command("show")
+@click.option(
+    "--render",
+    is_flag=True,
+    help="Render the T0 briefing (~100 tokens) instead of the raw YAML",
+)
+def persona_show(render: bool):
+    """Print the current persona (raw YAML, or T0-rendered briefing)."""
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import load_or_default, render_t0
+
+    if render:
+        console.print(render_t0(load_or_default()))
+        return
+
+    try:
+        persona = persona_load()
+    except Exception as exc:
+        console.print(f"[red]Invalid persona.yaml:[/] {exc}")
+        raise SystemExit(1) from exc
+
+    if persona is None:
+        console.print(
+            "[yellow]No persona file yet.[/] "
+            "Run `memgentic persona init` to bootstrap one from your memories, "
+            "or `memgentic persona edit` to write one by hand."
+        )
+        return
+    console.print(_format_persona_yaml(persona))
+
+
+@persona_group.command("edit")
+def persona_edit():
+    """Open the persona in $EDITOR (creates the file with defaults first if missing)."""
+    from memgentic.persona import default_persona
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import save as persona_save
+    from memgentic.persona.loader import get_persona_path
+
+    path = get_persona_path()
+    if not path.exists():
+        persona_save(default_persona())
+
+    click.edit(filename=str(path))
+
+    # Re-validate after the user closes the editor
+    try:
+        persona_load()
+    except Exception as exc:
+        console.print(f"[red]Saved file failed validation:[/] {exc}")
+        console.print("Fix the file or run `memgentic persona validate` for details.")
+        raise SystemExit(1) from exc
+    console.print(f"[green]OK[/] {path}")
+
+
+@persona_group.command("validate")
+def persona_validate():
+    """Validate ~/.memgentic/persona.yaml against the schema."""
+    from memgentic.persona import load as persona_load
+    from memgentic.persona.loader import get_persona_path
+
+    path = get_persona_path()
+    if not path.exists():
+        console.print(f"[yellow]No file at[/] {path}")
+        raise SystemExit(1)
+
+    try:
+        persona_load()
+    except Exception as exc:
+        console.print(f"[red]Invalid persona.yaml:[/] {exc}")
+        raise SystemExit(2) from exc
+    console.print(f"[green]OK[/] {path}")
+
+
+@persona_group.command("path")
+def persona_path():
+    """Print the persona file path."""
+    from memgentic.persona.loader import get_persona_path
+
+    # click.echo bypasses Rich's console width wrapping so the path stays
+    # on a single line — important for piping into other tools.
+    click.echo(str(get_persona_path()))
+
+
+def _coerce_scalar(value: str):
+    """Coerce a CLI string to bool/int/float when possible, else leave as str."""
+    lowered = value.lower()
+    if lowered in ("true", "yes", "on"):
+        return True
+    if lowered in ("false", "no", "off"):
+        return False
+    try:
+        return int(value)
+    except ValueError:
+        pass
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    return value
+
+
+@persona_group.command("set")
+@click.argument("field")
+@click.argument("value")
+def persona_set(field: str, value: str):
+    """Set a field via a dotted path (e.g. `identity.name Atlas`).
+
+    \b
+    Examples:
+      memgentic persona set identity.name Atlas
+      memgentic persona set metadata.workspace_inherit true
+      memgentic persona set preferences.remember "decisions,stack choices"
+    """
+    from memgentic.persona import default_persona
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import save as persona_save
+
+    try:
+        persona = persona_load()
+    except Exception as exc:
+        console.print(f"[red]Invalid persona.yaml:[/] {exc}")
+        raise SystemExit(1) from exc
+
+    if persona is None:
+        persona = default_persona()
+
+    parts = field.split(".")
+    if not parts or not all(parts):
+        console.print("[red]Field must be a non-empty dotted path, e.g. 'identity.name'[/]")
+        raise SystemExit(1)
+
+    data = persona.model_dump(mode="json")
+    # List-valued leaves accept a comma-separated string.
+    coerced: object
+    if "," in value and field.split(".")[-1] in {
+        "preferences",
+        "do_not",
+        "remember",
+        "avoid",
+        "stack",
+    }:
+        coerced = [v.strip() for v in value.split(",") if v.strip()]
+    else:
+        coerced = _coerce_scalar(value)
+
+    cursor = data
+    for part in parts[:-1]:
+        if not isinstance(cursor, dict) or part not in cursor:
+            console.print(f"[red]Path '{field}' does not exist in the persona[/]")
+            raise SystemExit(1)
+        cursor = cursor[part]
+    if not isinstance(cursor, dict):
+        console.print(f"[red]Path '{field}' resolves to a non-mapping node[/]")
+        raise SystemExit(1)
+    cursor[parts[-1]] = coerced
+
+    from memgentic.persona.schema import validate as validate_persona
+
+    try:
+        updated = validate_persona(data)
+    except Exception as exc:
+        console.print(f"[red]Update would make the persona invalid:[/] {exc}")
+        raise SystemExit(1) from exc
+    updated.metadata.generated_by = "edited"
+    persona_save(updated)
+    console.print(f"[green]OK[/] {field} = {coerced!r}")
+
+
+@persona_group.command("add-person")
+@click.argument("name")
+@click.option("--relationship", default=None)
+@click.option(
+    "--preferences",
+    default=None,
+    help="Comma-separated preferences (e.g. 'PostgreSQL,mornings only')",
+)
+@click.option(
+    "--do-not",
+    "do_not",
+    default=None,
+    help="Comma-separated do-not rules",
+)
+def persona_add_person(
+    name: str,
+    relationship: str | None,
+    preferences: str | None,
+    do_not: str | None,
+):
+    """Append a person to the persona."""
+    from memgentic.persona import default_persona
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import save as persona_save
+    from memgentic.persona.schema import Person
+
+    persona = persona_load() or default_persona()
+    person = Person(
+        name=name,
+        relationship=relationship,
+        preferences=[p.strip() for p in (preferences or "").split(",") if p.strip()],
+        do_not=[d.strip() for d in (do_not or "").split(",") if d.strip()],
+    )
+    persona.people.append(person)
+    persona.metadata.generated_by = "edited"
+    persona_save(persona)
+    console.print(f"[green]OK[/] added person: {name}")
+
+
+@persona_group.command("add-project")
+@click.argument("name")
+@click.option(
+    "--status",
+    type=click.Choice(["active", "paused", "archived"]),
+    default="active",
+)
+@click.option(
+    "--stack",
+    default=None,
+    help="Comma-separated tech stack tags (e.g. 'next.js,postgres')",
+)
+@click.option("--tldr", default=None, help="One-line project summary")
+def persona_add_project(
+    name: str,
+    status: str,
+    stack: str | None,
+    tldr: str | None,
+):
+    """Append a project to the persona."""
+    from memgentic.persona import default_persona
+    from memgentic.persona import load as persona_load
+    from memgentic.persona import save as persona_save
+    from memgentic.persona.schema import Project
+
+    persona = persona_load() or default_persona()
+    project = Project(
+        name=name,
+        status=status,  # type: ignore[arg-type]
+        stack=[s.strip() for s in (stack or "").split(",") if s.strip()],
+        tldr=tldr,
+    )
+    persona.projects.append(project)
+    persona.metadata.generated_by = "edited"
+    persona_save(persona)
+    console.print(f"[green]OK[/] added project: {name}")
+
+
 if __name__ == "__main__":
     main()
