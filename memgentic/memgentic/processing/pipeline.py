@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import hashlib
+import os
 import time
 from typing import Any
 
@@ -432,6 +433,19 @@ class IngestionPipeline:
         ):
             await self._detect_contradictions(memories)
 
+        # Step 4c-2: Chronograph triple extraction — LLM proposes bitemporal
+        # subject-predicate-object triples from enriched memories. Gated on
+        # ``MEMGENTIC_EXTRACT_TRIPLES=1`` during the initial rollout so the
+        # default ingestion path is unchanged; raw memories still bypass it.
+        if (
+            capture_profile != "raw"
+            and HAS_INTELLIGENCE
+            and self._llm_client
+            and self._llm_client.available
+            and os.getenv("MEMGENTIC_EXTRACT_TRIPLES") == "1"
+        ):
+            await self._extract_chronograph_triples(memories)
+
         # Step 4d: Dual-profile sibling — for every enriched memory just stored,
         # write a matching raw sibling containing the verbatim chunk text, no
         # topics/entities, importance 0.5. Pair them both ways via
@@ -572,6 +586,16 @@ class IngestionPipeline:
         if self._graph and (memory.topics or memory.entities):
             await self._graph.add_memory(memory.id, memory.topics, memory.entities)
 
+        # Chronograph triple extraction (gated by MEMGENTIC_EXTRACT_TRIPLES=1)
+        if (
+            profile != "raw"
+            and HAS_INTELLIGENCE
+            and self._llm_client
+            and self._llm_client.available
+            and os.getenv("MEMGENTIC_EXTRACT_TRIPLES") == "1"
+        ):
+            await self._extract_chronograph_triples([memory])
+
         # Dual profile: spawn a verbatim raw sibling paired with this memory.
         if profile == "dual":
             raw_sibling = Memory(
@@ -653,6 +677,43 @@ class IngestionPipeline:
                         similarity=round(score, 3),
                         text_overlap=round(overlap, 3),
                     )
+
+    async def _extract_chronograph_triples(self, memories: list[Memory]) -> None:
+        """Propose Chronograph triples for newly-stored memories.
+
+        Any failure is logged and swallowed — triple extraction is best-effort
+        and must never block the ingestion pipeline. Triples land with
+        ``status="proposed"`` so the dashboard validation queue gates them.
+        """
+        try:
+            from memgentic.graph import get_chronograph
+            from memgentic.graph.extractor import extract_triples, store_proposed
+        except ImportError as exc:  # pragma: no cover — intelligence extras required
+            logger.debug("pipeline.chronograph_unavailable", error=str(exc))
+            return
+
+        try:
+            chronograph = await get_chronograph()
+        except Exception as exc:
+            logger.warning("pipeline.chronograph_init_failed", error=str(exc))
+            return
+
+        for memory in memories:
+            try:
+                proposed = await extract_triples(memory, self._llm_client, chronograph)
+                if proposed:
+                    await store_proposed(proposed, chronograph)
+                    logger.info(
+                        "pipeline.triples_proposed",
+                        memory_id=memory.id[:8],
+                        count=len(proposed),
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "pipeline.triple_extraction_failed",
+                    memory_id=memory.id[:8],
+                    error=str(exc),
+                )
 
     @staticmethod
     async def _compute_file_hash(file_path: str) -> str:

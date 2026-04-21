@@ -1484,20 +1484,23 @@ EMBEDDING_PRESETS = {
 }
 
 
-@main.command()
+@main.command("graph-neighbors")
 @click.argument("entity")
 @click.option("--depth", "-d", default=1, type=int, help="Traversal depth (1-3)")
-def graph(entity: str, depth: int):
-    """Explore the knowledge graph around an entity.
+def graph_neighbors(entity: str, depth: int):
+    """Explore the co-occurrence graph around an entity.
 
     \b
-    Shows neighbors of the given entity/topic in the knowledge graph,
-    revealing connections between concepts across your memories.
+    Shows neighbors of the given entity/topic in the NetworkX
+    co-occurrence graph (memories where terms appear together).
+
+    For the bitemporal triple store use ``memgentic graph query``
+    instead.
 
     \b
     Examples:
-      memgentic graph python
-      memgentic graph "FastAPI" --depth 2
+      memgentic graph-neighbors python
+      memgentic graph-neighbors "FastAPI" --depth 2
     """
 
     async def _run():
@@ -2732,6 +2735,365 @@ def persona_add_project(
     persona.metadata.generated_by = "edited"
     persona_save(persona)
     console.print(f"[green]OK[/] added project: {name}")
+
+
+# ---------------------------------------------------------------------------
+# memgentic graph ...  (Chronograph — bitemporal entity-relationship graph)
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="graph")
+def graph_group():
+    """Inspect and manage the Chronograph (bitemporal triple store).
+
+    \b
+    The Chronograph stores subject-predicate-object triples with
+    validity windows. LLM-proposed triples land as 'proposed' and must
+    be accepted via the validation queue before they surface in queries.
+
+    \b
+    Subcommands:
+      status          Show entity / triple counts
+      query ENTITY    Current facts about an entity
+      timeline ENT    Chronological fact stream
+      add S P O       Add and accept a triple manually
+      invalidate ...  Close an open validity window
+      proposed        Show the LLM validation queue
+      accept ID       Accept a proposed triple
+      reject ID       Reject a proposed triple
+      edit ID ...     Edit a triple (predicate / dates / confidence)
+      extract         Re-run extractor on a memory
+      backfill        Extract from existing enriched memories
+    """
+
+
+def _display_triples(triples, title: str) -> None:
+    table = Table(title=title)
+    table.add_column("id", style="dim")
+    table.add_column("subject", style="cyan")
+    table.add_column("predicate", style="magenta")
+    table.add_column("object", style="cyan")
+    table.add_column("valid_from")
+    table.add_column("valid_to")
+    table.add_column("status")
+    table.add_column("conf", justify="right")
+    for t in triples:
+        table.add_row(
+            t.id[:10],
+            t.subject,
+            t.predicate,
+            t.object,
+            t.valid_from.isoformat() if t.valid_from else "",
+            t.valid_to.isoformat() if t.valid_to else "",
+            t.status,
+            f"{t.confidence:.2f}",
+        )
+    console.print(table)
+
+
+@graph_group.command("status")
+def graph_status():
+    """Print counts for the Chronograph (entities / triples by status)."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        stats = await cg.stats()
+        console.print(
+            f"[cyan]entities:[/] {stats['entities']}   "
+            f"[cyan]triples:[/] {stats['triples']}   "
+            f"[cyan]predicates:[/] {stats['predicates']}"
+        )
+        console.print(
+            f"  accepted={stats['accepted']}  proposed={stats['proposed']}  "
+            f"rejected={stats['rejected']}  edited={stats['edited']}"
+        )
+
+    asyncio.run(_run())
+
+
+@graph_group.command("query")
+@click.argument("entity")
+@click.option("--as-of", default=None, help="ISO date (YYYY-MM-DD). Default: today.")
+@click.option(
+    "--direction",
+    type=click.Choice(["subject", "object", "both"]),
+    default="both",
+)
+@click.option(
+    "--status",
+    type=click.Choice(["proposed", "accepted", "rejected", "edited", "any"]),
+    default="accepted",
+)
+def graph_query(entity: str, as_of: str | None, direction: str, status: str):
+    """List triples touching ENTITY valid at AS_OF (default: today)."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        triples = await cg.query_entity(
+            entity, as_of=as_of, direction=direction, status=status  # type: ignore[arg-type]
+        )
+        if not triples:
+            console.print(f"[dim]no {status} triples for {entity} at {as_of or 'today'}[/]")
+            return
+        _display_triples(triples, f"triples for {entity}")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("timeline")
+@click.argument("entity", required=False)
+@click.option("--limit", default=100, type=int)
+@click.option(
+    "--status",
+    type=click.Choice(["proposed", "accepted", "rejected", "edited", "any"]),
+    default="accepted",
+)
+def graph_timeline(entity: str | None, limit: int, status: str):
+    """Show the timeline of triples for ENTITY (or all entities)."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        triples = await cg.timeline(entity=entity, status=status, limit=limit)  # type: ignore[arg-type]
+        if not triples:
+            console.print("[dim]no triples[/]")
+            return
+        _display_triples(triples, f"timeline — {entity or 'all'}")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("add")
+@click.argument("subject")
+@click.argument("predicate")
+@click.argument("object_")
+@click.option("--from", "valid_from", default=None, help="ISO date (YYYY-MM-DD)")
+@click.option("--to", "valid_to", default=None, help="ISO date (YYYY-MM-DD)")
+@click.option("--confidence", default=1.0, type=float)
+@click.option(
+    "--status",
+    type=click.Choice(["proposed", "accepted", "edited"]),
+    default="accepted",
+)
+def graph_add(
+    subject: str,
+    predicate: str,
+    object_: str,
+    valid_from: str | None,
+    valid_to: str | None,
+    confidence: float,
+    status: str,
+):
+    """Add a triple — SUBJECT PREDICATE OBJECT (accepted by default)."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        triple = await cg.add_triple(
+            subject=subject,
+            predicate=predicate,
+            object=object_,
+            valid_from=valid_from,
+            valid_to=valid_to,
+            confidence=confidence,
+            proposer="user",
+            status=status,  # type: ignore[arg-type]
+        )
+        console.print(
+            f"[green]OK[/] {triple.id[:10]} "
+            f"{triple.subject} {triple.predicate} {triple.object}"
+        )
+
+    asyncio.run(_run())
+
+
+@graph_group.command("invalidate")
+@click.argument("subject")
+@click.argument("predicate")
+@click.argument("object_")
+@click.option("--ended", default=None, help="ISO date when the fact stopped being true")
+def graph_invalidate(subject: str, predicate: str, object_: str, ended: str | None):
+    """Close the validity window for SUBJECT PREDICATE OBJECT."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        await cg.invalidate(subject, predicate, object_, ended=ended)
+        console.print("[green]OK[/] invalidated")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("proposed")
+@click.option("--limit", default=50, type=int)
+def graph_proposed(limit: int):
+    """List LLM-proposed triples waiting for validation."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        triples = await cg.list_proposed(limit=limit)
+        if not triples:
+            console.print("[dim]no proposed triples[/]")
+            return
+        _display_triples(triples, "validation queue")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("accept")
+@click.argument("triple_id")
+def graph_accept(triple_id: str):
+    """Accept a proposed triple by id."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        try:
+            triple = await cg.accept(triple_id)
+        except LookupError:
+            console.print(f"[red]no triple[/] {triple_id}")
+            return
+        console.print(f"[green]accepted[/] {triple.id[:10]}")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("reject")
+@click.argument("triple_id")
+def graph_reject(triple_id: str):
+    """Reject a proposed triple by id."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        try:
+            triple = await cg.reject(triple_id)
+        except LookupError:
+            console.print(f"[red]no triple[/] {triple_id}")
+            return
+        console.print(f"[yellow]rejected[/] {triple.id[:10]}")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("edit")
+@click.argument("triple_id")
+@click.option("--predicate", default=None)
+@click.option("--valid-from", default=None)
+@click.option("--valid-to", default=None)
+@click.option("--confidence", default=None, type=float)
+def graph_edit(
+    triple_id: str,
+    predicate: str | None,
+    valid_from: str | None,
+    valid_to: str | None,
+    confidence: float | None,
+):
+    """Edit a triple by id — changes identity fields create a new row."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+
+        cg = await get_chronograph()
+        fields: dict = {}
+        if predicate is not None:
+            fields["predicate"] = predicate
+        if valid_from is not None:
+            fields["valid_from"] = valid_from
+        if valid_to is not None:
+            fields["valid_to"] = valid_to
+        if confidence is not None:
+            fields["confidence"] = confidence
+        try:
+            triple = await cg.edit(triple_id, **fields)
+        except LookupError:
+            console.print(f"[red]no triple[/] {triple_id}")
+            return
+        console.print(f"[green]updated[/] {triple.id[:10]}")
+
+    asyncio.run(_run())
+
+
+@graph_group.command("extract")
+@click.option("--memory", "memory_id", required=True, help="Memory id to extract triples from")
+def graph_extract(memory_id: str):
+    """Re-run the LLM triple extractor on a single memory."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+        from memgentic.graph.extractor import extract_triples, store_proposed
+        from memgentic.processing.llm import LLMClient
+        from memgentic.storage.metadata import MetadataStore
+
+        metadata_store = MetadataStore(settings.sqlite_path)
+        await metadata_store.initialize()
+        try:
+            memory = await metadata_store.get_memory(memory_id)
+            if memory is None:
+                console.print(f"[red]memory not found:[/] {memory_id}")
+                return
+            llm = LLMClient(settings)
+            if not llm.available:
+                console.print("[red]no LLM configured[/] — set GOOGLE_API_KEY or enable Ollama")
+                return
+            cg = await get_chronograph()
+            proposed = await extract_triples(memory, llm, cg)
+            ids = await store_proposed(proposed, cg)
+            console.print(f"[green]proposed[/] {len(ids)} triple(s) from memory {memory_id[:8]}")
+        finally:
+            await metadata_store.close()
+
+    asyncio.run(_run())
+
+
+@graph_group.command("backfill")
+@click.option("--batch", default=50, type=int, help="Max memories per run")
+@click.option("--dry-run", is_flag=True, default=False)
+def graph_backfill(batch: int, dry_run: bool):
+    """Extract triples from already-ingested enriched memories."""
+
+    async def _run():
+        from memgentic.graph import get_chronograph
+        from memgentic.graph.extractor import extract_triples, store_proposed
+        from memgentic.processing.llm import LLMClient
+        from memgentic.storage.metadata import MetadataStore
+
+        metadata_store = MetadataStore(settings.sqlite_path)
+        await metadata_store.initialize()
+        try:
+            llm = LLMClient(settings)
+            if not llm.available:
+                console.print("[red]no LLM configured[/]")
+                return
+            cg = await get_chronograph()
+            memories = await metadata_store.get_memories_by_filter(limit=batch)
+            total = 0
+            for mem in memories:
+                if mem.capture_profile == "raw":
+                    continue
+                proposed = await extract_triples(mem, llm, cg)
+                if dry_run:
+                    console.print(f"{mem.id[:8]} -> {len(proposed)} triple(s)")
+                else:
+                    await store_proposed(proposed, cg)
+                total += len(proposed)
+            verb = "would propose" if dry_run else "proposed"
+            console.print(f"[green]{verb}[/] {total} triple(s) across {len(memories)} memories")
+        finally:
+            await metadata_store.close()
+
+    asyncio.run(_run())
 
 
 if __name__ == "__main__":
