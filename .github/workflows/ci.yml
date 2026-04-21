@@ -36,6 +36,14 @@ jobs:
         run: |
           uv run pytest memgentic-api/tests/ -q \
             --timeout=60 --timeout-method=thread
+      - name: Run benchmark harness tests (unit only — no dataset downloads)
+        timeout-minutes: 3
+        # Phase-1 benchmark harness: scorers, corpus loader, and
+        # harness-lifecycle unit tests. Full benchmark runs are NOT in CI
+        # — see benchmarks/README.md for the reproducibility story.
+        run: |
+          uv run pytest benchmarks/tests/ -q \
+            --timeout=30 --timeout-method=thread
 
   lint:
     runs-on: ubuntu-latest
@@ -47,9 +55,9 @@ jobs:
       - name: Install dependencies
         run: uv sync --dev
       - name: Lint
-        run: uv run ruff check memgentic/ memgentic-api/
+        run: uv run ruff check memgentic/ memgentic-api/ benchmarks/
       - name: Format check
-        run: uv run ruff format --check memgentic/ memgentic-api/
+        run: uv run ruff format --check memgentic/ memgentic-api/ benchmarks/
 
   typecheck:
     runs-on: ubuntu-latest

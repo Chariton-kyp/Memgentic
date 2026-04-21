@@ -1,0 +1,3 @@
+# Placeholder — JSONL benchmark results are written into this directory
+# by the Phase 2 runs (see benchmarks/README.md). The directory is kept
+# empty in the Phase 1 PR on purpose.
