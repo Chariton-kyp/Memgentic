@@ -46,3 +46,14 @@ repos:
         args:
           - --types=feat,fix,perf,revert,refactor,docs,test,tests,build,ci,chore,style,security,dx
           - --strict
+
+  # Pyright is selective on purpose: it runs on release tooling and
+  # new boundary scripts, not on the whole core codebase (which has
+  # pre-existing typing debt that's out of scope for this hook).
+  # Expand `files:` deliberately when a module is cleaned up.
+  - repo: https://github.com/RobertCraigie/pyright-python
+    rev: v1.1.402
+    hooks:
+      - id: pyright
+        files: '^scripts/.*\.py$'
+        additional_dependencies: []
