@@ -1,0 +1,65 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "bootstrap-sha": "a16b45d85ea70a348a363ec9dda68e00b266bd06",
+  "include-component-in-tag": true,
+  "separate-pull-requests": false,
+  "plugins": [
+    {
+      "type": "linked-versions",
+      "groupName": "memgentic",
+      "components": ["memgentic", "memgentic-api", "memgentic-native"]
+    }
+  ],
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "security", "section": "Security" },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "tests", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build System", "hidden": true },
+    { "type": "ci", "section": "Continuous Integration", "hidden": true },
+    { "type": "chore", "section": "Miscellaneous Chores", "hidden": true },
+    { "type": "dx", "section": "Developer Experience", "hidden": true },
+    { "type": "style", "section": "Styles", "hidden": true }
+  ],
+  "packages": {
+    "memgentic": {
+      "package-name": "memgentic",
+      "release-type": "python",
+      "tag-separator": "-",
+      "component": "",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "python",
+          "path": "memgentic/__version__.py"
+        }
+      ]
+    },
+    "memgentic-api": {
+      "package-name": "memgentic-api",
+      "release-type": "python",
+      "tag-separator": "-",
+      "component": "api",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "python",
+          "path": "memgentic_api/__init__.py"
+        }
+      ]
+    },
+    "memgentic-native": {
+      "package-name": "memgentic-native",
+      "release-type": "rust",
+      "tag-separator": "-",
+      "component": "native",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}

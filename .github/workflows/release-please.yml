@@ -1,0 +1,48 @@
+name: Release Please
+
+# Scans commits since the last release, opens or updates a "chore(main): release X.Y.Z"
+# PR with version bumps and CHANGELOG. When merged, creates git tags (v*, api-v*,
+# native-v*) that fire the existing publish workflows.
+#
+# Linked versioning: all 3 packages (memgentic, memgentic-api, memgentic-native)
+# always bump together. See .release-please-config.json and
+# docs/architecture/release-automation.md.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    name: Open / update Release PR
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: .release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Summary
+        if: always()
+        env:
+          PATHS_RELEASED: ${{ steps.release.outputs.paths_released }}
+          RELEASES_CREATED: ${{ steps.release.outputs.releases_created }}
+          PR: ${{ steps.release.outputs.pr }}
+        run: |
+          {
+            echo "## Release Please"
+            echo ""
+            echo "- paths_released: ${PATHS_RELEASED:-none}"
+            echo "- releases_created: ${RELEASES_CREATED:-false}"
+            echo "- pr: ${PR:-none}"
+          } >> "$GITHUB_STEP_SUMMARY"
