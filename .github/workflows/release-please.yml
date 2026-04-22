@@ -28,7 +28,15 @@ jobs:
       - uses: googleapis/release-please-action@5c625bfb5d1ff62eadeeb3772007f7f66fdcf071 # v4.4.1
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # ``RELEASE_PLEASE_TOKEN`` is a personal access token with
+          # ``contents: write`` + ``pull_requests: write`` scopes on this
+          # repo. Falling back to ``GITHUB_TOKEN`` silently regresses
+          # release automation — tags pushed by GITHUB_TOKEN do NOT
+          # trigger the downstream ``release*.yml`` publish workflows
+          # (GitHub's recursive-workflow guard). v0.7.0 hit this: tags
+          # landed, zero publish jobs fired, PyPI stayed stale until we
+          # re-pushed with a user-auth token.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
