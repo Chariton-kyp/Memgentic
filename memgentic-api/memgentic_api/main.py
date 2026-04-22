@@ -270,9 +270,7 @@ app.include_router(
     import_export.router, prefix="/api/v1", tags=["import/export"], dependencies=_auth
 )
 app.include_router(graph.router, prefix="/api/v1", tags=["graph"], dependencies=_auth)
-app.include_router(
-    chronograph.router, prefix="/api/v1", tags=["chronograph"], dependencies=_auth
-)
+app.include_router(chronograph.router, prefix="/api/v1", tags=["chronograph"], dependencies=_auth)
 app.include_router(collections.router, prefix="/api/v1", tags=["collections"], dependencies=_auth)
 app.include_router(uploads.router, prefix="/api/v1", tags=["uploads"], dependencies=_auth)
 app.include_router(skills.router, prefix="/api/v1", tags=["skills"], dependencies=_auth)

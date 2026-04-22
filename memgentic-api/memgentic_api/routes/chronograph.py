@@ -275,9 +275,9 @@ async def get_timeline(
     request: Request,
     cg: ChronographDep,
     entity: str | None = Query(default=None),
-    status: Literal[
-        "proposed", "accepted", "rejected", "edited", "any"
-    ] = Query(default="accepted"),
+    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Query(
+        default="accepted"
+    ),
     limit: int = Query(default=200, ge=1, le=500),
 ) -> dict:
     triples = await cg.timeline(entity=entity, status=status, limit=limit)
@@ -352,9 +352,7 @@ async def start_backfill(
         "created_at": datetime.now(UTC).isoformat(),
         "error": None,
     }
-    asyncio.create_task(
-        _run_backfill(job_id, payload.batch, payload.dry_run, metadata_store, cg)
-    )
+    asyncio.create_task(_run_backfill(job_id, payload.batch, payload.dry_run, metadata_store, cg))
     return _backfill_jobs[job_id]
 
 

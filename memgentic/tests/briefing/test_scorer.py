@@ -143,9 +143,7 @@ class TestPinBoost:
 class TestSkillLink:
     def test_matching_topic_boosts_score(self):
         now = datetime.now(UTC)
-        matches = _mk(
-            "m", topics=["debugging"], importance=0.3, created_at=now
-        )
+        matches = _mk("m", topics=["debugging"], importance=0.3, created_at=now)
         other = _mk("o", topics=["unrelated"], importance=0.3, created_at=now)
         scored = score_memories(
             [matches, other],
@@ -159,12 +157,8 @@ class TestSkillLink:
 
     def test_matching_entity_also_counts(self):
         now = datetime.now(UTC)
-        entity_match = _mk(
-            "e", entities=["FastAPI"], importance=0.3, created_at=now
-        )
-        scored = score_memories(
-            [entity_match], now=now, active_skills=["fastapi"]
-        )
+        entity_match = _mk("e", entities=["FastAPI"], importance=0.3, created_at=now)
+        scored = score_memories([entity_match], now=now, active_skills=["fastapi"])
         assert scored[0].breakdown["skill_link"] == pytest.approx(1.0)
 
     def test_no_active_skills_gives_zero(self):
@@ -228,9 +222,7 @@ class TestMMR:
         assert select_with_mmr(sc, k=0) == []
 
     def test_respects_k(self):
-        candidates = [
-            ScoredMemory(memory=_mk(f"m{i}"), score=float(i)) for i in range(10)
-        ]
+        candidates = [ScoredMemory(memory=_mk(f"m{i}"), score=float(i)) for i in range(10)]
         picked = select_with_mmr(candidates, k=3)
         assert len(picked) == 3
         # Top scores first after final re-sort
@@ -238,14 +230,8 @@ class TestMMR:
 
     def test_preserves_pinned_memories(self):
         # 3 pinned + 10 non-pinned, k=5 → all pinned + 2 non-pinned = 5
-        pinned = [
-            ScoredMemory(memory=_mk(f"p{i}", pinned=True), score=0.1)
-            for i in range(3)
-        ]
-        non_pinned = [
-            ScoredMemory(memory=_mk(f"n{i}"), score=float(i) + 0.5)
-            for i in range(10)
-        ]
+        pinned = [ScoredMemory(memory=_mk(f"p{i}", pinned=True), score=0.1) for i in range(3)]
+        non_pinned = [ScoredMemory(memory=_mk(f"n{i}"), score=float(i) + 0.5) for i in range(10)]
         picked = select_with_mmr(pinned + non_pinned, k=5, preserve_pinned=True)
         assert len(picked) == 5
         pinned_ids = {p.memory.id for p in picked if p.memory.is_pinned}
@@ -253,10 +239,7 @@ class TestMMR:
 
     def test_keeps_all_pinned_even_above_k(self):
         # 5 pinned, k=3 → all 5 pinned kept (pins are user intent, plan §12)
-        pinned = [
-            ScoredMemory(memory=_mk(f"p{i}", pinned=True), score=0.1)
-            for i in range(5)
-        ]
+        pinned = [ScoredMemory(memory=_mk(f"p{i}", pinned=True), score=0.1) for i in range(5)]
         picked = select_with_mmr(pinned, k=3, preserve_pinned=True)
         assert len(picked) == 5
 
@@ -272,9 +255,7 @@ class TestMMR:
         assert "c" in ids
 
     def test_missing_embeddings_falls_back_to_score_order(self):
-        candidates = [
-            ScoredMemory(memory=_mk(f"m{i}"), score=float(i)) for i in range(5)
-        ]
+        candidates = [ScoredMemory(memory=_mk(f"m{i}"), score=float(i)) for i in range(5)]
         picked = select_with_mmr(candidates, k=3, preserve_pinned=False)
         assert [p.memory.id for p in picked] == ["m4", "m3", "m2"]
 

@@ -167,9 +167,7 @@ class TestAtlasFormatter:
             {"name": "OAuth", "type": "topic", "count": 5, "depth": 1},
             {"name": "Clerk", "type": "entity", "count": 3, "depth": 2},
         ]
-        out = format_atlas_tier(
-            entity="Kai", neighbors=neighbours, graph_empty=False
-        )
+        out = format_atlas_tier(entity="Kai", neighbors=neighbours, graph_empty=False)
         assert "OAuth (topic, hops=1, seen 5x)" in out
         assert "Clerk (entity, hops=2, seen 3x)" in out
 

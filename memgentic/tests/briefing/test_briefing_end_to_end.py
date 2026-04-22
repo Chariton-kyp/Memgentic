@@ -12,8 +12,6 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime, timedelta
 
-import pytest
-
 from memgentic.briefing import (
     BriefingContext,
     RecallStack,
@@ -58,17 +56,13 @@ class TestEndToEnd:
     ):
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         stack = RecallStack()
-        text = await stack.briefing(
-            BriefingContext(metadata_store=metadata_store)
-        )
+        text = await stack.briefing(BriefingContext(metadata_store=metadata_store))
         assert "## T0 — Persona" in text
         assert "## T1 — Horizon" in text
         assert "persona init" in text  # T0 hint for missing file
         assert "import-existing" in text  # T1 empty-state message
 
-    async def test_top_memory_surfaces_in_briefing(
-        self, metadata_store, tmp_path, monkeypatch
-    ):
+    async def test_top_memory_surfaces_in_briefing(self, metadata_store, tmp_path, monkeypatch):
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         # Pinned + high-importance memory should always appear.
         now = datetime.now(UTC)
@@ -81,19 +75,13 @@ class TestEndToEnd:
         )
         await metadata_store.save_memory(pinned)
         for i in range(5):
-            await metadata_store.save_memory(
-                _mk(f"noise-{i}", importance=0.3, created_at=now)
-            )
+            await metadata_store.save_memory(_mk(f"noise-{i}", importance=0.3, created_at=now))
 
         stack = RecallStack()
-        text = await stack.briefing(
-            BriefingContext(metadata_store=metadata_store)
-        )
+        text = await stack.briefing(BriefingContext(metadata_store=metadata_store))
         assert "Critical architectural decision" in text
 
-    async def test_default_briefing_under_900_tokens(
-        self, metadata_store, tmp_path, monkeypatch
-    ):
+    async def test_default_briefing_under_900_tokens(self, metadata_store, tmp_path, monkeypatch):
         """Plan §11: T0+T1 default must come in under 900 tokens."""
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         now = datetime.now(UTC)
@@ -107,14 +95,10 @@ class TestEndToEnd:
                 )
             )
 
-        text = await RecallStack().briefing(
-            BriefingContext(metadata_store=metadata_store)
-        )
+        text = await RecallStack().briefing(BriefingContext(metadata_store=metadata_store))
         assert estimate_tokens(text) < 900
 
-    async def test_each_tier_renders_end_to_end(
-        self, metadata_store, tmp_path, monkeypatch
-    ):
+    async def test_each_tier_renders_end_to_end(self, metadata_store, tmp_path, monkeypatch):
         """All five tiers succeed without raising, even with sparse data."""
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         await metadata_store.save_memory(_mk("m1", content="sample"))
@@ -145,9 +129,7 @@ class TestEndToEnd:
         assert "## T4" in t4.text
         assert "Knowledge graph not yet populated" in t4.text
 
-    async def test_10k_memories_under_200ms(
-        self, metadata_store, tmp_path, monkeypatch
-    ):
+    async def test_10k_memories_under_200ms(self, metadata_store, tmp_path, monkeypatch):
         """Plan §11: 10k memories → briefing in <200ms cold.
 
         We seed 10k rows via the metadata store batch helper (one
@@ -192,9 +174,7 @@ class TestLegacyCompat:
 
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         await metadata_store.save_memory(_mk("m1"))
-        text = await RecallStack().briefing(
-            BriefingContext(metadata_store=metadata_store)
-        )
+        text = await RecallStack().briefing(BriefingContext(metadata_store=metadata_store))
         assert "## T0 — Persona" in text
         assert "## T1 — Horizon" in text
 
@@ -203,16 +183,12 @@ class TestMissingPersona:
     async def test_hint_exact_wording(self, tmp_path, monkeypatch, metadata_store):
         """Plan §11: missing persona → T0 falls back with the exact hint."""
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "never.yaml"))
-        text = await RecallStack().briefing(
-            BriefingContext(metadata_store=metadata_store)
-        )
+        text = await RecallStack().briefing(BriefingContext(metadata_store=metadata_store))
         assert "memgentic persona init" in text
 
 
 class TestWeightsOverrides:
-    async def test_pinned_boosted_by_weights(
-        self, metadata_store, tmp_path, monkeypatch
-    ):
+    async def test_pinned_boosted_by_weights(self, metadata_store, tmp_path, monkeypatch):
         """Non-default weights change the selection order."""
         from memgentic.briefing import load_weights
 

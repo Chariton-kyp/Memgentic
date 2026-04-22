@@ -2834,7 +2834,10 @@ def graph_query(entity: str, as_of: str | None, direction: str, status: str):
 
         cg = await get_chronograph()
         triples = await cg.query_entity(
-            entity, as_of=as_of, direction=direction, status=status  # type: ignore[arg-type]
+            entity,
+            as_of=as_of,
+            direction=direction,
+            status=status,  # type: ignore[arg-type]
         )
         if not triples:
             console.print(f"[dim]no {status} triples for {entity} at {as_of or 'today'}[/]")
@@ -2906,8 +2909,7 @@ def graph_add(
             status=status,  # type: ignore[arg-type]
         )
         console.print(
-            f"[green]OK[/] {triple.id[:10]} "
-            f"{triple.subject} {triple.predicate} {triple.object}"
+            f"[green]OK[/] {triple.id[:10]} {triple.subject} {triple.predicate} {triple.object}"
         )
 
     asyncio.run(_run())

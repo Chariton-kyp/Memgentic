@@ -53,7 +53,7 @@ async def test_list_tiers_returns_five_entries(client):
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert set(body["tiers"].keys()) == {"T0", "T1", "T2", "T3", "T4"}
-    for tier_key, tier_data in body["tiers"].items():
+    for _tier_key, tier_data in body["tiers"].items():
         assert "budget" in tier_data
         assert tier_data["budget"]["tokens"] > 0
 
@@ -61,9 +61,7 @@ async def test_list_tiers_returns_five_entries(client):
 @pytest.mark.asyncio
 async def test_list_tiers_honours_model_context(client):
     # Small context → tight T1 cap (400 tok).
-    resp = await client.get(
-        "/api/v1/briefing/tiers", params={"model_context": 16000}
-    )
+    resp = await client.get("/api/v1/briefing/tiers", params={"model_context": 16000})
     assert resp.status_code == 200
     body = resp.json()
     assert body["tiers"]["T1"]["budget"]["tokens"] == 400
@@ -103,9 +101,7 @@ async def test_post_weights_rejects_zero_tau(client):
 
 
 @pytest.mark.asyncio
-async def test_briefing_content_matches_cli_assembly(
-    seeded_client, monkeypatch, tmp_path
-):
+async def test_briefing_content_matches_cli_assembly(seeded_client, monkeypatch, tmp_path):
     """REST output and the CLI RecallStack should render identical text.
 
     We exercise the same ``RecallStack.briefing`` path used by the CLI

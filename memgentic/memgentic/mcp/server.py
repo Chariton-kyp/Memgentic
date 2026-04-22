@@ -979,18 +979,10 @@ class BriefingInput(BaseModel):
             "Explicit values render that tier alone."
         ),
     )
-    collection: str | None = Field(
-        default=None, description="Scope T1/T2 to a collection name."
-    )
-    topic: str | None = Field(
-        default=None, description="Scope T2 to a topic tag."
-    )
-    query: str | None = Field(
-        default=None, description="Query text for T3 Deep Recall."
-    )
-    entity: str | None = Field(
-        default=None, description="Entity to traverse for T4 Atlas."
-    )
+    collection: str | None = Field(default=None, description="Scope T1/T2 to a collection name.")
+    topic: str | None = Field(default=None, description="Scope T2 to a topic tag.")
+    query: str | None = Field(default=None, description="Query text for T3 Deep Recall.")
+    entity: str | None = Field(default=None, description="Entity to traverse for T4 Atlas.")
     model_context: int | None = Field(
         default=None, description="Override detected model context (tokens)."
     )
@@ -1101,9 +1093,7 @@ class TierRecallInput(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    tier: Literal["T0", "T1", "T2", "T3", "T4"] = Field(
-        ..., description="Which tier to render."
-    )
+    tier: Literal["T0", "T1", "T2", "T3", "T4"] = Field(..., description="Which tier to render.")
     collection: str | None = Field(default=None)
     topic: str | None = Field(default=None)
     query: str | None = Field(default=None)
@@ -1631,9 +1621,7 @@ class GraphTimelineInput(BaseModel):
 
     entity: str | None = Field(default=None, description="Filter to triples about this entity")
     limit: int = Field(default=100, ge=1, le=500)
-    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(
-        default="accepted"
-    )
+    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(default="accepted")
 
 
 @mcp.tool(
@@ -1703,9 +1691,7 @@ async def memgentic_graph_add_tool(params: GraphAddInput, ctx: Context) -> dict:
         "openWorldHint": False,
     },
 )
-async def memgentic_graph_invalidate_tool(
-    params: GraphInvalidateInput, ctx: Context
-) -> dict:
+async def memgentic_graph_invalidate_tool(params: GraphInvalidateInput, ctx: Context) -> dict:
     """Close the validity window for a matching open triple."""
     from memgentic.graph import get_chronograph
 

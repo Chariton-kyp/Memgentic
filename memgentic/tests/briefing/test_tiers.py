@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from types import SimpleNamespace
 
 import pytest
 
@@ -24,7 +23,6 @@ from memgentic.models import (
     Platform,
     SourceMetadata,
 )
-
 
 # --- Stubs --------------------------------------------------------------
 
@@ -55,9 +53,7 @@ class FakeMetadataStore:
     ) -> list[Memory]:
         return list(self._recent[:limit])
 
-    async def get_pinned_memories(
-        self, user_id: str = "", limit: int = 50
-    ) -> list[Memory]:
+    async def get_pinned_memories(self, user_id: str = "", limit: int = 50) -> list[Memory]:
         return list(self._pinned[:limit])
 
     async def get_collections(self, user_id: str = ""):
@@ -120,9 +116,7 @@ def _mk(
 
 
 class TestPersonaTier:
-    async def test_renders_default_when_file_missing(
-        self, tmp_path, monkeypatch
-    ):
+    async def test_renders_default_when_file_missing(self, tmp_path, monkeypatch):
         # Point the persona loader at a non-existent file.
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "no.yaml"))
         tier = PersonaTier()
@@ -159,10 +153,7 @@ class TestHorizonTier:
         assert out.memories_count == 0
 
     async def test_returns_top_memories(self):
-        recent = [
-            _mk(f"m{i}", importance=i / 10.0, created_at=datetime.now(UTC))
-            for i in range(5)
-        ]
+        recent = [_mk(f"m{i}", importance=i / 10.0, created_at=datetime.now(UTC)) for i in range(5)]
         tier = HorizonTier()
         ctx = BriefingContext(metadata_store=FakeMetadataStore(recent=recent))
         out = await tier.render(ctx)
@@ -174,19 +165,14 @@ class TestHorizonTier:
         pinned = [_mk("p1", pinned=True, created_at=now - timedelta(days=365))]
         recent = [_mk(f"r{i}", importance=0.9, created_at=now) for i in range(5)]
         tier = HorizonTier()
-        ctx = BriefingContext(
-            metadata_store=FakeMetadataStore(recent=recent, pinned=pinned)
-        )
+        ctx = BriefingContext(metadata_store=FakeMetadataStore(recent=recent, pinned=pinned))
         out = await tier.render(ctx)
         # Even an ancient pinned memory survives.
         assert "p1" in out.text or "pinned" in out.text
 
     async def test_respects_budget(self):
         # 30 memories but budget caps at e.g. 15 for 128k context.
-        recent = [
-            _mk(f"m{i}", importance=0.5, created_at=datetime.now(UTC))
-            for i in range(30)
-        ]
+        recent = [_mk(f"m{i}", importance=0.5, created_at=datetime.now(UTC)) for i in range(30)]
         tier = HorizonTier()
         ctx = BriefingContext(
             metadata_store=FakeMetadataStore(recent=recent),
@@ -234,18 +220,14 @@ class TestOrbitTier:
         ]
         store = FakeMetadataStore(recent=pool)
         tier = OrbitTier()
-        out = await tier.render(
-            BriefingContext(metadata_store=store, topic="python")
-        )
+        out = await tier.render(BriefingContext(metadata_store=store, topic="python"))
         assert "[topic:python]" in out.text
         assert out.memories_count == 2
 
     async def test_unknown_collection_empty(self):
         store = FakeMetadataStore()
         tier = OrbitTier()
-        out = await tier.render(
-            BriefingContext(metadata_store=store, collection="missing")
-        )
+        out = await tier.render(BriefingContext(metadata_store=store, collection="missing"))
         assert "No memories match" in out.text
 
 
@@ -311,18 +293,14 @@ class TestAtlasTier:
             },
         )
         tier = AtlasTier()
-        out = await tier.render(
-            BriefingContext(graph=graph, entity="Kai")
-        )
+        out = await tier.render(BriefingContext(graph=graph, entity="Kai"))
         assert "OAuth" in out.text
         assert out.memories_count == 1
 
     async def test_unknown_entity_empty_neighbours(self):
         graph = FakeGraph(node_count=5, neighbors={})
         tier = AtlasTier()
-        out = await tier.render(
-            BriefingContext(graph=graph, entity="Ghost")
-        )
+        out = await tier.render(BriefingContext(graph=graph, entity="Ghost"))
         assert "Entity not found" in out.text
 
 
@@ -340,9 +318,7 @@ class TestRecallStack:
 
     async def test_tier_recall_returns_output(self):
         stack = RecallStack()
-        out = await stack.tier_recall(
-            "T4", BriefingContext(graph=FakeGraph(node_count=0))
-        )
+        out = await stack.tier_recall("T4", BriefingContext(graph=FakeGraph(node_count=0)))
         assert out.tier == "T4"
         assert "Knowledge graph" in out.text
 
@@ -361,9 +337,7 @@ class TestRecallStack:
     async def test_status_tracks_last_run(self, tmp_path, monkeypatch):
         monkeypatch.setenv("MEMGENTIC_PERSONA_PATH", str(tmp_path / "p.yaml"))
         stack = RecallStack()
-        await stack.briefing(
-            BriefingContext(metadata_store=FakeMetadataStore())
-        )
+        await stack.briefing(BriefingContext(metadata_store=FakeMetadataStore()))
         status = stack.status()
         assert status["last_run"]["mode"] == "briefing"
         assert status["last_run"]["tokens"] >= 0
