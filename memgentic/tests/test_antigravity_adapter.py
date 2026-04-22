@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import pytest
+from structlog.testing import capture_logs
 
 from memgentic.adapters.antigravity import (
+    ANTIGRAVITY_WIRE_FORMAT_VERSION,
     AntigravityAdapter,
     _extract_strings_fallback,
     _extract_strings_from_protobuf,
@@ -342,3 +344,84 @@ async def test_topic_extraction(adapter, tmp_path):
     for chunk in chunks:
         all_topics.update(chunk.topics)
     assert "python" in all_topics or "docker" in all_topics or "fastapi" in all_topics
+
+
+# --- Schema pin + fail-safe decode ---
+
+
+def test_wire_format_version_pin_is_exported():
+    """The wire-format version constant must exist and be non-empty.
+
+    This locks in the schema-pin contract: any change to the extractor's
+    wire-format assumptions must travel with a version bump in the same
+    commit, and the constant is what downstream log aggregators grep for.
+    """
+    assert isinstance(ANTIGRAVITY_WIRE_FORMAT_VERSION, str)
+    assert ANTIGRAVITY_WIRE_FORMAT_VERSION.strip() != ""
+
+
+@pytest.mark.asyncio
+async def test_parse_file_malformed_logs_decode_failed(adapter, tmp_path):
+    """A non-empty file that yields no extractable strings must emit
+    ``antigravity.decode_failed`` and return zero chunks (fail-safe)."""
+    # Build a payload that walks past the extractor without producing any
+    # readable strings: wire-type 2 fields with pure-binary bodies that
+    # recurse to nothing, plus a truncated length-delimited field that
+    # trips the `pos + length > size` guard.
+    blob = b""
+    # wire type 2, field 1, length 4, body = 4 random bytes (not valid UTF-8,
+    # not a nested message with strings)
+    blob += _encode_varint((1 << 3) | 2) + _encode_varint(4) + b"\xff\xfe\xfd\xfc"
+    # wire type 2, field 2, length 8 but only 2 bytes of payload — truncated
+    blob += _encode_varint((2 << 3) | 2) + _encode_varint(8) + b"\x00\x01"
+
+    file_path = tmp_path / "malformed.pb"
+    file_path.write_bytes(blob)
+
+    with capture_logs() as logs:
+        chunks = await adapter.parse_file(file_path)
+
+    assert chunks == []
+    events = [entry.get("event") for entry in logs]
+    assert "antigravity.decode_failed" in events, (
+        f"expected antigravity.decode_failed in logs, got {events}"
+    )
+    decode_failed = next(
+        entry for entry in logs if entry.get("event") == "antigravity.decode_failed"
+    )
+    # The warning must carry the schema pin for operator visibility.
+    assert decode_failed.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
+    assert decode_failed.get("log_level") == "warning"
+
+
+@pytest.mark.asyncio
+async def test_parse_file_malformed_does_not_raise(adapter, tmp_path):
+    """Random adversarial bytes must never raise — decode must fail closed."""
+    file_path = tmp_path / "garbage.pb"
+    # Interleave every wire-type byte including the deprecated 3/4 markers.
+    file_path.write_bytes(bytes((i * 0x0F) & 0xFF for i in range(512)))
+
+    # Must not raise.  Result may be a list (possibly empty).
+    chunks = await adapter.parse_file(file_path)
+    assert isinstance(chunks, list)
+
+
+def test_extract_strings_logs_unknown_wire_type():
+    """Encountering an unknown wire type is a schema-drift signal — log it."""
+    # Field 1 with wire type 3 (deprecated group-start) — our extractor
+    # does not support groups and must warn rather than silently stop.
+    # Trailing bytes are required so pos < size when the wire-type branch
+    # is evaluated (the extractor short-circuits at EOF without logging).
+    data = _encode_varint((1 << 3) | 3) + b"\x00\x00"
+
+    with capture_logs() as logs:
+        result = _extract_strings_from_protobuf(data)
+
+    assert result == []
+    events = [entry.get("event") for entry in logs]
+    assert "antigravity.unknown_wire_type" in events
+    unknown = next(
+        entry for entry in logs if entry.get("event") == "antigravity.unknown_wire_type"
+    )
+    assert unknown.get("wire_type") == 3
+    assert unknown.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
