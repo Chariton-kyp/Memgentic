@@ -308,7 +308,7 @@ class HorizonTier(BaseTier):
         try:
             get_skills = getattr(metadata_store, "get_skills", None)
             if callable(get_skills):
-                skills = await get_skills(user_id=ctx.user_id)
+                skills = await get_skills(user_id=ctx.user_id)  # type: ignore[misc]
                 for skill in skills[:3]:
                     skills_block.append(
                         {
@@ -358,7 +358,7 @@ async def _bulk_get_embeddings(vector_store: Any, ids: list[str]) -> dict[str, l
         fn = getattr(vector_store, method_name, None)
         if callable(fn):
             try:
-                result = await fn(ids)
+                result = await fn(ids)  # type: ignore[misc]
             except Exception as exc:
                 logger.debug(
                     "briefing.horizon.vector_fetch_failed",
@@ -516,7 +516,12 @@ class DeepRecallTier(BaseTier):
             basic_fn = _bs
 
         try:
-            if search_fn is not None:
+            if (
+                search_fn is not None
+                and ctx.metadata_store is not None
+                and ctx.vector_store is not None
+                and ctx.embedder is not None
+            ):
                 results = await search_fn(
                     query=query,
                     metadata_store=ctx.metadata_store,
@@ -527,7 +532,11 @@ class DeepRecallTier(BaseTier):
                     limit=budget.max_memories,
                     user_id=ctx.user_id,
                 )
-            elif ctx.vector_store is not None and ctx.embedder is not None:
+            elif (
+                ctx.metadata_store is not None
+                and ctx.vector_store is not None
+                and ctx.embedder is not None
+            ):
                 results = await basic_fn(
                     query=query,
                     metadata_store=ctx.metadata_store,
@@ -571,7 +580,7 @@ class AtlasTier(BaseTier):
         graph_empty = graph is None or getattr(graph, "node_count", 0) == 0
         neighbors: list[dict[str, Any]] | None = None
 
-        if not graph_empty and ctx.entity:
+        if not graph_empty and ctx.entity and graph is not None:
             try:
                 data = await graph.query_neighbors(ctx.entity, depth=2)
                 neighbors = list(data.get("neighbors") or [])
