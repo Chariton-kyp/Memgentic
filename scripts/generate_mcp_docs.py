@@ -39,9 +39,10 @@ transport configured by ``memgentic serve``.
 
 async def _collect_tools() -> list[dict]:
     # Import lazily — keeps `--check` fast failure readable when the package
-    # can't import at all.
+    # can't import at all. The sys.path mutation means pyright can't resolve
+    # this statically; suppress the diagnostic rather than disable the file.
     sys.path.insert(0, str(ROOT / "memgentic"))
-    from memgentic.mcp.server import mcp  # noqa: E402
+    from memgentic.mcp.server import mcp  # type: ignore[import-not-found]  # noqa: E402, PLC0415
 
     tools = await mcp.list_tools()
     rows: list[dict] = []
@@ -116,7 +117,7 @@ def render(tools: list[dict]) -> str:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument(
         "--check",
         action="store_true",
