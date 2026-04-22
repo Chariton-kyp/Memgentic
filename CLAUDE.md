@@ -318,3 +318,70 @@ Each plan doc contains:
 - Acceptance criteria (checkboxes)
 
 Agents should read the milestone doc, implement each phase's tasks, run tests, and verify acceptance criteria.
+
+## Release Automation (critical — read `docs/RELEASE.md` for the full flow)
+
+This repo ships **three linked-version packages** via PyPI Trusted Publishing. Everything after "merge the Release PR" is unattended.
+
+### Tags ↔ workflows ↔ PyPI envs
+
+| Tag pattern | Publish workflow | GitHub env | PyPI project |
+| --- | --- | --- | --- |
+| `vX.Y.Z` | `release.yml` | `pypi` | `memgentic` |
+| `api-vX.Y.Z` | `release-api.yml` | `pypi-api` | `memgentic-api` |
+| `native-vX.Y.Z` | `release-native.yml` | `pypi-native` | `memgentic-native` |
+
+Env names, workflow filenames, and owner/repo are load-bearing — renaming breaks the OIDC claim check. Never rename without updating the matching PyPI Trusted Publisher entry first.
+
+### Secret + bot identity rules
+
+- **`RELEASE_PLEASE_TOKEN`** — PAT owned by `@Chariton-kyp` with `contents: write` + `pull_requests: write`. Used by `release-please.yml`, `linked-version-align.yml`, and `dependabot-auto-merge.yml`. Three things break without it: (1) release tags don't fire publish workflows — `GITHUB_TOKEN` pushes are blocked by GitHub's recursive-workflow guard; (2) align-workflow commits don't re-trigger CI on the Release PR; (3) Dependabot approvals post as `github-actions[bot]` which doesn't satisfy the CODEOWNERS gate. All three workflows fall back to `GITHUB_TOKEN` if the PAT is missing so they stay green, but automation is degraded.
+- **Never pin to `secrets.GITHUB_TOKEN` alone** in any release-adjacent workflow. Use `${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}`.
+- No PyPI API tokens. Trusted Publishing (OIDC) does the upload.
+
+### Conventional Commits = version bumps
+
+Only `feat` / `fix` / `perf` / `security` / `revert` move the version and surface in the CHANGELOG. `docs` / `chore` / `test` / `refactor` / `build` / `ci` / `style` are hidden. Breaking changes: `!` in type or `BREAKING CHANGE:` footer. Commitlint CI rejects bad PR titles.
+
+### Linked-version alignment
+
+`.github/workflows/linked-version-align.yml` + `scripts/align_linked_versions.py` auto-backfill any component left behind when `release-please`'s linked-versions plugin only lifts components with releasable commits. **Do NOT manually edit `.release-please-manifest.json`** — the align workflow owns it and will overwrite.
+
+When `release-please` opens a Release PR: the align workflow detects version drift across the three manifest entries, picks the max as target, bumps the lagging component's `__version__.py` / `__init__.py` / `pyproject.toml` / `Cargo.toml` / `Cargo.lock`, updates the manifest, commits as `github-actions[bot]`, and pushes via PAT (re-triggers CI).
+
+### Branch protection
+
+`main` requires 1 **code-owner** review per `.github/CODEOWNERS` (every path → `@Chariton-kyp`). 7 required status checks. Linear history. `enforce_admins: false` so the solo maintainer can admin-bypass when urgent; other contributors cannot.
+
+### Dependabot policy (OSS-mainstream)
+
+Auto-merge **patch-level only** via `dependabot-auto-merge.yml`. Minor and major bumps require manual review. Majors known to break:
+- `pyo3` (API renames every 0.x → 0.y) — major + minor ignored
+- `next`, `react`, `react-dom`, `tailwindcss` — majors ignored
+- Typescript, eslint — majors need migration plans (don't auto-merge)
+
+### Manual publish escape hatch
+
+Every publish workflow accepts `workflow_dispatch` with a `tag` input. If a tag exists on GitHub but its push event was suppressed (happens when `RELEASE_PLEASE_TOKEN` was missing at tag-creation time), re-fire with:
+
+```bash
+gh workflow run release.yml         -f tag=vX.Y.Z
+gh workflow run release-api.yml     -f tag=api-vX.Y.Z
+gh workflow run release-native.yml  -f tag=native-vX.Y.Z
+```
+
+### SBOM (temporarily removed)
+
+`cyclonedx-py` doesn't handle Rust-backed wheels or PEP 668 Ubuntu 24.04 cleanly. All SBOM jobs were stripped during the 0.7.0 unblock to get packages on PyPI. Re-add plan: `cargo-cyclonedx` for native; env-native cyclonedx for pure-Python packages. SLSA build-provenance attestations (`actions/attest-build-provenance`) are still emitted — that's the baseline supply-chain signal.
+
+### CHANGELOG locations
+
+- `/CHANGELOG.md` — human-curated aggregate (tracks the narrative across all three packages).
+- `/memgentic/CHANGELOG.md` — auto-maintained by release-please (core package only).
+- `/memgentic-api/CHANGELOG.md` — auto-maintained (API only).
+- `/memgentic-native/CHANGELOG.md` — auto-maintained (native only).
+
+End users see:
+- **GitHub Releases** page — per-tag notes extracted from the matching package CHANGELOG.
+- **PyPI sidebar → Changelog link** — points to the root `CHANGELOG.md`.
+- **PyPI long description** — renders each package's own `README.md` at release time.

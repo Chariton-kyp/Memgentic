@@ -1,0 +1,60 @@
+name: Linked-version align
+
+# Auto-aligns the linked-versions manifest when release-please opens or
+# updates a Release PR that leaves a quiet component behind. Mainstream
+# hybrid-language projects (pydantic/pydantic-core, polars, tokenizers)
+# all enforce matching versions across their Python + Rust packages;
+# release-please's ``linked-versions`` plugin only lifts components
+# that had commits in the window, so a quiet package (most often
+# ``memgentic-native``) drifts unless we backfill. This workflow does
+# the backfill automatically so users never have to remember.
+#
+# Why a PAT and not ``GITHUB_TOKEN``?
+# The align commit needs to fire the downstream ``ci.yml`` checks on
+# the Release PR. Pushes from ``GITHUB_TOKEN`` do NOT trigger workflow
+# runs — same recursive-trigger guard that bit release-please itself
+# (see release-please.yml). Using the same ``RELEASE_PLEASE_TOKEN``
+# PAT solves both.
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  align:
+    # Only run on release-please-opened PRs. Naming convention is fixed
+    # by release-please; it will always start with the literal prefix
+    # below. Any other PR skips the job cleanly.
+    if: startsWith(github.head_ref, 'release-please--branches--')
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.head_ref }}
+          # PAT so the align push re-triggers CI on the PR — see
+          # workflow-level comment above.
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      - name: Align linked versions
+        id: align
+        run: python scripts/align_linked_versions.py
+
+      - name: Commit + push align
+        if: steps.align.outputs.changed == 'true'
+        run: |
+          # Use the release-please bot identity for the commit so the
+          # Release PR's commit graph stays coherent (all release-please
+          # commits authored by the bot).
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          VERSION=$(python -c "import json; print(max(json.load(open('.release-please-manifest.json')).values()))")
+          git add -A
+          git commit -m "chore: align linked versions to ${VERSION}"
+          git push
