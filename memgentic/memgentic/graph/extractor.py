@@ -31,8 +31,10 @@ logger = structlog.get_logger()
 _DEFAULT_CONFIDENCE = 0.7
 
 # Minimum rapidfuzz / difflib ratio to count as an alias match when
-# resolving subjects/objects back to existing entities.
-_FUZZY_MATCH_THRESHOLD = 90
+# resolving subjects/objects back to existing entities. 80 tolerates
+# case differences that WRatio scores at ~84 (e.g. "orion project"
+# matching alias "Orion Project").
+_FUZZY_MATCH_THRESHOLD = 80
 
 
 class _ExtractedTripleSchema(BaseModel):
