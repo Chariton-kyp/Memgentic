@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, FileText, Link2, X, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { useUploadText, useUploadFile, useTopics, useCreateMemory } from "@/hooks/use-memories";
+import { useUploadFile, useTopics, useCreateMemory } from "@/hooks/use-memories";
 import { uploadUrl } from "@/lib/api";
 import { CONTENT_TYPE_CONFIG } from "@/lib/constants";
 import {

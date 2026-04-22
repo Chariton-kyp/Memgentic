@@ -59,33 +59,36 @@ export default function GraphPage() {
     return () => observer.disconnect();
   }, []);
 
+  // Narrow ``data`` inside each useMemo body (rather than via a hoisted
+  // optional-chained const) so the React Compiler's inferred deps match
+  // the source deps and ``preserve-manual-memoization`` stays happy.
   const availableTypes = useMemo(() => {
-    if (!data?.nodes) return [];
-    const types = new Set(data.nodes.map((n) => n.type));
+    const nodes = data?.nodes ?? [];
+    const types = new Set(nodes.map((n) => n.type));
     return Array.from(types).sort();
-  }, [data?.nodes]);
+  }, [data]);
 
   const toggleType = useCallback((type: string) => {
     setTypeFilters((prev) => ({ ...prev, [type]: !prev[type] }));
   }, []);
 
   const filteredNodes = useMemo(() => {
-    if (!data?.nodes) return [];
-    return data.nodes.filter((node: GraphNode) => {
+    const nodes = data?.nodes ?? [];
+    return nodes.filter((node: GraphNode) => {
       const matchesType = typeFilters[node.type] !== false;
       const matchesSearch =
         search === "" || node.id.toLowerCase().includes(search.toLowerCase());
       return matchesType && matchesSearch;
     });
-  }, [data?.nodes, typeFilters, search]);
+  }, [data, typeFilters, search]);
 
   const filteredEdges = useMemo(() => {
-    if (!data?.edges) return [];
+    const edges = data?.edges ?? [];
     const nodeIds = new Set(filteredNodes.map((n: GraphNode) => n.id));
-    return data.edges.filter(
+    return edges.filter(
       (edge: GraphEdge) => nodeIds.has(edge.source) && nodeIds.has(edge.target)
     );
-  }, [data?.edges, filteredNodes]);
+  }, [data, filteredNodes]);
 
   const graphData = useMemo(
     () => ({

@@ -24,10 +24,10 @@ export default function TimelinePage() {
   const [page, setPage] = useState(1);
   const { data, isLoading, error } = useMemories({ page, page_size: 50 });
 
-  const grouped = useMemo(() => {
-    if (!data?.memories) return {};
-    return groupByDate(data.memories);
-  }, [data?.memories]);
+  // Narrow ``data`` inside the useMemo body so the React Compiler's
+  // inferred deps match the source deps — otherwise
+  // ``preserve-manual-memoization`` fires on the optional chain.
+  const grouped = useMemo(() => groupByDate(data?.memories ?? []), [data]);
 
   const dateKeys = useMemo(
     () => Object.keys(grouped).sort((a, b) => b.localeCompare(a)),

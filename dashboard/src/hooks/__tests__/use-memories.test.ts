@@ -22,8 +22,6 @@ import {
   useSearch,
   useSources,
   useStats,
-  useDeleteMemory,
-  useCreateMemory,
 } from '../use-memories'
 
 function createWrapper() {

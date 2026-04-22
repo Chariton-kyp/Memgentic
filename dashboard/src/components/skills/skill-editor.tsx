@@ -47,7 +47,14 @@ export function SkillEditor({ skillId, onDeleted }: SkillEditorProps) {
   const [distributeTo, setDistributeTo] = useState<string[]>([]);
   const [dirty, setDirty] = useState(false);
 
-  // Sync form fields when skill data loads or changes
+  // Sync form fields when skill data loads or changes. This is the
+  // standard prop→local-state hydration pattern for editable forms: the
+  // parent passes ``key={selectedId}`` on ``SkillEditor`` so a different
+  // skill forces a full remount, but the *same* selected skill refetching
+  // (e.g. after a mutation invalidates its query) still has to flow back
+  // into the form. ``react-hooks/set-state-in-effect`` flags the batched
+  // setState calls; they are intentional and idempotent under StrictMode.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (skill) {
       setName(skill.name);
@@ -58,6 +65,7 @@ export function SkillEditor({ skillId, onDeleted }: SkillEditorProps) {
       setDirty(false);
     }
   }, [skill]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const markDirty = useCallback(() => setDirty(true), []);
 
