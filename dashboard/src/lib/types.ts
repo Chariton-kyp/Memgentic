@@ -275,3 +275,46 @@ export interface Persona {
 export interface PersonaBootstrapResponse {
   persona: Persona;
 }
+
+// --- Recall Tiers (briefing) ---
+
+export type RecallTier = "T0" | "T1" | "T2" | "T3" | "T4" | "default";
+
+export interface BriefingBudget {
+  tier: string;
+  tokens: number;
+  max_memories: number;
+  model_context: number;
+}
+
+export interface BriefingTierInfo {
+  label: string;
+  budget: BriefingBudget;
+}
+
+export interface BriefingTiersResponse {
+  tiers: Record<string, BriefingTierInfo>;
+}
+
+export interface BriefingResponse {
+  tier: string;
+  text: string;
+  tokens: number;
+  model_context: number;
+  max_memories: number;
+  status: Record<string, unknown>;
+}
+
+export interface BriefingWeights {
+  importance: number;
+  recency: number;
+  pinned: number;
+  cluster: number;
+  skill_link: number;
+  tau_days: number;
+}
+
+export interface BriefingWeightsResponse {
+  weights: BriefingWeights;
+  overrides: Record<string, number>;
+}

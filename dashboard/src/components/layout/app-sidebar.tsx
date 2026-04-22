@@ -13,6 +13,7 @@ import {
   Settings,
   Sun,
   Moon,
+  Layers,
 } from "lucide-react";
 import {
   Sidebar,
@@ -30,6 +31,7 @@ import { Button } from "@/components/ui/button";
 
 const navItems = [
   { label: "Memories", href: "/", icon: Brain },
+  { label: "Briefing", href: "/briefing", icon: Layers },
   { label: "Skills", href: "/skills", icon: Sparkles },
   { label: "Sources", href: "/sources", icon: Database },
   { label: "Graph", href: "/graph", icon: Network },

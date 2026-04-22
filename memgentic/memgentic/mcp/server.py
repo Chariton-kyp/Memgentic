@@ -961,12 +961,42 @@ async def memgentic_stats(ctx: Context) -> str:
 
 
 class BriefingInput(BaseModel):
-    """Input for cross-agent briefing."""
+    """Input for cross-agent briefing (Recall Tiers).
+
+    Backward-compatible: with no arguments, the tool returns the
+    default T0+T1 wake-up bundle. Passing ``since_hours`` (legacy)
+    without a ``tier`` keeps the pre-Recall-Tiers time-window summary
+    working for agents with pinned prompts. When ``tier`` is supplied,
+    Recall Tiers is used and ``since_hours`` is ignored.
+    """
 
     model_config = ConfigDict(str_strip_whitespace=True)
 
-    since_hours: int = Field(
-        default=24, ge=1, le=720, description="Hours to look back (default: 24)"
+    tier: Literal["T0", "T1", "T2", "T3", "T4", "default"] | None = Field(
+        default=None,
+        description=(
+            "Recall Tier to render. 'default' (or omitted) returns T0+T1. "
+            "Explicit values render that tier alone."
+        ),
+    )
+    collection: str | None = Field(default=None, description="Scope T1/T2 to a collection name.")
+    topic: str | None = Field(default=None, description="Scope T2 to a topic tag.")
+    query: str | None = Field(default=None, description="Query text for T3 Deep Recall.")
+    entity: str | None = Field(default=None, description="Entity to traverse for T4 Atlas.")
+    model_context: int | None = Field(
+        default=None, description="Override detected model context (tokens)."
+    )
+    max_tokens: int | None = Field(
+        default=None,
+        description="Clamp a tier's token budget below the tier ceiling.",
+    )
+    since_hours: int | None = Field(
+        default=None,
+        description=(
+            "[Deprecated] Legacy time-window briefing. If set and ``tier`` "
+            "is omitted, the pre-Recall-Tiers summary is returned. "
+            "Range 1-720 hours."
+        ),
     )
 
 
@@ -981,54 +1011,136 @@ class BriefingInput(BaseModel):
     },
 )
 async def memgentic_briefing(params: BriefingInput, ctx: Context) -> str:
-    """Get a briefing of new memories since your last session.
+    """Render a Recall Tiers briefing (default: T0 + T1 under ~900 tokens).
 
-    Shows what's new across all AI tools — perfect for starting a new
-    conversation with context from other agents.
+    Backward-compatible:
+    - No args → T0+T1 wake-up bundle
+    - ``tier="T2"`` + ``collection``/``topic`` → Orbit tier
+    - ``tier="T3"`` + ``query`` → Deep Recall (hybrid search)
+    - ``tier="T4"`` + ``entity`` → Atlas (KG traversal; stubbed when empty)
+    - ``since_hours=N`` with no ``tier`` → legacy summary (deprecated)
 
-    Args:
-        params (BriefingInput): Parameters:
-            - since_hours (int): Hours to look back (default 24, max 720)
-
-    Returns:
-        str: Markdown briefing with platform counts, top topics, and previews.
+    Returns assembled briefing text.
     """
     try:
-        metadata_store = ctx.request_context.lifespan_context["metadata_store"]
-        since = datetime.now(UTC) - timedelta(hours=params.since_hours)
-        memories = await metadata_store.get_memories_since(since, limit=100)
+        from memgentic.briefing import BriefingContext, RecallStack
 
-        if not memories:
-            return f"No new memories in the last {params.since_hours} hours."
+        state = ctx.request_context.lifespan_context
 
-        # Group by platform
-        platform_counts = Counter(m.source.platform.value for m in memories)
-        all_topics: list[str] = []
-        for m in memories:
-            all_topics.extend(m.topics)
-        top_topics = Counter(all_topics).most_common(10)
+        # Legacy path — ``since_hours`` without a tier request.
+        if params.tier is None and params.since_hours is not None:
+            return await _legacy_briefing(state["metadata_store"], params.since_hours)
 
-        lines = [f"# Briefing — Last {params.since_hours} hours", ""]
-        lines.append(f"**{len(memories)} new memories** across {len(platform_counts)} platforms:")
-        lines.append("")
-        for platform, count in platform_counts.most_common():
-            lines.append(f"- **{platform}**: {count} memories")
-
-        if top_topics:
-            lines.append("")
-            lines.append("**Top topics:** " + ", ".join(t for t, _ in top_topics[:8]))
-
-        # Preview latest 5
-        lines.append("")
-        lines.append("## Latest")
-        for m in memories[:5]:
-            preview = m.content[:150].replace("\n", " ")
-            lines.append(f"- [{m.content_type.value}] {preview}...")
-
-        return "\n".join(lines)
+        session_config = _get_session_config(ctx)
+        brief_ctx = BriefingContext(
+            metadata_store=state.get("metadata_store"),
+            vector_store=state.get("vector_store"),
+            embedder=state.get("embedder"),
+            graph=state.get("graph"),
+            session_config=session_config,
+            collection=params.collection,
+            topic=params.topic,
+            query=params.query,
+            entity=params.entity,
+            model_context=params.model_context,
+            max_tokens=params.max_tokens,
+        )
+        stack = RecallStack()
+        tier = params.tier or "default"
+        if tier == "default":
+            return await stack.briefing(brief_ctx)
+        out = await stack.tier_recall(tier, brief_ctx)
+        return out.text
     except Exception as e:
         logger.error("memgentic_briefing.error", error=str(e))
         return f"Error generating briefing: {e}"
+
+
+async def _legacy_briefing(metadata_store, since_hours: int) -> str:
+    """Pre-Recall-Tiers time-window summary kept for backward compat."""
+    hours = max(1, min(720, int(since_hours)))
+    since = datetime.now(UTC) - timedelta(hours=hours)
+    memories = await metadata_store.get_memories_since(since, limit=100)
+    if not memories:
+        return f"No new memories in the last {hours} hours."
+
+    platform_counts = Counter(m.source.platform.value for m in memories)
+    all_topics: list[str] = []
+    for m in memories:
+        all_topics.extend(m.topics)
+    top_topics = Counter(all_topics).most_common(10)
+
+    lines = [f"# Briefing — Last {hours} hours", ""]
+    lines.append(f"**{len(memories)} new memories** across {len(platform_counts)} platforms:")
+    lines.append("")
+    for platform, count in platform_counts.most_common():
+        lines.append(f"- **{platform}**: {count} memories")
+
+    if top_topics:
+        lines.append("")
+        lines.append("**Top topics:** " + ", ".join(t for t, _ in top_topics[:8]))
+
+    lines.append("")
+    lines.append("## Latest")
+    for m in memories[:5]:
+        preview = m.content[:150].replace("\n", " ")
+        lines.append(f"- [{m.content_type.value}] {preview}...")
+    return "\n".join(lines)
+
+
+class TierRecallInput(BaseModel):
+    """Input for ``memgentic_tier_recall`` — explicit Recall Tier call."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    tier: Literal["T0", "T1", "T2", "T3", "T4"] = Field(..., description="Which tier to render.")
+    collection: str | None = Field(default=None)
+    topic: str | None = Field(default=None)
+    query: str | None = Field(default=None)
+    entity: str | None = Field(default=None)
+    model_context: int | None = Field(default=None)
+    max_tokens: int | None = Field(default=None)
+
+
+@mcp.tool(
+    name="memgentic_tier_recall",
+    annotations={
+        "title": "Recall Tier",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_tier_recall(params: TierRecallInput, ctx: Context) -> str:
+    """Render a single Recall Tier explicitly (T0-T4).
+
+    Cleaner entry-point than ``memgentic_briefing`` when the agent
+    already knows which tier it wants. Same context + scoping knobs.
+    """
+    try:
+        from memgentic.briefing import BriefingContext, RecallStack
+
+        state = ctx.request_context.lifespan_context
+        session_config = _get_session_config(ctx)
+        brief_ctx = BriefingContext(
+            metadata_store=state.get("metadata_store"),
+            vector_store=state.get("vector_store"),
+            embedder=state.get("embedder"),
+            graph=state.get("graph"),
+            session_config=session_config,
+            collection=params.collection,
+            topic=params.topic,
+            query=params.query,
+            entity=params.entity,
+            model_context=params.model_context,
+            max_tokens=params.max_tokens,
+        )
+        out = await RecallStack().tier_recall(params.tier, brief_ctx)
+        return out.text
+    except Exception as exc:
+        logger.error("memgentic_tier_recall.error", error=str(exc))
+        return f"Error rendering tier {params.tier}: {exc}"
 
 
 class ForgetInput(BaseModel):
@@ -1509,9 +1621,7 @@ class GraphTimelineInput(BaseModel):
 
     entity: str | None = Field(default=None, description="Filter to triples about this entity")
     limit: int = Field(default=100, ge=1, le=500)
-    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(
-        default="accepted"
-    )
+    status: Literal["proposed", "accepted", "rejected", "edited", "any"] = Field(default="accepted")
 
 
 @mcp.tool(
@@ -1581,9 +1691,7 @@ async def memgentic_graph_add_tool(params: GraphAddInput, ctx: Context) -> dict:
         "openWorldHint": False,
     },
 )
-async def memgentic_graph_invalidate_tool(
-    params: GraphInvalidateInput, ctx: Context
-) -> dict:
+async def memgentic_graph_invalidate_tool(params: GraphInvalidateInput, ctx: Context) -> dict:
     """Close the validity window for a matching open triple."""
     from memgentic.graph import get_chronograph
 

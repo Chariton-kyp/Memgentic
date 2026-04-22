@@ -321,8 +321,7 @@ class Chronograph:
         db = self._require_db()
         if workspace_id is not None:
             cursor = await db.execute(
-                "SELECT * FROM entities WHERE workspace_id = ? "
-                "ORDER BY name LIMIT ? OFFSET ?",
+                "SELECT * FROM entities WHERE workspace_id = ? ORDER BY name LIMIT ? OFFSET ?",
                 (workspace_id, limit, offset),
             )
         else:
@@ -511,7 +510,8 @@ class Chronograph:
         """
         db = self._require_db()
         entity_id = _normalize_entity_id(name)
-        at = _parse_date(as_of) if as_of else datetime.now(UTC).date()
+        parsed = _parse_date(as_of) if as_of else None
+        at: date = parsed if parsed is not None else datetime.now(UTC).date()
 
         where = []
         params: list[Any] = []
@@ -635,24 +635,17 @@ class Chronograph:
 
         identity_changed = any(
             k in fields and fields[k] is not None for k in ("subject", "predicate", "object")
-        ) or (
-            "valid_from" in fields
-            and _parse_date(fields["valid_from"]) != existing.valid_from
-        )
+        ) or ("valid_from" in fields and _parse_date(fields["valid_from"]) != existing.valid_from)
 
         if identity_changed:
             new_subject = fields.get("subject") or existing.subject
             new_predicate = fields.get("predicate") or existing.predicate
             new_object = fields.get("object") or existing.object
             new_valid_from = (
-                _parse_date(fields["valid_from"])
-                if "valid_from" in fields
-                else existing.valid_from
+                _parse_date(fields["valid_from"]) if "valid_from" in fields else existing.valid_from
             )
             new_valid_to = (
-                _parse_date(fields["valid_to"])
-                if "valid_to" in fields
-                else existing.valid_to
+                _parse_date(fields["valid_to"]) if "valid_to" in fields else existing.valid_to
             )
             new_confidence = float(fields.get("confidence", existing.confidence))
             # Delete old, insert new
@@ -747,15 +740,15 @@ class Chronograph:
     async def stats(self) -> dict[str, Any]:
         db = self._require_db()
         cursor = await db.execute("SELECT COUNT(*) FROM entities")
-        entity_count = int((await cursor.fetchone())[0])
-        cursor = await db.execute(
-            "SELECT status, COUNT(*) FROM triples GROUP BY status"
-        )
+        row1 = await cursor.fetchone()
+        entity_count = int(row1[0]) if row1 else 0
+        cursor = await db.execute("SELECT status, COUNT(*) FROM triples GROUP BY status")
         counts: dict[str, int] = {}
         for row in await cursor.fetchall():
             counts[row[0]] = int(row[1])
         cursor = await db.execute("SELECT COUNT(DISTINCT predicate) FROM triples")
-        predicate_count = int((await cursor.fetchone())[0])
+        row2 = await cursor.fetchone()
+        predicate_count = int(row2[0]) if row2 else 0
         return {
             "entities": entity_count,
             "triples": sum(counts.values()),
