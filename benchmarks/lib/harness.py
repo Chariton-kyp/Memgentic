@@ -9,11 +9,12 @@ ConvoMem, MemBench, and Cross-Tool Transfer without branching.
 
 The ``profile`` argument accepts ``"raw"``, ``"enriched"``, ``"dual"`` and
 a small set of synonyms documented in :meth:`BenchmarkHarness.__init__`.
-Today it only gates LLM-backed classification (off for ``raw``, on
-otherwise). Capture Profiles have since landed end-to-end in the
-pipeline; wiring the harness to route through the ingestion pipeline's
-``capture_profile`` argument is a Week-4 follow-up tracked in the
-project roadmap.
+Phase 2 wires the profile end-to-end: every ingestion call made through
+:meth:`BenchmarkHarness.ingest_session` forwards the profile to
+:meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
+via its ``capture_profile`` argument, so ``raw`` runs bypass LLM
+enrichment, ``enriched`` runs go through the full Gemini-Flash-Lite
+pipeline, and ``dual`` runs emit paired raw/enriched memories.
 """
 
 from __future__ import annotations
@@ -126,10 +127,11 @@ class BenchmarkHarness:
 
         Args:
             profile: Capture profile tag (``"raw"``, ``"enriched"``,
-                ``"dual"``). Today this is recorded in result files and
-                toggles LLM-driven classification off for ``raw``; when
-                the Capture Profiles work (plan 07) merges it will wire
-                in the full profile machinery without runner changes.
+                ``"dual"``). The tag is recorded in result files and
+                passed through to
+                :meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
+                via ``capture_profile`` so ingestion uses exactly the
+                same code path as production.
             embedder: Embedder label. The default ``"qwen3-0.6b"`` maps to
                 the production Ollama model. Custom values flow through
                 unchanged for experimentation.
@@ -224,6 +226,10 @@ class BenchmarkHarness:
 
         The §6 LongMemEval runner calls this in a loop; other runners
         can call :meth:`ingest_corpus` to pass an iterable.
+
+        The harness's normalised ``profile`` flows through as
+        ``capture_profile`` so the pipeline routes to the configured
+        raw / enriched / dual code path without any runner branching.
         """
         pipeline = self._require_pipeline()
         await pipeline.ingest_conversation(
@@ -232,6 +238,7 @@ class BenchmarkHarness:
             session_id=session.session_id,
             session_title=session.session_title,
             capture_method=CaptureMethod.MANUAL_IMPORT,
+            capture_profile=self.profile,  # type: ignore[arg-type]
         )
 
     async def ingest_corpus(

@@ -21,8 +21,12 @@ file SHA-256 will be written back here so future runs can detect drift.
 ### Cross-Tool Transfer (Memgentic-original)
 
 This benchmark is built by the Memgentic team rather than pulled from
-upstream. Phase 2 will commit its 100-conversation seed set to
-`benchmarks/datasets/cross_tool_transfer/` once curation is complete.
+upstream. A 5-row fixture lives at
+[`cross_tool_transfer/example.jsonl`](cross_tool_transfer/example.jsonl)
+for smoke tests; see
+[`cross_tool_transfer/README.md`](cross_tool_transfer/README.md) for
+the JSONL schema. The 100-conversation full dataset lands in a
+follow-up PR once curation is complete.
 
 ### Licensing
 

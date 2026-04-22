@@ -1,0 +1,29 @@
+[
+    {
+        "sample_id": "sample-1",
+        "conversation": {
+            "session_1": [
+                {"role": "user", "content": "I started learning sourdough baking in January."},
+                {"role": "assistant", "content": "Nice — how's the hydration treating you?"}
+            ],
+            "session_2": [
+                {"role": "user", "content": "Yesterday we visited the Portland art museum and loved the ceramics wing."},
+                {"role": "assistant", "content": "Sounds lovely."}
+            ]
+        },
+        "qa": [
+            {
+                "question": "When did I start learning sourdough baking?",
+                "answer": "January",
+                "evidence": ["session_1"],
+                "category": "temporal"
+            },
+            {
+                "question": "Which museum wing did we love?",
+                "answer": "ceramics",
+                "evidence": ["session_2"],
+                "category": "factual"
+            }
+        ]
+    }
+]

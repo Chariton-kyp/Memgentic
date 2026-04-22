@@ -8,13 +8,15 @@ Capture Profiles feature merges.
 
 ## Status
 
-**Phase 1 (this repo, today):** harness + scorers + corpus loaders +
-LongMemEval runner skeleton. No datasets are downloaded in CI, and no
-results have been published yet.
+**Phase 1:** harness + scorers + corpus loaders + LongMemEval runner
+skeleton. Landed in PR #62.
 
-**Phase 2 (Week 4):** full runs for LongMemEval, LoCoMo, ConvoMem,
-MemBench, and the Memgentic-only Cross-Tool Transfer benchmark. Results
-will be committed as JSONL under [`results/`](results/).
+**Phase 2 (this PR):** runnable runners for LoCoMo, ConvoMem, MemBench,
+and the Memgentic-only Cross-Tool Transfer benchmark, plus
+profile-aware ingestion that routes `raw` / `enriched` / `dual` through
+`IngestionPipeline.capture_profile`. Published numbers are pending —
+they will be committed to `results/` after maintainers run the full
+suite locally.
 
 ## Methodology
 
@@ -30,18 +32,27 @@ Every run is scoped to a single **capture profile** (`raw`, `enriched`,
 
 ## Running locally
 
-Phase 1 does not auto-download datasets. Once you have a LongMemEval
-JSON file on disk:
+The runners never auto-download datasets. Fetch them once with
+[`datasets/download.sh`](datasets/download.sh) (or pass `--dataset` to a
+file you already have), then invoke any runner as a module:
 
 ```bash
-python -m benchmarks.runners.longmemeval_bench \
-    --dataset path/to/longmemeval_s.json \
-    --profile raw \
-    --k 5
+python -m benchmarks.runners.longmemeval_bench          --profile raw --k 5
+python -m benchmarks.runners.locomo_bench               --profile raw --k 10
+python -m benchmarks.runners.convomem_bench             --profile raw --k 5
+python -m benchmarks.runners.membench_bench             --profile raw --k 5
+python -m benchmarks.runners.cross_tool_transfer_bench  --profile raw --k 5
 ```
 
-Without a dataset the runner exits with a clear error (status code 2)
-so CI distinguishes "missing input" from "runtime bug".
+Each runner writes a timestamped JSONL to
+`benchmarks/results/{dataset}/{profile}/{timestamp}.jsonl` and prints the
+headline metric on stdout. Without a dataset the runner exits with a
+clear error (status code 2) so CI can distinguish "missing input" from
+"runtime bug".
+
+For the full reproducibility walk-through (Ollama setup, download,
+profile sweep, target numbers) see
+[`../docs/BENCHMARKS.md`](../docs/BENCHMARKS.md#reproducibility).
 
 ## Running in Docker
 
@@ -55,13 +66,20 @@ See [`BENCHMARKS.md`](BENCHMARKS.md) for the reproducibility contract.
 ```
 benchmarks/
 ├── README.md               ← you are here
-├── BENCHMARKS.md           ← methodology + published numbers (phase 2)
+├── BENCHMARKS.md           ← methodology + published numbers
 ├── datasets/
 │   ├── README.md           ← upstream sources and download notes
-│   └── download.sh         ← URLs, not executed in CI
+│   ├── download.sh         ← URLs, not executed in CI
+│   └── cross_tool_transfer/
+│       ├── README.md       ← schema for the Memgentic-original dataset
+│       └── example.jsonl   ← 5-row fixture for smoke tests
 ├── runners/
-│   └── longmemeval_bench.py
-├── results/                ← populated by phase-2 runs
+│   ├── longmemeval_bench.py
+│   ├── locomo_bench.py
+│   ├── convomem_bench.py
+│   ├── membench_bench.py
+│   └── cross_tool_transfer_bench.py
+├── results/                ← populated by local runs (gitignored empty)
 ├── lib/
 │   ├── harness.py          ← BenchmarkHarness (shared loop)
 │   ├── corpus_loader.py    ← dataset → harness objects

@@ -1,0 +1,25 @@
+[
+    {
+        "id": "cm-001",
+        "category": "single_hop",
+        "session_id": "sess-alpha",
+        "conversation": [
+            {"role": "user", "content": "Alice is Bob's mentor and has been for three years."},
+            {"role": "assistant", "content": "Got it."}
+        ],
+        "question": "Who is Bob's mentor?",
+        "answer": "Alice",
+        "evidence": ["sess-alpha"]
+    },
+    {
+        "id": "cm-002",
+        "category": "multi_hop",
+        "session_id": "sess-beta",
+        "conversation": [
+            {"role": "user", "content": "Project Orion is led by Chen and shipped v1 last Friday."}
+        ],
+        "question": "Who leads Project Orion?",
+        "answer": "Chen",
+        "evidence": ["sess-beta"]
+    }
+]
