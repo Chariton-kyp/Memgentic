@@ -35,6 +35,12 @@ from mcp.server.fastmcp import Context, FastMCP
 from pydantic import BaseModel, ConfigDict, Field
 
 from memgentic.config import settings
+from memgentic.mcp.formatters import preview_text, utc_now_iso
+from memgentic.mcp.schemas import (
+    DedupeCheckInput,
+    OverviewInput,
+    WatchersStatusInput,
+)
 from memgentic.models import ContentType, MemoryStatus, Platform, SessionConfig
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
@@ -1862,6 +1868,274 @@ async def memgentic_persona_update(params: PersonaUpdateInput, ctx: Context) -> 
     except Exception as exc:
         logger.error("memgentic_persona_update.error", error=str(exc))
         return f"Error updating persona: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Expansion pass — utility tools
+# ---------------------------------------------------------------------------
+
+
+@mcp.tool(
+    name="memgentic_dedupe_check",
+    annotations={
+        "title": "Near-Duplicate Check",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_dedupe_check(params: DedupeCheckInput, ctx: Context) -> dict:
+    """Scan existing memories for near-duplicates of candidate content.
+
+    Intended to run *before* a write so callers can skip or merge instead of
+    creating duplicates. Reuses the same embedder + vector backend as recall,
+    so the similarity score matches what semantic search would surface.
+
+    Returns:
+        ``{is_duplicate, threshold, matches: [{id, similarity,
+        content_preview, source}]}``. ``is_duplicate`` is True when the top
+        match's similarity is at or above ``threshold``.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        embedder: Embedder = state["embedder"]
+        vector_store: VectorStore = state["vector_store"]
+
+        embedding = await embedder.embed(params.content)
+        raw_matches = await vector_store.search(
+            query_embedding=embedding,
+            session_config=None,
+            limit=params.limit,
+        )
+
+        matches = []
+        for item in raw_matches:
+            similarity = float(item.get("score") or 0.0)
+            payload = item.get("payload") or {}
+            matches.append(
+                {
+                    "id": str(item["id"]),
+                    "similarity": round(similarity, 4),
+                    "content_preview": preview_text(payload.get("content")),
+                    "source": payload.get("platform", "unknown"),
+                }
+            )
+
+        top = matches[0]["similarity"] if matches else 0.0
+        return {
+            "is_duplicate": bool(matches) and top >= params.threshold,
+            "threshold": params.threshold,
+            "matches": [m for m in matches if m["similarity"] >= params.threshold],
+        }
+    except Exception as exc:
+        logger.error("memgentic_dedupe_check.error", error=str(exc))
+        return {"error": f"dedupe check failed: {exc}"}
+
+
+@mcp.tool(
+    name="memgentic_overview",
+    annotations={
+        "title": "Memory Overview",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_overview(params: OverviewInput, ctx: Context) -> dict:
+    """Return a one-shot overview of the memory store.
+
+    Aggregates counts per source, the largest topics, storage footprint, and
+    the active capture profile. Intended as a cheap, single-call replacement
+    for combining ``memgentic_stats`` + ``memgentic_sources`` + watcher
+    status on the client side.
+
+    Returns:
+        ``{total_memories, collections, sources, top_topics, storage_mb,
+        capture_profile_default, watchers_active}``.
+    """
+    try:
+        from pathlib import Path
+
+        from memgentic.daemon.watcher_state import WatcherStateStore
+        from memgentic.daemon.watchers import ALL_TOOLS
+
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        total = await metadata_store.get_total_count()
+        sources = await metadata_store.get_source_stats()
+
+        collections_list = await metadata_store.get_collections()
+        collections: dict[str, int] = {}
+        for coll in collections_list:
+            collections[coll.name] = await metadata_store.get_collection_memory_count(coll.id)
+
+        top_topics = await _aggregate_top_topics(metadata_store, params.top_topics_limit)
+
+        storage_mb = _path_size_mb(Path(settings.sqlite_path))
+
+        watchers_active = 0
+        try:
+            store = WatcherStateStore()
+            for tool in ALL_TOOLS:
+                status = store.get_status(tool)
+                if status is not None and status.enabled:
+                    watchers_active += 1
+        except Exception as exc:
+            logger.warning("memgentic_overview.watchers_failed", error=str(exc))
+
+        return {
+            "total_memories": total,
+            "collections": collections,
+            "sources": sources,
+            "top_topics": top_topics,
+            "storage_mb": round(storage_mb, 2),
+            "capture_profile_default": settings.default_capture_profile,
+            "watchers_active": watchers_active,
+        }
+    except Exception as exc:
+        logger.error("memgentic_overview.error", error=str(exc))
+        return {"error": f"overview failed: {exc}"}
+
+
+@mcp.tool(
+    name="memgentic_refresh",
+    annotations={
+        "title": "Refresh Cached Settings",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_refresh(ctx: Context) -> dict:
+    """Re-hydrate runtime-mutable settings after an external write.
+
+    Dashboard/CLI changes to ``runtime_settings`` (default capture profile,
+    etc.) aren't seen by a running MCP server because the values are read
+    once at startup. This tool bumps the cache by re-reading them — no store
+    reopen, so it's safe to call while other tools are in flight.
+
+    Returns:
+        ``{refreshed: True, db_path, reopened_at}`` on success.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        stored_profile = await metadata_store.get_runtime_setting("default_capture_profile")
+        if stored_profile in ("raw", "enriched", "dual"):
+            settings.default_capture_profile = stored_profile  # type: ignore[assignment]
+
+        return {
+            "refreshed": True,
+            "db_path": str(settings.sqlite_path),
+            "reopened_at": utc_now_iso(),
+        }
+    except Exception as exc:
+        logger.error("memgentic_refresh.error", error=str(exc))
+        return {"refreshed": False, "error": str(exc)}
+
+
+@mcp.tool(
+    name="memgentic_watchers_status",
+    annotations={
+        "title": "Watchers Status",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_watchers_status(params: WatchersStatusInput, ctx: Context) -> dict:
+    """Report cross-tool watcher state (capture mechanism + recent activity).
+
+    Mirrors the REST ``GET /api/v1/watchers`` surface so agents don't need
+    an HTTP round-trip to decide which tool's capture is still live.
+
+    Returns:
+        ``{watchers: [{tool, mechanism, installed, enabled, installed_at,
+        last_error, last_error_at, captured_count_today, captured_count_total,
+        last_captured_at}]}``. ``captured_count_today`` is the number of
+        memories ingested since UTC midnight for that tool (parsed from
+        watcher_logs). ``captured_count_total`` is the lifetime total.
+        When ``include_disabled=False`` (default True), only installed *and*
+        enabled rows are returned — both gates match the field name.
+    """
+    try:
+        from memgentic.daemon.watcher_state import WatcherStateStore
+        from memgentic.daemon.watchers import ALL_TOOLS, classify_tool
+
+        store = WatcherStateStore()
+        watchers: list[dict] = []
+        for tool in ALL_TOOLS:
+            status = store.get_status(tool)
+            installed = status is not None
+            enabled = bool(status.enabled) if status else False
+            if not params.include_disabled and (not installed or not enabled):
+                continue
+            watchers.append(
+                {
+                    "tool": tool,
+                    "mechanism": classify_tool(tool),
+                    "installed": installed,
+                    "enabled": enabled,
+                    "installed_at": status.installed_at if status else None,
+                    "last_error": status.last_error if status else None,
+                    "last_error_at": status.last_error_at if status else None,
+                    "captured_count_today": store.captured_count_today(tool),
+                    "captured_count_total": store.total_captured(tool),
+                    "last_captured_at": store.last_captured_at(tool),
+                }
+            )
+        return {"watchers": watchers}
+    except Exception as exc:
+        logger.error("memgentic_watchers_status.error", error=str(exc))
+        return {"watchers": [], "error": str(exc)}
+
+
+async def _aggregate_top_topics(
+    metadata_store: MetadataStore, limit: int
+) -> list[dict[str, int | str]]:
+    """Return top-N topics (by count) across active memories."""
+    try:
+        db = getattr(metadata_store, "_db", None)
+        if db is None:
+            return []
+        cursor = await db.execute("SELECT topics FROM memories WHERE status = 'active'")
+        rows = await cursor.fetchall()
+        counter: Counter = Counter()
+        import json as _json
+
+        for row in rows:
+            raw = row[0] if row else None
+            if not raw:
+                continue
+            try:
+                topics = _json.loads(raw)
+            except Exception:
+                continue
+            if isinstance(topics, list):
+                counter.update(str(t) for t in topics if t)
+        return [{"topic": t, "count": c} for t, c in counter.most_common(limit)]
+    except Exception as exc:
+        logger.warning("memgentic_overview.top_topics_failed", error=str(exc))
+        return []
+
+
+def _path_size_mb(path) -> float:
+    """Return the size of ``path`` in megabytes, or 0.0 if missing.
+
+    Used by :func:`memgentic_overview` for ``storage_mb``. Only the metadata
+    SQLite file is measured — vector storage (sqlite-vec / Qdrant) and the
+    knowledge-graph JSON are tracked separately by their own stats tools.
+    """
+    try:
+        return path.stat().st_size / (1024 * 1024)
+    except Exception:
+        return 0.0
 
 
 def _redirect_logs_to_stderr() -> None:
