@@ -31,6 +31,7 @@ from memgentic_api.routes import (
     sources,
     stats,
     uploads,
+    watchers,
     websocket,
 )
 from memgentic_api.routes import (
@@ -278,6 +279,7 @@ app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"], depen
 app.include_router(settings_routes.router, prefix="/api/v1", tags=["settings"], dependencies=_auth)
 app.include_router(persona.router, prefix="/api/v1", tags=["persona"], dependencies=_auth)
 app.include_router(briefing.router, prefix="/api/v1", tags=["briefing"], dependencies=_auth)
+app.include_router(watchers.router, prefix="/api/v1", tags=["watchers"], dependencies=_auth)
 
 # WebSocket — no auth dependency (clients authenticate via initial message if needed)
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])

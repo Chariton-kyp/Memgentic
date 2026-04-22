@@ -3264,5 +3264,75 @@ def briefing(
         raise SystemExit(exit_code)
 
 
+# ---------------------------------------------------------------------------
+# Watchers — cross-tool automatic capture
+# ---------------------------------------------------------------------------
+
+
+@main.group(name="watchers")
+def watchers_group():
+    """Install and manage cross-tool capture watchers.
+
+    \b
+    Subcommands:
+      install   Install hooks / file watchers for a specific tool
+      uninstall Reverse install
+      status    Show per-tool capture status
+    """
+
+
+@watchers_group.command(name="install")
+@click.option("--tool", required=True, help="Tool name (e.g. claude_code, codex, gemini_cli)")
+def watchers_install(tool: str):
+    """Install watcher mechanism for TOOL."""
+    from memgentic.daemon.watcher_install import install
+
+    result = install(tool)
+    if result.ok:
+        console.print(f"[green]OK[/] installed watcher for {tool}: {result.message}")
+    else:
+        console.print(f"[red]ERROR[/] {result.message}")
+        raise SystemExit(1)
+
+
+@watchers_group.command(name="uninstall")
+@click.option("--tool", required=True)
+def watchers_uninstall(tool: str):
+    """Uninstall watcher for TOOL."""
+    from memgentic.daemon.watcher_install import uninstall
+
+    result = uninstall(tool)
+    if result.ok:
+        console.print(f"[green]OK[/] uninstalled watcher for {tool}: {result.message}")
+    else:
+        console.print(f"[red]ERROR[/] {result.message}")
+        raise SystemExit(1)
+
+
+@watchers_group.command(name="status")
+def watchers_status():
+    """Show per-tool watcher status."""
+    from memgentic.daemon.watcher_state import WatcherStateStore
+
+    store = WatcherStateStore()
+    rows = store.list_statuses()
+    if not rows:
+        console.print("[dim]no watchers installed[/]")
+        return
+    table = Table(title="Watchers")
+    table.add_column("tool")
+    table.add_column("enabled")
+    table.add_column("installed at")
+    table.add_column("last error")
+    for row in rows:
+        table.add_row(
+            row.tool,
+            "yes" if row.enabled else "no",
+            str(row.installed_at or "—"),
+            row.last_error or "—",
+        )
+    console.print(table)
+
+
 if __name__ == "__main__":
     main()
