@@ -1,0 +1,2 @@
+{"question_id": "mb-0001", "question": "What is the boiling point of water at sea level?", "context": "Water boils at 100 degrees Celsius at standard atmospheric pressure (sea level).", "source_id": "ctx-water-boiling", "category": "factual"}
+{"question_id": "mb-0002", "question": "Who painted the Mona Lisa?", "context": "The Mona Lisa was painted by Leonardo da Vinci between 1503 and 1506.", "source_id": "ctx-mona-lisa", "category": "factual"}

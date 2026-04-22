@@ -9,11 +9,12 @@ ConvoMem, MemBench, and Cross-Tool Transfer without branching.
 
 The ``profile`` argument accepts ``"raw"``, ``"enriched"``, ``"dual"`` and
 a small set of synonyms documented in :meth:`BenchmarkHarness.__init__`.
-Today it only gates LLM-backed classification (off for ``raw``, on
-otherwise). Capture Profiles have since landed end-to-end in the
-pipeline; wiring the harness to route through the ingestion pipeline's
-``capture_profile`` argument is a Week-4 follow-up tracked in the
-project roadmap.
+Phase 2 wires the profile end-to-end: every ingestion call made through
+:meth:`BenchmarkHarness.ingest_session` forwards the profile to
+:meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
+via its ``capture_profile`` argument, so ``raw`` runs bypass LLM
+enrichment, ``enriched`` runs go through the full Gemini-Flash-Lite
+pipeline, and ``dual`` runs emit paired raw/enriched memories.
 """
 
 from __future__ import annotations
@@ -29,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
-from memgentic.models import CaptureMethod, ConversationChunk, Platform
+from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
 from memgentic.storage.metadata import MetadataStore
@@ -126,10 +127,11 @@ class BenchmarkHarness:
 
         Args:
             profile: Capture profile tag (``"raw"``, ``"enriched"``,
-                ``"dual"``). Today this is recorded in result files and
-                toggles LLM-driven classification off for ``raw``; when
-                the Capture Profiles work (plan 07) merges it will wire
-                in the full profile machinery without runner changes.
+                ``"dual"``). The tag is recorded in result files and
+                passed through to
+                :meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
+                via ``capture_profile`` so ingestion uses exactly the
+                same code path as production.
             embedder: Embedder label. The default ``"qwen3-0.6b"`` maps to
                 the production Ollama model. Custom values flow through
                 unchanged for experimentation.
@@ -143,7 +145,7 @@ class BenchmarkHarness:
                 the harness uses it as-is — useful for wiring a Qdrant
                 server URL or supplying a real Ollama config in Docker.
         """
-        self.profile = self._normalise_profile(profile)
+        self.profile: CaptureProfile = self._normalise_profile(profile)
         self.embedder_label = embedder
         self.backend_label = backend
         self.seed = seed
@@ -224,6 +226,10 @@ class BenchmarkHarness:
 
         The §6 LongMemEval runner calls this in a loop; other runners
         can call :meth:`ingest_corpus` to pass an iterable.
+
+        The harness's normalised ``profile`` flows through as
+        ``capture_profile`` so the pipeline routes to the configured
+        raw / enriched / dual code path without any runner branching.
         """
         pipeline = self._require_pipeline()
         await pipeline.ingest_conversation(
@@ -232,6 +238,7 @@ class BenchmarkHarness:
             session_id=session.session_id,
             session_title=session.session_title,
             capture_method=CaptureMethod.MANUAL_IMPORT,
+            capture_profile=self.profile,
         )
 
     async def ingest_corpus(
@@ -342,13 +349,18 @@ class BenchmarkHarness:
         )
 
     @staticmethod
-    def _normalise_profile(profile: str) -> str:
+    def _normalise_profile(profile: str) -> CaptureProfile:
         resolved = _PROFILE_ALIASES.get(profile, profile)
         if resolved not in _KNOWN_PROFILES:
             raise ValueError(
                 f"Unknown profile {profile!r}. Expected one of {sorted(_KNOWN_PROFILES)}."
             )
-        return resolved
+        # The membership check above constrains `resolved` to the three literal
+        # values, but pyright can't narrow through ``in _KNOWN_PROFILES`` — the
+        # cast here encodes the invariant for the type checker.
+        from typing import cast
+
+        return cast(CaptureProfile, resolved)
 
     def _require_pipeline(self) -> IngestionPipeline:
         if self._pipeline is None:

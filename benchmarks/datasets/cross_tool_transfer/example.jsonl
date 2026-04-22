@@ -1,0 +1,5 @@
+{"role": "turn", "tool": "claude_code", "turn": 1, "content": "We decided to pick sqlite-vec for Memgentic's default vector backend because it is zero-config and multi-process safe.", "session_id": "ctt-session-001"}
+{"role": "turn", "tool": "claude_code", "turn": 2, "content": "Qdrant stays as an opt-in backend for users who already run a Qdrant server.", "session_id": "ctt-session-001"}
+{"role": "turn", "tool": "gemini_cli", "turn": 1, "content": "For the embedding model, the team picked Qwen3-Embedding-0.6B served via Ollama with 768-dim MRL truncation.", "session_id": "ctt-session-002"}
+{"role": "query", "tool": "chatgpt", "content": "Which vector database did we pick as Memgentic's default backend?", "ground_truth_memory_ids": ["ctt-session-001"], "target_tool": "claude_code", "category": "factual_recall"}
+{"role": "query", "tool": "aider", "content": "What embedding model is Memgentic using and where is it served from?", "ground_truth_memory_ids": ["ctt-session-002"], "target_tool": "gemini_cli", "category": "factual_recall"}
