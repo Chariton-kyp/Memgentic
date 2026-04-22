@@ -1,4 +1,27 @@
-"""Antigravity adapter — parses Protocol Buffer conversation files from ~/.gemini/antigravity/."""
+"""Antigravity adapter — parses Protocol Buffer conversation files from ~/.gemini/antigravity/.
+
+Schema pin
+----------
+Google's Antigravity product does not publish an official ``.proto`` schema for
+its conversation files, so this adapter does NOT depend on a generated
+``_pb2`` module.  Instead it walks the raw protobuf wire format and pulls out
+length-delimited UTF-8 runs.  The pin is therefore on our *wire-format
+assumptions* rather than on a schema version string:
+
+* We handle wire types 0 (varint), 1 (64-bit fixed), 2 (length-delimited) and
+  5 (32-bit fixed).  Deprecated group wire types 3 and 4 are treated as an
+  unknown-schema signal and logged.
+* We rely on message bodies containing human-readable UTF-8 in length-
+  delimited fields.  Any future Antigravity version that moves to a different
+  encoding (e.g. encrypted payloads, fixed-width binary records, or a
+  versioned header we don't recognise) will make decode yield zero strings on
+  non-empty input, which now emits ``antigravity.decode_failed`` and skips
+  the record instead of silently returning empty memories.
+
+If Antigravity ships a new wire-format revision upstream, bump
+``ANTIGRAVITY_WIRE_FORMAT_VERSION`` below in the same commit as the
+wire-format changes so the pin travels with the code that implements it.
+"""
 
 from __future__ import annotations
 
@@ -11,6 +34,13 @@ from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
 
 logger = structlog.get_logger()
+
+# Pinned wire-format revision.  Purely informational — logged on decode
+# failures so that upstream schema bumps show up in operator logs.
+# Bump this string in the same commit whenever the extractor's wire-format
+# assumptions (handled wire types, header parsing, UTF-8 assumption, etc.)
+# are intentionally changed.
+ANTIGRAVITY_WIRE_FORMAT_VERSION = "wireformat.v1-2026-04"
 
 # Try to use the Rust-native protobuf parser (15-30x faster).
 try:
@@ -87,7 +117,15 @@ def _extract_strings_from_protobuf(data: bytes, min_length: int = 10) -> list[st
             # 32-bit fixed — skip 4 bytes
             pos += 4
         else:
-            # Unknown wire type — cannot continue safely
+            # Unknown wire type (3/4 group markers or anything else).
+            # Likely a schema drift — bail out on this frame but keep any
+            # strings we already accumulated from prior fields.
+            logger.warning(
+                "antigravity.unknown_wire_type",
+                wire_type=wire_type,
+                position=pos,
+                schema_version=ANTIGRAVITY_WIRE_FORMAT_VERSION,
+            )
             break
 
     return strings
@@ -276,6 +314,11 @@ class AntigravityAdapter(BaseAdapter):
         """Synchronous helper — read and extract text strings from a .pb file.
 
         Uses Rust native protobuf parser when available (15-30x faster).
+
+        Fail-safe: any decode error (malformed wire format, truncated payload,
+        native parser exception) is caught and logged as
+        ``antigravity.decode_failed``; we then return ``[]`` so the ingestion
+        pipeline skips the record rather than corrupting the memory store.
         """
         try:
             data = file_path.read_bytes()
@@ -286,23 +329,51 @@ class AntigravityAdapter(BaseAdapter):
         if not data:
             return []
 
+        strings: list[str] = []
         if _USE_NATIVE_PB:
             try:
                 strings = list(_native_pb_extract(data))
                 if not strings:
                     strings = list(_native_pb_fallback(data))
-                return strings
             except Exception as e:
+                # Any exception from the PyO3 boundary (protobuf wire-format
+                # error, UTF-8 error, PanicException).  Fall through to the
+                # pure-Python extractor which is more permissive.
                 logger.warning(
                     "antigravity.native_parse_fallback",
                     file=str(file_path),
                     error=str(e),
+                    schema_version=ANTIGRAVITY_WIRE_FORMAT_VERSION,
                 )
-
-        # Python fallback
-        strings = _extract_strings_from_protobuf(data)
+                strings = []
 
         if not strings:
-            strings = _extract_strings_fallback(data)
+            # Python fallback — wrapped in a broad try/except so a
+            # future schema change that breaks our wire-format assumptions
+            # cannot crash the watcher / importer.
+            try:
+                strings = _extract_strings_from_protobuf(data)
+                if not strings:
+                    strings = _extract_strings_fallback(data)
+            except Exception as e:  # pragma: no cover — defensive guard
+                logger.warning(
+                    "antigravity.decode_failed",
+                    file=str(file_path),
+                    error=str(e),
+                    schema_version=ANTIGRAVITY_WIRE_FORMAT_VERSION,
+                )
+                return []
+
+        if not strings:
+            # Non-empty file that yielded nothing — most likely a schema
+            # drift upstream.  Log once per file and skip the record.
+            logger.warning(
+                "antigravity.decode_failed",
+                file=str(file_path),
+                bytes=len(data),
+                reason="no_strings_extracted",
+                schema_version=ANTIGRAVITY_WIRE_FORMAT_VERSION,
+            )
+            return []
 
         return strings
