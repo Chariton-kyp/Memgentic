@@ -69,6 +69,13 @@ updates:
       rust-minor-patch:
         applies-to: version-updates
         update-types: ["minor", "patch"]
+    ignore:
+      # pyo3 majors (0.x → 0.y) carry breaking API renames (PyObject moved
+      # in 0.28, Bound/Py smart-pointer rework, etc.). Each bump needs a
+      # dedicated migration PR, not an auto-open. Revisit when we schedule
+      # the migration.
+      - dependency-name: "pyo3"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "npm"
     directory: "/dashboard"
