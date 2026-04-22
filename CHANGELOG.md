@@ -4,6 +4,32 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-04-22 — Intelligence Upgrades + Distribution
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
+
+### Added
+- **Recall Tiers (T0–T4)** — progressive context loader: T0 Persona, T1 Horizon (hybrid score + MMR), T2 Orbit, T3 Deep Recall, T4 Atlas. Adaptive token budget that auto-scales to model context. New MCP `memgentic_tier_recall` tool; upgraded `memgentic_briefing`. Dashboard `/briefing` page with tier picker, weight sliders, and live preview.
+- **Persona** — structured identity/people/projects/preferences with LLM bootstrap and atomic file locking. `memgentic persona {init,show,edit,validate,…}` CLI; REST `/api/v1/persona/*`; MCP `memgentic_persona_get` + `memgentic_persona_update`; dashboard `/persona` page.
+- **Watchers** — cross-tool automatic capture umbrella. Hook scripts for Claude Code and Codex. File watchers for Aider, Antigravity, Copilot CLI, Gemini CLI behind a `FILE_WATCHERS` registry. `memgentic watchers {install,uninstall,enable,disable,status,logs}` CLI; REST `/api/v1/watchers/*`; MCP `memgentic_watchers_status`; dashboard `/watchers` page.
+- **Chronograph** — bitemporal entity-relationship graph (separate `chronograph.sqlite`). LLM triple extractor, validation queue, `memgentic graph` CLI subgroup (11 commands), 13 REST endpoints, 5 MCP tools, dashboard `/chronograph` page.
+- **Capture Profiles** (raw / enriched / dual) — pipeline dispatches on profile; CLI `--profile`; REST + MCP surface; dashboard selector.
+- **MCP surface** expanded 14 → **27 tools**. New: `dedupe_check`, `overview`, `refresh`, `watchers_status`. `docs/MCP-TOOLS.md` auto-generated from the live tool registry with a CI drift guard.
+- **Benchmarks (phase 2)** — runners for LoCoMo, ConvoMem, MemBench, Cross-Tool Transfer in `benchmarks/runners/`. Profile flag now wires through `BenchmarkHarness` → `IngestionPipeline.ingest_conversation`. `docs/BENCHMARKS.md` has the full reproducibility walkthrough. Actual numbers are run-then-publish.
+- **Dashboard landing page** (`/welcome`) with Recall Tiers diagram + Watchers matrix + "Why Memgentic".
+
+### Fixed
+- **`lxml`** bumped 6.0.4 → 6.1.0 to close the GHSA XXE CVE (Dependabot alert #22).
+- **Antigravity protobuf** — pinned wire-format version (`wireformat.v1-2026-04`) + fail-safe decode that logs a structured warning and skips corrupt payloads instead of raising.
+- **WebSocket reconnect** — broke a `scheduleReconnect` / `connect` circular reference via ref-indirection. Fixes the "variable accessed before declared" lint that shaded a live stale-closure risk.
+- **Release automation** — `release-please` + `scorecard-action` pin + Dependabot workspace scope unblocked after weeks of red workflows.
+
+### Changed
+- **Default capture profile** now persists in the `runtime_settings` kv table; MCP `memgentic_refresh` re-hydrates it live without reopening stores.
+- **Dashboard eslint** now runs in CI; 0 errors, 0 warnings on main.
+- **Dependabot `pip` scope** fixed to the workspace root (was scanning member pyprojects without the lock).
+- **Branch protection** on `main` now requires a code-owner review on every PR (solo admin-bypass retained).
+
 ## [0.6.0] — 2026-04-19 — Zero-config by default
 
 ### Breaking Changes
