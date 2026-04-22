@@ -27,10 +27,9 @@ import contextlib
 import time
 from collections.abc import Iterable
 from pathlib import Path
-
-import structlog
 from typing import Any
 
+import structlog
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 

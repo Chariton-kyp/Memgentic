@@ -56,7 +56,7 @@ function formatRelative(ts: string | null): string {
 }
 
 function StatusDot({ row }: { row: WatcherRow }) {
-  if (!row.installed) {
+  if (!row.installed_at) {
     return <span className="size-2 rounded-full bg-muted-foreground/40" />;
   }
   if (row.last_error) {
@@ -175,7 +175,7 @@ export default function WatchersPage() {
                       <div className="flex items-center gap-2">
                         <StatusDot row={row} />
                         <span className="text-xs text-muted-foreground">
-                          {row.installed
+                          {row.installed_at
                             ? row.enabled
                               ? row.last_error
                                 ? "error"
@@ -194,7 +194,7 @@ export default function WatchersPage() {
                       onClick={(e) => e.stopPropagation()}
                     >
                       {INSTALLABLE.has(row.tool) ? (
-                        row.installed ? (
+                        row.installed_at ? (
                           <div className="inline-flex gap-1">
                             <Button
                               variant="ghost"
