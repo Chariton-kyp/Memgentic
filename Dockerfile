@@ -1,5 +1,5 @@
 # === Stage 1: Builder — install dependencies ===
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 # Install uv
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -34,7 +34,7 @@ RUN cd memgentic-native && maturin build --release && \
 
 
 # === Stage 2: Runtime — lean production image ===
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 # Copy uv (needed for `uv run` in CMD/entrypoint)
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
