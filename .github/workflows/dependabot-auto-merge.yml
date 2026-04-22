@@ -1,5 +1,19 @@
 name: Dependabot auto-merge
 
+# Auto-approves + auto-merges Dependabot PRs that bump a dep by a
+# PATCH version only. MINOR and MAJOR bumps require a human review —
+# standard pattern for a solo-maintainer repo where patches are
+# generally safe but any API-surface change deserves eyeballs.
+#
+# Why ``RELEASE_PLEASE_TOKEN`` and not ``GITHUB_TOKEN``?
+# ``main`` branch protection requires a **code-owner** approval per
+# CODEOWNERS (@Chariton-kyp). ``gh pr review --approve`` with
+# ``GITHUB_TOKEN`` posts the approval as ``github-actions[bot]``,
+# which does not satisfy the code-owner gate → auto-merge stalls on
+# otherwise-safe patch bumps. Using a PAT owned by @Chariton-kyp
+# posts the approval as the owner, which satisfies CODEOWNERS. Same
+# secret as release-please.yml; no extra secret to manage.
+
 on:
   pull_request:
     branches: [main]
@@ -23,13 +37,15 @@ jobs:
       - name: Approve patch updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT so the approval is posted as the code-owner, not as
+          # github-actions[bot]. See workflow-level comment.
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr review --approve "$PR_URL"
 
       - name: Enable auto-merge for patch updates
         if: steps.metadata.outputs.update-type == 'version-update:semver-patch'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: gh pr merge --auto --squash "$PR_URL"
