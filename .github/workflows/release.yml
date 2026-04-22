@@ -146,15 +146,19 @@ jobs:
 
       - name: Generate SBOM (CycloneDX)
         run: |
-          uv pip install --system cyclonedx-bom
+          # Ubuntu 24.04 system python is PEP 668-managed, so
+          # ``uv pip install --system`` fails with "externally-managed".
+          # Install into the repo's ``.venv`` (created by the earlier
+          # ``uv sync --dev`` step) and run the CLI via ``uv run``.
+          uv pip install cyclonedx-bom
           mkdir -p sbom
           TAG="${TAG_NAME}"
           VERSION="${TAG#v}"
-          cyclonedx-py environment \
+          uv run cyclonedx-py environment \
             --output-format json \
             --output-file "sbom/sbom-memgentic-${VERSION}.cdx.json" \
             --spec-version 1.6 \
-            .
+            .venv
           ls -lh sbom/
 
       - uses: actions/upload-artifact@v4
