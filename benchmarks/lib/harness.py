@@ -30,7 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
-from memgentic.models import CaptureMethod, ConversationChunk, Platform
+from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
 from memgentic.storage.metadata import MetadataStore
@@ -145,7 +145,7 @@ class BenchmarkHarness:
                 the harness uses it as-is — useful for wiring a Qdrant
                 server URL or supplying a real Ollama config in Docker.
         """
-        self.profile = self._normalise_profile(profile)
+        self.profile: CaptureProfile = self._normalise_profile(profile)
         self.embedder_label = embedder
         self.backend_label = backend
         self.seed = seed
@@ -238,7 +238,7 @@ class BenchmarkHarness:
             session_id=session.session_id,
             session_title=session.session_title,
             capture_method=CaptureMethod.MANUAL_IMPORT,
-            capture_profile=self.profile,  # type: ignore[arg-type]
+            capture_profile=self.profile,
         )
 
     async def ingest_corpus(
@@ -349,13 +349,18 @@ class BenchmarkHarness:
         )
 
     @staticmethod
-    def _normalise_profile(profile: str) -> str:
+    def _normalise_profile(profile: str) -> CaptureProfile:
         resolved = _PROFILE_ALIASES.get(profile, profile)
         if resolved not in _KNOWN_PROFILES:
             raise ValueError(
                 f"Unknown profile {profile!r}. Expected one of {sorted(_KNOWN_PROFILES)}."
             )
-        return resolved
+        # The membership check above constrains `resolved` to the three literal
+        # values, but pyright can't narrow through ``in _KNOWN_PROFILES`` — the
+        # cast here encodes the invariant for the type checker.
+        from typing import cast
+
+        return cast(CaptureProfile, resolved)
 
     def _require_pipeline(self) -> IngestionPipeline:
         if self._pipeline is None:
