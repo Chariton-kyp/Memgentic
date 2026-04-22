@@ -144,33 +144,10 @@ jobs:
       - name: List dist artifacts
         run: ls -lh dist/
 
-      - name: Generate SBOM (CycloneDX)
-        run: |
-          # Ubuntu 24.04 system python is PEP 668-managed, so
-          # ``uv pip install --system`` fails with "externally-managed".
-          # Install into the repo's ``.venv`` (created by the earlier
-          # ``uv sync --dev`` step) and run the CLI via ``uv run``.
-          uv pip install cyclonedx-bom
-          mkdir -p sbom
-          TAG="${TAG_NAME}"
-          VERSION="${TAG#v}"
-          uv run cyclonedx-py environment \
-            --output-format json \
-            --output-file "sbom/sbom-memgentic-${VERSION}.cdx.json" \
-            --spec-version 1.6 \
-            .venv
-          ls -lh sbom/
-
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom/
           if-no-files-found: error
 
   # ── 3. Publish ──────────────────────────────────────────────────────────────
@@ -222,16 +199,10 @@ jobs:
           name: dist
           path: dist/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: sbom
-          path: sbom/
-
       - name: Assemble release assets
         run: |
           mkdir -p release-assets
           cp dist/*.whl dist/*.tar.gz release-assets/
-          cp sbom/*.cdx.json release-assets/
           ls -lh release-assets/
 
       - name: Extract CHANGELOG section
