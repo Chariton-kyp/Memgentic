@@ -36,7 +36,11 @@ vi.mock('@/components/ui/sidebar', () => ({
     React.createElement('ul', null, children),
   SidebarMenuItem: ({ children }: { children: React.ReactNode }) =>
     React.createElement('li', null, children),
-  SidebarMenuButton: ({ children, render, tooltip, ...props }: { children: React.ReactNode; render?: React.ReactElement; tooltip?: string; isActive?: boolean }) => {
+  SidebarMenuButton: ({ children, render, ...rest }: { children: React.ReactNode; render?: React.ReactElement; tooltip?: string; isActive?: boolean }) => {
+    // Drop the ``tooltip`` prop — it's a Sidebar-specific label that would
+    // warn if forwarded to a DOM button.
+    const { tooltip, ...props } = rest
+    void tooltip
     if (render && React.isValidElement(render)) {
       return React.cloneElement(render as React.ReactElement<{ children?: React.ReactNode }>, props, children)
     }

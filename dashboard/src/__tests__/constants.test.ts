@@ -25,7 +25,7 @@ describe('PLATFORM_CONFIG', () => {
   })
 
   it('every platform has label, color, and bgColor', () => {
-    for (const [key, config] of Object.entries(PLATFORM_CONFIG)) {
+    for (const config of Object.values(PLATFORM_CONFIG)) {
       expect(config.label).toBeTruthy()
       expect(config.color).toMatch(/^#[0-9A-Fa-f]{6}$/)
       expect(config.bgColor).toBeTruthy()

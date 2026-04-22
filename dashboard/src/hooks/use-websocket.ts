@@ -281,6 +281,13 @@ export function useWebSocket() {
     scheduleReconnectRef.current = scheduleReconnect;
   }, [scheduleReconnect]);
 
+  // ``connect()`` calls ``setStatus("connecting")`` synchronously on mount.
+  // This is a legitimate mount-time external-connection bridge
+  // (WebSocket) — exactly the shape ``useEffect`` + ``setState`` is meant
+  // to express. ``react-hooks/set-state-in-effect`` fires anyway; the
+  // alternative (``useSyncExternalStore``) doesn't match the reconnect
+  // semantics we need.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     mountedRef.current = true;
     connect();
@@ -294,6 +301,7 @@ export function useWebSocket() {
       }
     };
   }, [connect]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return { status };
 }

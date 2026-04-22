@@ -16,7 +16,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { updateMemory } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";

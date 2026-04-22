@@ -22,6 +22,12 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   const isWelcomePage = pathname === "/welcome";
   const isPublicPage = isLoginPage || isWelcomePage;
 
+  // ``setChecked`` syncs an async health-probe result into React state —
+  // a legitimate React→external-system bridge that
+  // ``react-hooks/set-state-in-effect`` flags by default. The flag is
+  // one-way (false → true only), so the cascading-renders failure mode
+  // the rule warns about cannot occur.
+  /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
     if (isPublicPage) {
       setChecked(true);
@@ -54,6 +60,7 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         setChecked(true);
       });
   }, [isPublicPage, router]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   // Public pages (login, welcome pitch): render without sidebar chrome
   if (isPublicPage) {

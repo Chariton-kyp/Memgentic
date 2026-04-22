@@ -27,7 +27,6 @@ import { useActivityStore } from "@/stores/activity-store";
 import { Header } from "@/components/layout/header";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -108,7 +107,11 @@ export default function HomePage() {
   const isCollectionView =
     activeView !== null && activeView !== "pinned";
 
-  const { data: sourcesData } = useSources();
+  // Prefetch sources so the sidebar / filters hydrate before first user
+  // interaction. The dashboard doesn't read the return value here — the
+  // sidebar subscribes through its own ``useSources()`` call — but keeping
+  // the prefetch warm avoids a flicker on first filter open.
+  useSources();
 
   const {
     data: memoriesData,
