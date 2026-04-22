@@ -122,15 +122,19 @@ jobs:
       - name: Generate SBOM (CycloneDX)
         working-directory: memgentic-api
         run: |
-          uv pip install --system cyclonedx-bom
+          # PEP 668 guard on Ubuntu 24.04 — see matching comment in
+          # release.yml. Install into the project-local ``.venv`` (created
+          # by the earlier ``uv sync`` step above) and invoke via
+          # ``uv run``.
+          uv pip install cyclonedx-bom
           mkdir -p sbom
           TAG="${TAG_NAME}"
           VERSION="${TAG#api-v}"
-          cyclonedx-py environment \
+          uv run cyclonedx-py environment \
             --output-format json \
             --output-file "sbom/sbom-memgentic-api-${VERSION}.cdx.json" \
             --spec-version 1.6 \
-            .
+            .venv
           ls -lh sbom/
 
       - uses: actions/upload-artifact@v4
