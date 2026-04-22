@@ -32,6 +32,7 @@ from memgentic_api.routes import (
     sources,
     stats,
     uploads,
+    watchers,
 )
 from memgentic_api.routes import (
     settings as settings_routes,
@@ -85,6 +86,7 @@ def _create_test_app(
     app.include_router(settings_routes.router, prefix="/api/v1")
     app.include_router(persona.router, prefix="/api/v1")
     app.include_router(briefing.router, prefix="/api/v1")
+    app.include_router(watchers.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     async def health_check():

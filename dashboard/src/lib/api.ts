@@ -834,3 +834,40 @@ export async function previewBriefingWeights(
     body: JSON.stringify(weights),
   });
 }
+
+// --- Watchers ---
+
+import type { WatcherRow, WatcherLog } from "./types";
+
+export async function listWatchers(): Promise<{ watchers: WatcherRow[] }> {
+  return fetchJson(`${API_BASE}/watchers`);
+}
+
+export async function updateWatcher(
+  tool: string,
+  patch: { enabled: boolean },
+): Promise<WatcherRow> {
+  return fetchJson<WatcherRow>(`${API_BASE}/watchers/${tool}`, {
+    method: "PATCH",
+    body: JSON.stringify(patch),
+  });
+}
+
+export async function installWatcher(tool: string): Promise<WatcherRow> {
+  return fetchJson<WatcherRow>(`${API_BASE}/watchers/${tool}/install`, {
+    method: "POST",
+  });
+}
+
+export async function uninstallWatcher(tool: string): Promise<WatcherRow> {
+  return fetchJson<WatcherRow>(`${API_BASE}/watchers/${tool}/uninstall`, {
+    method: "POST",
+  });
+}
+
+export async function getWatcherLogs(
+  tool: string,
+  limit = 50,
+): Promise<{ logs: WatcherLog[] }> {
+  return fetchJson(`${API_BASE}/watchers/${tool}/logs?limit=${limit}`);
+}
