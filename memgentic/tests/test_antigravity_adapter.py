@@ -420,8 +420,6 @@ def test_extract_strings_logs_unknown_wire_type():
     assert result == []
     events = [entry.get("event") for entry in logs]
     assert "antigravity.unknown_wire_type" in events
-    unknown = next(
-        entry for entry in logs if entry.get("event") == "antigravity.unknown_wire_type"
-    )
+    unknown = next(entry for entry in logs if entry.get("event") == "antigravity.unknown_wire_type")
     assert unknown.get("wire_type") == 3
     assert unknown.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
