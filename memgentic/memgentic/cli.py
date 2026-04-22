@@ -3288,11 +3288,8 @@ def watchers_install(tool: str):
     from memgentic.daemon.watcher_install import install
 
     result = install(tool)
-    if result.ok:
-        console.print(f"[green]OK[/] installed watcher for {tool}: {result.message}")
-    else:
-        console.print(f"[red]ERROR[/] {result.message}")
-        raise SystemExit(1)
+    tag = "[green]OK[/]" if result.changed else "[yellow]no-op[/]"
+    console.print(f"{tag} {tool}: {result.message}")
 
 
 @watchers_group.command(name="uninstall")
@@ -3302,11 +3299,8 @@ def watchers_uninstall(tool: str):
     from memgentic.daemon.watcher_install import uninstall
 
     result = uninstall(tool)
-    if result.ok:
-        console.print(f"[green]OK[/] uninstalled watcher for {tool}: {result.message}")
-    else:
-        console.print(f"[red]ERROR[/] {result.message}")
-        raise SystemExit(1)
+    tag = "[green]OK[/]" if result.changed else "[yellow]no-op[/]"
+    console.print(f"{tag} {tool}: {result.message}")
 
 
 @watchers_group.command(name="status")

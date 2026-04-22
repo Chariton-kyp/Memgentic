@@ -318,3 +318,22 @@ export interface BriefingWeightsResponse {
   weights: BriefingWeights;
   overrides: Record<string, number>;
 }
+
+// --- Watchers ---
+
+export interface WatcherRow {
+  tool: string;
+  mechanism: "hook" | "file_watcher" | "mcp" | "import";
+  enabled: boolean;
+  installed_at: string | null;
+  last_captured_at: string | null;
+  captured_count: number;
+  last_error: string | null;
+  last_error_at: string | null;
+}
+
+export interface WatcherLog {
+  ts: string;
+  level: "info" | "warning" | "error";
+  message: string;
+}

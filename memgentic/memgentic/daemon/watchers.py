@@ -29,6 +29,8 @@ from collections.abc import Iterable
 from pathlib import Path
 
 import structlog
+from typing import Any
+
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -144,7 +146,7 @@ class WatchersOrchestrator:
         self._deduper = SemanticDeduper(embedder, vector_store, threshold=dedup_threshold)
         self._extra_aider_paths = [Path(p) for p in (extra_aider_paths or [])]
 
-        self._observer: Observer | None = None
+        self._observer: Any | None = None
         self._queue: asyncio.Queue[tuple[BaseFileWatcher, Path]] = asyncio.Queue(maxsize=2000)
         self._watchers: list[BaseFileWatcher] = []
         self._socket: WatcherSocketServer | None = None
@@ -195,7 +197,8 @@ class WatchersOrchestrator:
                     )
                     continue
                 handler = _FileWatchHandler(watcher, loop, self._queue)
-                self._observer.schedule(handler, str(path), recursive=True)
+                if self._observer is not None:
+                    self._observer.schedule(handler, str(path), recursive=True)
                 logger.info("watchers.subscribed", tool=tool, path=str(path))
             self._watchers.append(watcher)
 
