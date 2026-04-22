@@ -5,9 +5,35 @@ build-backend = "maturin"
 [project]
 name = "memgentic-native"
 version = "0.7.0"
-description = "Native Rust acceleration for Memgentic"
+description = "Native Rust acceleration for Memgentic — text processing, parsers, and knowledge graph"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Chariton Kypraios", email = "chariton@ellinai.com"}]
+keywords = ["memgentic", "rust", "pyo3", "performance", "native-extension"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.urls]
+Homepage = "https://github.com/Chariton-kyp/Memgentic"
+Repository = "https://github.com/Chariton-kyp/Memgentic"
+Issues = "https://github.com/Chariton-kyp/Memgentic/issues"
+Changelog = "https://github.com/Chariton-kyp/Memgentic/blob/main/memgentic-native/CHANGELOG.md"
+Source = "https://github.com/Chariton-kyp/Memgentic/tree/main/memgentic-native"
 
 [tool.maturin]
 features = ["pyo3/extension-module"]
