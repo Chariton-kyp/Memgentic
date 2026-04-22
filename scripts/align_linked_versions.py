@@ -87,22 +87,28 @@ def main() -> int:
     print(f"Linked-version drift detected. Target: {target}")
     print(f"Manifest before: {manifest}")
 
-    any_changed = False
+    manifest_changed = False
+    files_changed = False
     for component, files in COMPONENT_FILES.items():
         current = manifest.get(component)
         if current == target:
             continue
         print(f"Aligning {component}: {current} -> {target}")
         for path, pattern in files:
-            any_changed |= bump_file(path, pattern, target)
+            files_changed |= bump_file(path, pattern, target)
         manifest[component] = target
+        manifest_changed = True
 
-    if any_changed:
+    if manifest_changed:
         MANIFEST.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
         print(f"Manifest after: {manifest}")
         set_github_output("changed", "true")
+    elif files_changed:
+        # Shouldn't happen — files can't be out-of-sync with the manifest
+        # unless someone hand-edited something. Commit the file fix anyway.
+        set_github_output("changed", "true")
     else:
-        print("Nothing to commit (no version files matched).")
+        print("Nothing to commit.")
         set_github_output("changed", "false")
 
     return 0
