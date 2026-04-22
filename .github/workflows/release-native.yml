@@ -186,45 +186,9 @@ jobs:
           name: sdist
           path: memgentic-native/dist/
 
-  sbom:
-    name: Generate SBOM (CycloneDX)
-    needs: sdist
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          ref: ${{ env.TAG_NAME }}
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Build SBOM
-        working-directory: memgentic-native
-        run: |
-          # ``cyclonedx-py environment`` needs a populated Python env
-          # with site-packages to inspect. This job has a bare interpreter
-          # (no ``uv sync`` — the wheel is Rust-built), so ``environment``
-          # fails with "Failed to find python in directory: .". Switch to
-          # ``pyproject`` mode which reads the static ``pyproject.toml``
-          # directly without needing installed deps.
-          pip install cyclonedx-bom
-          mkdir -p sbom
-          TAG="${TAG_NAME}"
-          VERSION="${TAG#native-v}"
-          cyclonedx-py pyproject pyproject.toml \
-            --output-format json \
-            --outfile "sbom/sbom-memgentic-native-${VERSION}.cdx.json" \
-            --spec-version 1.6 \
-            --mc-type application
-          ls -lh sbom/
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: memgentic-native/sbom/
-          if-no-files-found: error
-
   publish:
     name: Publish memgentic-native to PyPI
-    needs: [linux, macos, windows, sdist, sbom]
+    needs: [linux, macos, windows, sdist]
     runs-on: ubuntu-24.04
     permissions:
       id-token: write
@@ -238,8 +202,10 @@ jobs:
       name: pypi-native
       url: https://pypi.org/p/memgentic-native
     steps:
-      # Pull wheels + sdist ONLY. The `sbom` artifact must NOT land here
-      # or twine will try to upload the .cdx.json as a distribution.
+      # Pull wheels + sdist. SBOM job removed in the 0.7.0 unblock —
+      # cyclonedx-py can't handle Rust-backed wheels cleanly. Add
+      # SBOM back in a follow-up via ``cargo-cyclonedx`` when it's
+      # not blocking a release.
       - uses: actions/download-artifact@v4
         with:
           path: wheels/
@@ -279,7 +245,7 @@ jobs:
       - name: Collect release assets
         run: |
           mkdir -p release-assets
-          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" -o -name "*.cdx.json" \) -exec cp {} release-assets/ \;
+          find artifacts -type f \( -name "*.whl" -o -name "*.tar.gz" \) -exec cp {} release-assets/ \;
           ls -lh release-assets/
       - name: Extract CHANGELOG section
         id: changelog

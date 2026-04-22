@@ -119,34 +119,10 @@ jobs:
         working-directory: memgentic-api
         run: uv build --package memgentic-api --out-dir dist
 
-      - name: Generate SBOM (CycloneDX)
-        working-directory: memgentic-api
-        run: |
-          # PEP 668 guard on Ubuntu 24.04 — see matching comment in
-          # release.yml. Install into the project-local ``.venv`` (created
-          # by the earlier ``uv sync`` step above) and invoke via
-          # ``uv run``.
-          uv pip install cyclonedx-bom
-          mkdir -p sbom
-          TAG="${TAG_NAME}"
-          VERSION="${TAG#api-v}"
-          uv run cyclonedx-py environment \
-            --output-format json \
-            --output-file "sbom/sbom-memgentic-api-${VERSION}.cdx.json" \
-            --spec-version 1.6 \
-            .venv
-          ls -lh sbom/
-
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: memgentic-api/dist/
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: memgentic-api/sbom/
           if-no-files-found: error
 
   # ── 3. Publish ──────────────────────────────────────────────────────
@@ -199,16 +175,10 @@ jobs:
           name: dist
           path: dist/
 
-      - uses: actions/download-artifact@v4
-        with:
-          name: sbom
-          path: sbom/
-
       - name: Assemble release assets
         run: |
           mkdir -p release-assets
           cp dist/*.whl dist/*.tar.gz release-assets/
-          cp sbom/*.cdx.json release-assets/
           ls -lh release-assets/
 
       - name: Extract CHANGELOG section
