@@ -265,18 +265,18 @@ export default function WatchersPage() {
                 <Skeleton className="h-32 w-full" />
               )}
               {logsQuery.data &&
-                (logsQuery.data.entries.length === 0 ? (
+                (logsQuery.data.logs.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
                     No log entries yet.
                   </p>
                 ) : (
                   <ul className="space-y-1 text-xs font-mono">
-                    {logsQuery.data.entries.map((entry, idx) => (
+                    {logsQuery.data.logs.map((entry, idx) => (
                       <li
                         key={idx}
                         className="flex gap-3 text-muted-foreground"
                       >
-                        <span className="shrink-0">{entry.created_at}</span>
+                        <span className="shrink-0">{entry.ts}</span>
                         <span className="shrink-0 uppercase">
                           [{entry.level}]
                         </span>
