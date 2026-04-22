@@ -16,9 +16,9 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml uv.lock* ./
-COPY memgentic/pyproject.toml memgentic/
+COPY memgentic/pyproject.toml memgentic/README.md memgentic/LICENSE memgentic/
 COPY memgentic/memgentic/ memgentic/memgentic/
-COPY memgentic-api/pyproject.toml memgentic-api/
+COPY memgentic-api/pyproject.toml memgentic-api/README.md memgentic-api/LICENSE memgentic-api/
 COPY memgentic-api/memgentic_api/ memgentic-api/memgentic_api/
 
 # Install Python dependencies (with intelligence extras for LangChain/LangGraph)
