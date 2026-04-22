@@ -11,12 +11,23 @@ on:
       # on the v0.5.0 push). The two packages release independently
       # now: bump Cargo.toml + pyproject.toml and push `native-vX.Y.Z`.
       - "native-v*"
+  # Manual re-fire for tags whose push event was suppressed by
+  # GITHUB_TOKEN's recursive-workflow guard. See release-please.yml.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. native-v0.7.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read   # base — jobs escalate as needed
 
+env:
+  TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+
 concurrency:
-  group: release-native-${{ github.ref }}
+  group: release-native-${{ github.event.inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -28,10 +39,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - name: Check version matches tag
         run: |
-          TAG="${GITHUB_REF_NAME}"             # native-v0.7.0
+          TAG="${TAG_NAME}"             # native-v0.7.0
           VERSION="${TAG#native-v}"            # 0.7.0
           CARGO_VERSION=$(python3 -c "
           import tomllib, pathlib
@@ -53,7 +66,7 @@ jobs:
 
       - name: Check version not already on PyPI
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${TAG_NAME}"
           VERSION="${TAG#native-v}"
           python3 - "$VERSION" <<'PYEOF'
           import sys, json, urllib.request, urllib.error
@@ -85,6 +98,8 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -110,6 +125,8 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -134,6 +151,8 @@ jobs:
         python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
@@ -154,6 +173,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - name: Build sdist
         uses: PyO3/maturin-action@e83996d129638aa358a18fbd1dfb82f0b0fb5d3b # v1
         with:
@@ -171,21 +192,29 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - name: Build SBOM
         working-directory: memgentic-native
         run: |
+          # ``cyclonedx-py environment`` needs a populated Python env
+          # with site-packages to inspect. This job has a bare interpreter
+          # (no ``uv sync`` — the wheel is Rust-built), so ``environment``
+          # fails with "Failed to find python in directory: .". Switch to
+          # ``pyproject`` mode which reads the static ``pyproject.toml``
+          # directly without needing installed deps.
           pip install cyclonedx-bom
           mkdir -p sbom
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${TAG_NAME}"
           VERSION="${TAG#native-v}"
-          cyclonedx-py environment \
+          cyclonedx-py pyproject pyproject.toml \
             --output-format json \
-            --output-file "sbom/sbom-memgentic-native-${VERSION}.cdx.json" \
+            --outfile "sbom/sbom-memgentic-native-${VERSION}.cdx.json" \
             --spec-version 1.6 \
-            .
+            --mc-type application
           ls -lh sbom/
       - uses: actions/upload-artifact@v4
         with:
@@ -242,6 +271,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts/
@@ -253,7 +284,7 @@ jobs:
       - name: Extract CHANGELOG section
         id: changelog
         run: |
-          TAG="${GITHUB_REF_NAME}"         # native-v0.6.0
+          TAG="${TAG_NAME}"         # native-v0.6.0
           VERSION="${TAG#native-v}"        # 0.6.0
           CHANGELOG_PATH="memgentic-native/CHANGELOG.md"
           if [ ! -f "$CHANGELOG_PATH" ]; then

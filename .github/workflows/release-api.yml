@@ -4,12 +4,23 @@ on:
   push:
     tags:
       - "api-v*"
+  # Manual re-fire for tags whose push event was suppressed by
+  # GITHUB_TOKEN's recursive-workflow guard. See release-please.yml.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. api-v0.7.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read   # base — jobs escalate as needed
 
+env:
+  TAG_NAME: ${{ github.event.inputs.tag || github.ref_name }}
+
 concurrency:
-  group: release-api-${{ github.ref }}
+  group: release-api-${{ github.event.inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -23,10 +34,12 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - name: Check version matches tag
         run: |
-          TAG="${GITHUB_REF_NAME}"               # api-v0.7.0
+          TAG="${TAG_NAME}"               # api-v0.7.0
           VERSION="${TAG#api-v}"                 # 0.7.0
           FILE_VERSION=$(python3 -c "
           import tomllib, pathlib
@@ -49,7 +62,7 @@ jobs:
 
       - name: Check version not already on PyPI
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${TAG_NAME}"
           VERSION="${TAG#api-v}"
           python3 - "$VERSION" <<'PYEOF'
           import sys, json, urllib.request, urllib.error
@@ -81,6 +94,8 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - name: Install uv
         uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5
@@ -109,7 +124,7 @@ jobs:
         run: |
           uv pip install --system cyclonedx-bom
           mkdir -p sbom
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${TAG_NAME}"
           VERSION="${TAG#api-v}"
           cyclonedx-py environment \
             --output-format json \
@@ -172,6 +187,8 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ env.TAG_NAME }}
 
       - uses: actions/download-artifact@v4
         with:
@@ -193,7 +210,7 @@ jobs:
       - name: Extract CHANGELOG section
         id: changelog
         run: |
-          TAG="${GITHUB_REF_NAME}"         # api-v0.6.0
+          TAG="${TAG_NAME}"         # api-v0.6.0
           VERSION="${TAG#api-v}"           # 0.6.0
 
           # Try package-local CHANGELOG first (written by release-please);
