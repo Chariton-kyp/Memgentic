@@ -183,3 +183,58 @@ All tabs: topic selector (autocomplete), collection picker, content type dropdow
 | **D** | 3-4 weeks | Desktop App |
 
 **Time to MVP: 8-12 weeks.**
+
+---
+
+## Shipped: Memory Intelligence Upgrades
+
+The following subsystems landed on top of Phases A + B as a single wave of work focused on **how** memory is loaded, captured, personalised, and connected. They run on top of the existing storage layer — no breaking changes to the Phase A/B APIs.
+
+### Recall Tiers (T0–T4)
+
+**What it is.** A structured, 5-tier progressive context loader that replaces the flat `memgentic_briefing` dump with a token-budgeted stack: **T0 Persona** (identity card), **T1 Horizon** (top memories + top skills, scored by importance × recency × pinned × cluster centrality × skill-link, selected with MMR at λ=0.5), **T2 Orbit** (collection/topic-scoped memories), **T3 Deep Recall** (hybrid semantic + FTS5 search), **T4 Atlas** (knowledge-graph traversal). Each tier has its own budget, a plain-text formatter, and a clean MCP contract; adaptive resizing keys off the target model's context window (< 32k / 32k–200k / > 200k).
+
+**Why it matters.** Every agent session opens with a cold context. Dumping "everything" wastes tokens and dilutes relevance; dumping "nothing" forces the agent to re-discover the same facts. Tiers give the agent a small, deterministic wake-up (T0 + T1 ≤ ~900 tokens by default) while leaving deeper recall one call away. The scoring formula is transparent and configurable, so users can tune the balance between "what's important" and "what's recent" without editing code. This is what makes a "second brain" feel like a single continuous session instead of isolated chats.
+
+- Shipped: `memgentic/briefing/` package (`tiers.py`, `scorer.py`, `token_budget.py`, `formatters.py`)
+- Shipped: `memgentic briefing` CLI with `--tier`, `--collection`, `--topic`, `--model-context`, `--weights`, `--status` flags
+- Shipped: tier-aware `memgentic_briefing` MCP tool (backward-compatible default = T0 + T1) and new `memgentic_tier_recall` for explicit-tier calls
+- Shipped: REST `GET /api/v1/briefing` + `GET /api/v1/briefing/tiers` + `POST /api/v1/briefing/weights`
+
+### Persona
+
+**What it is.** A structured, versioned "who is this agent" card stored at `~/.memgentic/persona.yaml`: identity (name, role, tone, optional voice sample), people the agent knows, active projects, and `remember` / `avoid` preference lists. Pydantic-validated, YAML-diffable, atomic-written with `0600` permissions, and bootstrappable via an LLM pass over the last 100 memories with a human-confirmed diff before persistence. Consumed by Recall Tier T0 and (optionally) injected at session start by Watchers.
+
+**Why it matters.** Cross-tool memory is only half the story; cross-tool **identity** is the other half. Without a stable persona, every tool re-asks who you are, what you prefer, and how you want to be spoken to. A structured YAML beats free-text identity strings because it's diffable (you can see exactly what changed), machine-editable (CLI, REST, dashboard all write the same file), and future-proof — `workspace_inherit: true` is the seed of Phase C team personas.
+
+- Shipped: `memgentic/persona/` package (`schema.py`, `loader.py`, `bootstrap.py`, `defaults.py`)
+- Shipped: `memgentic persona init / show / edit / validate / set / add-person / add-project` CLI
+- Shipped: REST `/api/v1/persona` (GET / PUT / PATCH / bootstrap) + `/api/v1/persona/schema`
+- Shipped: MCP tools `memgentic_persona_get` and `memgentic_persona_update`
+- Shipped: dashboard editor at `dashboard/src/app/persona/page.tsx`
+
+### Watchers (Cross-Tool Automatic Capture)
+
+**What it is.** An umbrella capture system that gives each AI tool the mechanism native to it: **hooks** where the tool has a hook API (Claude Code, Codex CLI), **file watchers** where the tool writes conversations to disk (Gemini CLI, Antigravity, Aider, Copilot CLI), **MCP-mode** for agent-initiated tools (Cursor, OpenCode), and **one-shot imports** for tools with no live access (ChatGPT, Claude Web / Desktop). All paths converge on the same daemon: dedup (cosine ≥ 0.92 against recent same-session vectors) → capture-profile pipeline → store. A small Unix-socket protocol at `~/.memgentic/watcher.sock` carries hook events; a separate `~/.memgentic/watcher_state.sqlite` tracks per-file offsets so restarts never re-ingest old lines. Unified CLI (`memgentic watchers install|status|disable|uninstall --tool X`) and a dashboard page expose the whole thing.
+
+**Why it matters.** "Universal AI memory" means nothing if capture is manual. Every tool that ships without automatic capture is a tool whose knowledge silently evaporates. Watchers treat the nine mainstream AI tools uniformly while respecting their native conventions — no tool has to change, no conversation is lost, and dedup keeps the store clean without spending LLM tokens on the decision. The Unix-socket architecture means hooks complete in < 50 ms (the daemon does the real work asynchronously), so AI-tool latency is untouched.
+
+- Shipped: `memgentic/daemon/watcher_socket.py`, `dedup.py`, `watchers.py`, `watcher_install.py`, `watcher_state.py`
+- Shipped: `memgentic/daemon/file_watchers/` (Gemini CLI, Antigravity, Aider, Copilot CLI)
+- Shipped: `hooks/claude_code/` + `hooks/codex/` checkpoint / compact / session shell scripts
+- Shipped: REST `/api/v1/watchers` + per-tool install / uninstall / toggle / logs
+- Shipped: dashboard at `dashboard/src/app/watchers/page.tsx`
+- Shipped: MCP tool `memgentic_watchers_status`
+
+### Chronograph (Bitemporal Knowledge Graph)
+
+**What it is.** An LLM-extracted subject / predicate / object triple store with bitemporal validity (`valid_from` / `valid_to`), confidence scoring, source-memory backlinks, and a proposed / accepted / edited / rejected review lifecycle. Lives in its own SQLite database (`~/.memgentic/chronograph.sqlite`) to isolate KG churn from the main metadata DB and to ease a later PostgreSQL move. Triples are proposed automatically at `enriched` / `dual` ingestion time and gated into "accepted" state through a dashboard validation queue. Entities are alias-aware (fuzzy-matched via rapidfuzz); predicates are normalised to `snake_case` with a vocabulary tracker to curb predicate explosion.
+
+**Why it matters.** Co-occurrence graphs tell you which entities show up together; bitemporal triples tell you **what was true, when**. That's the difference between "Kai and Orion appear in the same docs" and "Kai worked on Orion from 2025-06 to 2026-03, then moved to Helios." With validity windows, the agent can answer "what did we decide about Orion last quarter" without getting confused by current-state writes. User validation keeps hallucinated triples out of the accepted layer. This is the data Recall Tier T4 Atlas traverses on demand.
+
+- Shipped: `memgentic/graph/temporal.py` (entities + triples stores, `invalidate`, `timeline`, `as_of` queries)
+- Shipped: `memgentic/graph/extractor.py` (LLM triple proposer, wired into `processing/intelligence.py` for enriched/dual profiles)
+- Shipped: migration **9** creating the separate Chronograph SQLite with `workspace_id` columns pre-seeded for Phase C
+- Shipped: REST `/api/v1/chronograph` (entities, triples, proposed queue, timeline, backfill job)
+- Shipped: MCP tools `memgentic_graph_query`, `memgentic_graph_add`, `memgentic_graph_invalidate`, `memgentic_graph_timeline`, `memgentic_graph_stats`
+- Shipped: dashboard at `dashboard/src/app/chronograph/page.tsx` with graph viz, validation queue, and timeline view

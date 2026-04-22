@@ -418,3 +418,311 @@ Batch:
 6. **Daemon does distribution** — watches skill DB, writes to native tool paths
 7. **Auth is opt-in** — local mode unchanged
 8. **Core independence** — models in core, routes in API, distribution in daemon
+
+---
+
+## Memory Intelligence Subsystems
+
+Four subsystems sit on top of the Phase A/B storage layer: **Recall Tiers**, **Persona**, **Watchers**, and **Chronograph**. Each has its own package under `memgentic/memgentic/`; none of them changes Phase A/B schemas beyond the migrations called out below.
+
+### Recall Tiers — API Contracts
+
+Package: `memgentic/memgentic/briefing/`
+
+```python
+# memgentic/briefing/tiers.py
+class BaseTier(ABC):
+    name: str
+    default_budget: int
+    async def render(self, ctx: BriefingContext) -> TierOutput: ...
+
+class PersonaTier(BaseTier):        # T0 — reads ~/.memgentic/persona.yaml
+class HorizonTier(BaseTier):        # T1 — top-N memories + top-3 skills, MMR λ=0.5
+class OrbitTier(BaseTier):          # T2 — filter by collection/topic
+class DeepRecallTier(BaseTier):     # T3 — hybrid semantic + FTS5
+class AtlasTier(BaseTier):          # T4 — Chronograph graph traversal
+
+class RecallStack:
+    async def briefing(self, ctx) -> str:            # T0 + T1 default
+    async def tier_recall(self, tier, ctx) -> str:   # explicit tier
+    def status(self) -> dict                         # budgets, last-run stats
+```
+
+**T1 Horizon scoring:**
+
+```
+score = w_importance · importance
+      + w_recency    · exp(-age_days / τ)       (τ = 30d default)
+      + w_pinned     · pinned_boost             (1.0 if pinned else 0.0)
+      + w_cluster    · cluster_centrality       (cosine dist from centroid)
+      + w_skill_link · links_to_active_skill    (0.0–1.0)
+
+defaults: w_importance=0.30, w_recency=0.25, w_pinned=0.25,
+          w_cluster=0.10, w_skill_link=0.10
+```
+
+Weights are overridable via `~/.memgentic/config.yaml` or the REST `POST /api/v1/briefing/weights` endpoint. MMR (λ = 0.5) de-duplicates near-neighbours at selection time.
+
+**Adaptive budget (tokens / memories in T1):**
+
+| Model context | T1 token cap | Max memories |
+|---|---|---|
+| `< 32k`          | 400  | 8  |
+| `32k – 200k`     | 800  | 15 |
+| `> 200k`         | 1500 | 25 |
+
+**MCP tool upgrade** (`memgentic_briefing`, backward-compatible — default stays T0+T1):
+
+```json
+{
+  "name": "memgentic_briefing",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "tier":          {"type": "string", "enum": ["T0","T1","T2","T3","T4","default"]},
+      "collection":    {"type": "string"},
+      "topic":         {"type": "string"},
+      "query":         {"type": "string"},
+      "entity":        {"type": "string"},
+      "model_context": {"type": "integer"},
+      "max_tokens":    {"type": "integer"}
+    }
+  }
+}
+```
+
+**REST endpoints:**
+
+```
+GET  /api/v1/briefing?collection=&tier=&max_tokens=
+GET  /api/v1/briefing/tiers          # list tiers + their current budgets/status
+POST /api/v1/briefing/weights        # update scorer weights (atomic write)
+```
+
+### Persona — Schema & API
+
+File: `~/.memgentic/persona.yaml` (mode `0600`, parent dir `0700`).
+
+```yaml
+version: 1
+
+identity:
+  name: Atlas                # agent's self-concept name
+  role: Personal AI assistant for Alice
+  tone: warm, direct, remembers everything
+  pronouns: they/them        # optional
+  voice_sample: |            # optional, for style anchoring
+    Concise. Prefers bullet points. Asks before acting on ambiguous requests.
+
+people:
+  - name: Alice
+    relationship: creator
+    preferences: [prefers PostgreSQL, mornings only]
+    do_not: [mention Bob's preferences without asking]
+
+projects:
+  - name: journaling-app
+    status: active            # active | paused | archived
+    stack: [next.js, postgres]
+    tldr: journaling app that helps process emotions
+
+preferences:
+  remember:                   # categories the agent should pay attention to
+    - code stack choices
+    - naming conventions
+    - decisions with rationale
+  avoid:                      # behaviours the agent should skip
+    - apology-heavy responses
+    - unrelated refactors during bug fixes
+
+metadata:
+  workspace_inherit: true     # Phase C: merge workspace-level persona
+  updated_at: "2026-04-21T10:00:00Z"
+  generated_by: bootstrap     # bootstrap | manual | edited
+```
+
+**Pydantic model** (`memgentic/persona/schema.py`): `Persona(version, identity, people, projects, preferences, metadata)` with sub-models `IdentityBlock`, `Person`, `Project`, `PreferencesBlock`, `PersonaMetadata`. Validation rejects unknown fields to protect forward-compat migrations.
+
+**REST endpoints:**
+
+```
+GET    /api/v1/persona                  # current persona (JSON)
+PUT    /api/v1/persona                  # replace entirely (full validation)
+PATCH  /api/v1/persona                  # partial update (RFC 7396 merge patch)
+POST   /api/v1/persona/bootstrap        # LLM-propose from last 100 memories, return draft
+POST   /api/v1/persona/bootstrap/accept # persist last proposed bootstrap
+GET    /api/v1/persona/schema           # JSON Schema for client-side validation
+```
+
+**MCP tools:** `memgentic_persona_get` (returns the whole persona block) and `memgentic_persona_update(field, value)` (dotted-path write with validation).
+
+### Watchers — Socket Protocol & State DB
+
+Unix-socket dispatch file: `$XDG_RUNTIME_DIR/memgentic/watcher.sock` (falls back to `~/.memgentic/watcher.sock`, mode `0600`).
+
+**Frame format (JSON, newline-delimited):**
+
+```json
+{
+  "schema": 1,
+  "type": "checkpoint | compact | session | delta",
+  "tool": "claude_code | codex | gemini_cli | antigravity | aider | copilot_cli",
+  "session_id": "abc123",
+  "project_dir": "/home/alice/projects/app",
+  "event_data": {
+    "last_n_messages": [...],
+    "jsonl_path": "...",
+    "offset": 12345
+  },
+  "sent_at": "2026-04-21T10:00:00Z"
+}
+```
+
+Hooks are thin shell scripts: read event JSON on stdin → forward to the socket → return `{}` (non-blocking) for `checkpoint` and `session`, or `{"decision": "block", "reason": "..."}` for `compact` so the agent waits for capture to complete before overwriting context.
+
+**State store** (separate from the main metadata DB): `~/.memgentic/watcher_state.sqlite`
+
+```sql
+CREATE TABLE watcher_state (
+    tool             TEXT NOT NULL,
+    session_id       TEXT NOT NULL,
+    file_path        TEXT NOT NULL,
+    last_offset      INTEGER NOT NULL,
+    last_captured_at TIMESTAMP,
+    captured_count   INTEGER DEFAULT 0,
+    PRIMARY KEY (tool, session_id, file_path)
+);
+
+CREATE TABLE watcher_status (
+    tool           TEXT PRIMARY KEY,
+    enabled        BOOLEAN DEFAULT TRUE,
+    installed_at   TIMESTAMP,
+    last_error     TEXT,
+    last_error_at  TIMESTAMP
+);
+```
+
+**Dedup** — before any pipeline write: embed the incoming chunk, query nearest-neighbour within the same `(tool, session_id)` scope, skip if cosine ≥ 0.92 (configurable). Zero LLM tokens per decision.
+
+**REST endpoints:**
+
+```
+GET    /api/v1/watchers                  # list + status per tool
+GET    /api/v1/watchers/{tool}           # detail: last capture ts, count, errors
+PATCH  /api/v1/watchers/{tool}           # { "enabled": true | false }
+POST   /api/v1/watchers/{tool}/install
+POST   /api/v1/watchers/{tool}/uninstall
+GET    /api/v1/watchers/{tool}/logs?limit=50
+```
+
+**MCP tool:** `memgentic_watchers_status` — returns the dashboard table contents (tool, mechanism, enabled, last-capture, captured-count, last-error) for agent-side self-diagnosis.
+
+### Migration 8 — Capture Profile (already applied)
+
+Wave 1 added a per-memory `capture_profile` selector and a lightweight `runtime_settings` key-value table. The migration is recorded in `memgentic/memgentic/storage/migrations.py` as version **8**:
+
+```sql
+ALTER TABLE memories
+  ADD COLUMN capture_profile TEXT NOT NULL DEFAULT 'enriched'
+  CHECK (capture_profile IN ('raw', 'enriched', 'dual'));
+
+ALTER TABLE memories
+  ADD COLUMN dual_sibling_id TEXT;   -- NULL for raw/enriched; FK-style
+                                     -- pointer for the sibling in a dual pair
+
+CREATE INDEX IF NOT EXISTS idx_memories_capture_profile
+  ON memories(capture_profile);
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key        TEXT PRIMARY KEY,
+    value      TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+```
+
+- `enriched` keeps the historic default: LLM topics, entities, and importance.
+- `raw` stores verbatim chunks with no LLM enrichment (cheapest, MemPalace-shaped).
+- `dual` writes both rows and links them through `dual_sibling_id` so the dashboard can collapse the pair into one card. Only `enriched` / `dual` profiles run the Chronograph triple extractor.
+
+### Migration 9 — Chronograph (Separate Database)
+
+Chronograph lives in its own SQLite file — `~/.memgentic/chronograph.sqlite` — rather than extending `memgentic.sqlite`. Two reasons: (1) graph churn shouldn't bloat the memory metadata DB or contend for its WAL; (2) it lets us swap the backend to PostgreSQL in Phase C without rewriting the main store. The migration file is `memgentic/memgentic/storage/migrations/009_chronograph.sql` (standalone — applied against the Chronograph connection, not the main one).
+
+```sql
+CREATE TABLE entities (
+    id           TEXT PRIMARY KEY,          -- lowercase normalised name
+    name         TEXT NOT NULL,             -- display name
+    type         TEXT,                      -- person | project | tool | concept | place | other
+    aliases      JSON DEFAULT '[]',
+    properties   JSON DEFAULT '{}',
+    workspace_id TEXT,                      -- Phase C scoping, NULL in local mode
+    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE triples (
+    id                TEXT PRIMARY KEY,     -- hash(subject, predicate, object, valid_from)
+    subject           TEXT NOT NULL,
+    predicate         TEXT NOT NULL,
+    object            TEXT NOT NULL,
+    valid_from        DATE,
+    valid_to          DATE,                 -- NULL = currently true
+    confidence        REAL DEFAULT 0.7,     -- 0.0–1.0; 1.0 for user-validated
+    source_memory_id  TEXT,                 -- backlink to memories.id
+    status            TEXT DEFAULT 'proposed',   -- proposed | accepted | rejected | edited
+    proposer          TEXT,                      -- llm | user | import
+    accepted_by       TEXT,                      -- user_id when validated
+    accepted_at       TIMESTAMP,
+    workspace_id      TEXT,                      -- Phase C
+    FOREIGN KEY (subject) REFERENCES entities(id),
+    FOREIGN KEY (object)  REFERENCES entities(id)
+);
+
+CREATE INDEX idx_triples_subject   ON triples(subject, valid_from);
+CREATE INDEX idx_triples_object    ON triples(object, valid_from);
+CREATE INDEX idx_triples_predicate ON triples(predicate);
+CREATE INDEX idx_triples_status    ON triples(status);
+```
+
+**Chronograph public API** (`memgentic/graph/temporal.py`):
+
+```python
+class Chronograph:
+    def add_entity(name, type=None, aliases=[], properties={}) -> Entity
+    def add_triple(subject, predicate, object, valid_from=None,
+                   confidence=0.7, source_memory_id=None,
+                   proposer="llm", status="proposed") -> Triple
+    def invalidate(subject, predicate, object, ended=None) -> None
+    def query_entity(name, as_of=None, direction="both", status="accepted") -> list[Triple]
+    def timeline(entity=None, status="accepted") -> list[Triple]
+    def stats() -> dict
+    def list_proposed(limit=50) -> list[Triple]
+    def accept(triple_id) -> None
+    def edit(triple_id, **fields) -> Triple
+    def reject(triple_id) -> None
+```
+
+**Extraction** — `memgentic/graph/extractor.py` is invoked from `processing/intelligence.py` for memories with `capture_profile IN ('enriched', 'dual')`. Prompt returns a JSON array of `{subject, predicate, object, valid_from?, confidence}`; each row is normalised (lowercase snake_case predicate, alias-resolved subject/object via rapidfuzz) and inserted as `proposed`. Users move triples to `accepted` from the dashboard validation queue. Accepted triples drop `confidence = 1.0` automatically.
+
+**REST endpoints:**
+
+```
+GET    /api/v1/chronograph                          # stats
+GET    /api/v1/chronograph/entities                 # paginated list
+GET    /api/v1/chronograph/entities/{name}          # entity detail
+POST   /api/v1/chronograph/entities                 # manual create
+
+GET    /api/v1/chronograph/triples?subject=&predicate=&object=&as_of=&status=
+POST   /api/v1/chronograph/triples                  # add triple
+PATCH  /api/v1/chronograph/triples/{id}             # edit (predicate, valid_from, confidence)
+POST   /api/v1/chronograph/triples/{id}/accept
+POST   /api/v1/chronograph/triples/{id}/reject
+POST   /api/v1/chronograph/triples/{id}/invalidate  # body: { "ended": "YYYY-MM-DD" }
+
+GET    /api/v1/chronograph/proposed?limit=          # validation queue
+GET    /api/v1/chronograph/timeline?entity=&from=&to=
+
+POST   /api/v1/chronograph/backfill                 # async job: extract from enriched memories
+GET    /api/v1/chronograph/backfill/{job_id}        # job status
+```
+
+**MCP tools:** `memgentic_graph_query`, `memgentic_graph_add`, `memgentic_graph_invalidate`, `memgentic_graph_timeline`, `memgentic_graph_stats` — all proxy the `Chronograph` class. `memgentic/graph/knowledge.py` (the prior NetworkX co-occurrence graph) stays for backwards-compat; both layers coexist because they answer different questions.
