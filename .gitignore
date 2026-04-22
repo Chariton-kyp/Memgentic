@@ -53,6 +53,7 @@ cloud/
 .mneme/
 .private/
 .maintainer/
+memgentic-strategy/
 
 # Rust
 target/
