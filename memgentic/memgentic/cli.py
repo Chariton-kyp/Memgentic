@@ -3376,7 +3376,8 @@ def watchers_logs(tool: str, limit: int):
 
     _reject_unknown_tool(tool)
     store = WatcherStateStore()
-    entries = store.list_logs(tool, limit=limit) if hasattr(store, "list_logs") else []
+    list_logs = getattr(store, "list_logs", None)
+    entries = list_logs(tool, limit=limit) if callable(list_logs) else []
     if not entries:
         console.print("No log entries yet.")
         return
