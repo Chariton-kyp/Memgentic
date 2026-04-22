@@ -24,6 +24,11 @@ export function useWebSocket() {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const queryClient = useQueryClient();
   const mountedRef = useRef(true);
+  // ``connect`` and ``scheduleReconnect`` are mutually recursive. Rather than
+  // hoist one before the other (which just flips the declaration-before-use
+  // error), route the recursion through a ref so neither useCallback closes
+  // over a forward reference.
+  const scheduleReconnectRef = useRef<() => void>(() => {});
 
   const connect = useCallback(() => {
     if (!mountedRef.current) return;
@@ -246,7 +251,7 @@ export function useWebSocket() {
         if (!mountedRef.current) return;
         setStatus("disconnected");
         wsRef.current = null;
-        scheduleReconnect();
+        scheduleReconnectRef.current();
       };
 
       ws.onerror = () => {
@@ -255,7 +260,7 @@ export function useWebSocket() {
       };
     } catch {
       setStatus("disconnected");
-      scheduleReconnect();
+      scheduleReconnectRef.current();
     }
   }, [queryClient]);
 
@@ -271,6 +276,10 @@ export function useWebSocket() {
 
     backoffRef.current = Math.min(backoffRef.current * 2, MAX_BACKOFF);
   }, [connect]);
+
+  useEffect(() => {
+    scheduleReconnectRef.current = scheduleReconnect;
+  }, [scheduleReconnect]);
 
   useEffect(() => {
     mountedRef.current = true;
