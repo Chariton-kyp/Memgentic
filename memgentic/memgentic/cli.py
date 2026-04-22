@@ -2836,7 +2836,7 @@ def graph_query(entity: str, as_of: str | None, direction: str, status: str):
         triples = await cg.query_entity(
             entity,
             as_of=as_of,
-            direction=direction,
+            direction=direction,  # type: ignore[arg-type]
             status=status,  # type: ignore[arg-type]
         )
         if not triples:
