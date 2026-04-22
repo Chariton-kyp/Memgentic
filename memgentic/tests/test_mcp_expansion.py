@@ -239,6 +239,9 @@ async def test_watchers_status_filters_disabled_when_asked(monkeypatch):
         def total_captured(self, tool):
             return 0
 
+        def captured_count_today(self, tool):
+            return 0
+
         def last_captured_at(self, tool):
             return None
 
@@ -255,6 +258,40 @@ async def test_watchers_status_filters_disabled_when_asked(monkeypatch):
     assert names == ["claude_code"]  # disabled codex_cli + uninstalled gemini_cli hidden
 
 
+async def test_watchers_status_surfaces_today_and_total_counts(monkeypatch):
+    """``captured_count_today`` and ``captured_count_total`` reach the response dict."""
+
+    class _Status:
+        def __init__(self):
+            self.enabled = True
+            self.installed_at = "2026-04-20T00:00:00+00:00"
+            self.last_error = None
+            self.last_error_at = None
+
+    class _Store:
+        def get_status(self, tool):
+            return _Status() if tool == "claude_code" else None
+
+        def total_captured(self, tool):
+            return 42 if tool == "claude_code" else 0
+
+        def captured_count_today(self, tool):
+            return 7 if tool == "claude_code" else 0
+
+        def last_captured_at(self, tool):
+            return "2026-04-21T00:00:00+00:00" if tool == "claude_code" else None
+
+    monkeypatch.setattr("memgentic.daemon.watcher_state.WatcherStateStore", lambda: _Store())
+    monkeypatch.setattr("memgentic.daemon.watchers.ALL_TOOLS", ["claude_code"])
+    monkeypatch.setattr("memgentic.daemon.watchers.classify_tool", lambda tool: "hook")
+
+    ctx = _mock_ctx()
+    result = await memgentic_watchers_status(WatchersStatusInput(), ctx)
+    row = result["watchers"][0]
+    assert row["captured_count_today"] == 7
+    assert row["captured_count_total"] == 42
+
+
 async def test_watchers_status_reports_installed_tools(monkeypatch):
     class _Status:
         def __init__(self, enabled):
@@ -269,6 +306,9 @@ async def test_watchers_status_reports_installed_tools(monkeypatch):
 
         def total_captured(self, tool):
             return 10 if tool == "claude_code" else 0
+
+        def captured_count_today(self, tool):
+            return 3 if tool == "claude_code" else 0
 
         def last_captured_at(self, tool):
             return "2026-04-21T00:00:00+00:00" if tool == "claude_code" else None

@@ -2057,7 +2057,10 @@ async def memgentic_watchers_status(params: WatchersStatusInput, ctx: Context) -
 
     Returns:
         ``{watchers: [{tool, mechanism, installed, enabled, installed_at,
-        last_error, last_error_at, captured_count, last_captured_at}]}``.
+        last_error, last_error_at, captured_count_today, captured_count_total,
+        last_captured_at}]}``. ``captured_count_today`` is the number of
+        memories ingested since UTC midnight for that tool (parsed from
+        watcher_logs). ``captured_count_total`` is the lifetime total.
         When ``include_disabled=False`` (default True), only installed *and*
         enabled rows are returned — both gates match the field name.
     """
@@ -2082,7 +2085,8 @@ async def memgentic_watchers_status(params: WatchersStatusInput, ctx: Context) -
                     "installed_at": status.installed_at if status else None,
                     "last_error": status.last_error if status else None,
                     "last_error_at": status.last_error_at if status else None,
-                    "captured_count": store.total_captured(tool),
+                    "captured_count_today": store.captured_count_today(tool),
+                    "captured_count_total": store.total_captured(tool),
                     "last_captured_at": store.last_captured_at(tool),
                 }
             )

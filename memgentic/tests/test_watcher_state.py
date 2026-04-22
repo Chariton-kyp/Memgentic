@@ -114,3 +114,30 @@ def test_list_statuses_sorted(tmp_path: Path) -> None:
     store.upsert_status("claude_code", enabled=False)
     tools = [s.tool for s in store.list_statuses()]
     assert tools == sorted(tools)
+
+
+def test_captured_count_today_sums_ingested_events(tmp_path: Path) -> None:
+    """``captured_count_today`` parses ``ingested N`` lines from today's logs."""
+    import sqlite3
+    from datetime import UTC, datetime, timedelta
+
+    store = WatcherStateStore(tmp_path / "w.db")
+
+    # Append a few real logs (created_at will be now, which is today).
+    store.append_log("claude_code", "ingested 3 memory/memories from session-1")
+    store.append_log("claude_code", "ingested 5 memory/memories from session-2")
+    store.append_log("claude_code", "received checkpoint event (session=x)")  # no ingested N
+    store.append_log("claude_code", "dedup skipped 2/3 chunks")  # no ingested N
+    store.append_log("codex_cli", "ingested 10 memory/memories from session-z")  # different tool
+
+    # Forge an "ingested 99" yesterday via direct insert — must NOT be counted.
+    yesterday = (datetime.now(UTC) - timedelta(days=2)).isoformat()
+    with sqlite3.connect(tmp_path / "w.db", isolation_level=None) as conn:
+        conn.execute(
+            "INSERT INTO watcher_logs (tool, level, message, created_at) VALUES (?,?,?,?)",
+            ("claude_code", "info", "ingested 99 memory/memories from old session", yesterday),
+        )
+
+    assert store.captured_count_today("claude_code") == 8  # 3 + 5
+    assert store.captured_count_today("codex_cli") == 10
+    assert store.captured_count_today("never_seen") == 0

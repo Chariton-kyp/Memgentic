@@ -1687,7 +1687,10 @@ an HTTP round-trip to decide which tool's capture is still live.
 
 Returns:
     ``{watchers: [{tool, mechanism, installed, enabled, installed_at,
-    last_error, last_error_at, captured_count, last_captured_at}]}``.
+    last_error, last_error_at, captured_count_today, captured_count_total,
+    last_captured_at}]}``. ``captured_count_today`` is the number of
+    memories ingested since UTC midnight for that tool (parsed from
+    watcher_logs). ``captured_count_total`` is the lifetime total.
     When ``include_disabled=False`` (default True), only installed *and*
     enabled rows are returned — both gates match the field name.
 

@@ -208,6 +208,36 @@ class WatcherStateStore:
             ).fetchone()
             return row["ts"] if row else None
 
+    def captured_count_today(self, tool: str) -> int:
+        """Sum ``ingested N`` events from ``watcher_logs`` for ``tool`` since UTC midnight.
+
+        Parses the ``ingested <N> memory/memories …`` messages that both the
+        hook dispatcher and the file-watcher base emit on every successful
+        capture. Returns 0 when no rows match — including when ``level`` isn't
+        ``info`` or the message format doesn't parse.
+        """
+        import re
+
+        today = datetime.now(UTC).strftime("%Y-%m-%d")
+        pattern = re.compile(r"^ingested\s+(\d+)\s+memor", re.IGNORECASE)
+        total = 0
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT message FROM watcher_logs
+                WHERE tool = ?
+                  AND level = 'info'
+                  AND created_at >= ?
+                  AND message LIKE 'ingested %'
+                """,
+                (tool, f"{today}T00:00:00+00:00"),
+            ).fetchall()
+        for row in rows:
+            match = pattern.match(row["message"] or "")
+            if match:
+                total += int(match.group(1))
+        return total
+
     # -- status ------------------------------------------------------------
 
     def get_status(self, tool: str) -> WatcherStatus | None:
