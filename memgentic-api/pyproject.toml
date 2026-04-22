@@ -1,8 +1,29 @@
 [project]
 name = "memgentic-api"
-version = "0.7.0"
-description = "REST API for Memgentic — memory search, management, and real-time updates"
+version = "0.7.0"  # x-release-please-version
+description = "REST API for Memgentic — memory search, management, skills, and real-time updates"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{name = "Chariton Kypraios", email = "chariton@ellinai.com"}]
+keywords = [
+    "ai", "memory", "rest-api", "fastapi", "memgentic",
+    "rag", "llm", "agents", "skills",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: FastAPI",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Typing :: Typed",
+]
 dependencies = [
     "memgentic[intelligence]",
     "fastapi>=0.130",
@@ -10,6 +31,14 @@ dependencies = [
     "python-multipart>=0.0.26",
     "slowapi>=0.1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Chariton-kyp/Memgentic"
+Repository = "https://github.com/Chariton-kyp/Memgentic"
+Documentation = "https://github.com/Chariton-kyp/Memgentic/blob/main/docs/API_GUIDE.md"
+Issues = "https://github.com/Chariton-kyp/Memgentic/issues"
+Changelog = "https://github.com/Chariton-kyp/Memgentic/blob/main/memgentic-api/CHANGELOG.md"
+Source = "https://github.com/Chariton-kyp/Memgentic/tree/main/memgentic-api"
 
 [project.optional-dependencies]
 dev = [

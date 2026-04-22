@@ -2,16 +2,29 @@
 name = "memgentic"
 dynamic = ["version"]
 description = "Universal AI memory layer — cross-tool knowledge capture with MCP, semantic search, and knowledge graphs"
+readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [{name = "Chariton Kypraios", email = "chariton@ellinai.com"}]
-keywords = ["ai", "memory", "mcp", "rag", "knowledge-graph", "claude", "gemini", "codex", "semantic-search"]
+keywords = [
+    "ai", "memory", "mcp", "rag", "knowledge-graph",
+    "claude", "gemini", "codex", "chatgpt", "cursor",
+    "semantic-search", "vector-database", "llm", "agents",
+]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Database",
+    "Typing :: Typed",
 ]
 
 dependencies = [
@@ -145,9 +158,12 @@ reportMissingImports = "warning"
 reportMissingModuleSource = "none"
 
 [project.urls]
-Homepage = "https://github.com/Chariton-kyp/memgentic"
-Repository = "https://github.com/Chariton-kyp/memgentic"
-Issues = "https://github.com/Chariton-kyp/memgentic/issues"
+Homepage = "https://github.com/Chariton-kyp/Memgentic"
+Repository = "https://github.com/Chariton-kyp/Memgentic"
+Documentation = "https://github.com/Chariton-kyp/Memgentic/tree/main/docs"
+Issues = "https://github.com/Chariton-kyp/Memgentic/issues"
+Changelog = "https://github.com/Chariton-kyp/Memgentic/blob/main/CHANGELOG.md"
+Source = "https://github.com/Chariton-kyp/Memgentic/tree/main/memgentic"
 
 [tool.hatch.build.targets.wheel]
 packages = ["memgentic"]
