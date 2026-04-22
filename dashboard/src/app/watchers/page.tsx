@@ -102,7 +102,7 @@ export default function WatchersPage() {
 
   const toggleMut = useMutation({
     mutationFn: ({ tool, enabled }: { tool: string; enabled: boolean }) =>
-      updateWatcher(tool, enabled),
+      updateWatcher(tool, { enabled }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["watchers"] }),
   });
 
