@@ -175,6 +175,8 @@ tags: [deploy, ops]
 
 ## Tool Integrations
 
+This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) above.
+
 | Tool | Capture | Skill injection |
 |------|---------|-----------|
 | Claude Code | Daemon | `~/.claude/skills/` + MCP + SessionStart hook |
