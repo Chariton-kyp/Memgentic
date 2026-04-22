@@ -232,9 +232,9 @@ The following subsystems landed on top of Phases A + B as a single wave of work 
 
 **Why it matters.** Co-occurrence graphs tell you which entities show up together; bitemporal triples tell you **what was true, when**. That's the difference between "Kai and Orion appear in the same docs" and "Kai worked on Orion from 2025-06 to 2026-03, then moved to Helios." With validity windows, the agent can answer "what did we decide about Orion last quarter" without getting confused by current-state writes. User validation keeps hallucinated triples out of the accepted layer. This is the data Recall Tier T4 Atlas traverses on demand.
 
-- Shipped: `memgentic/graph/temporal.py` (entities + triples stores, `invalidate`, `timeline`, `as_of` queries)
+- Shipped: `memgentic/graph/temporal.py` (entities + triples stores, `invalidate`, `timeline`, `as_of` queries, inline schema with its own `schema_version` sentinel at version **9**)
 - Shipped: `memgentic/graph/extractor.py` (LLM triple proposer, wired into `processing/intelligence.py` for enriched/dual profiles)
-- Shipped: migration **9** creating the separate Chronograph SQLite with `workspace_id` columns pre-seeded for Phase C
+- Shipped: standalone `~/.memgentic/chronograph.sqlite` with `workspace_id` columns pre-seeded for Phase C
 - Shipped: REST `/api/v1/chronograph` (entities, triples, proposed queue, timeline, backfill job)
 - Shipped: MCP tools `memgentic_graph_query`, `memgentic_graph_add`, `memgentic_graph_invalidate`, `memgentic_graph_timeline`, `memgentic_graph_stats`
 - Shipped: dashboard at `dashboard/src/app/chronograph/page.tsx` with graph viz, validation queue, and timeline view

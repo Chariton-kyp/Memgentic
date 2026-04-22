@@ -646,41 +646,47 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
 
 ### Migration 9 — Chronograph (Separate Database)
 
-Chronograph lives in its own SQLite file — `~/.memgentic/chronograph.sqlite` — rather than extending `memgentic.sqlite`. Two reasons: (1) graph churn shouldn't bloat the memory metadata DB or contend for its WAL; (2) it lets us swap the backend to PostgreSQL in Phase C without rewriting the main store. The migration file is `memgentic/memgentic/storage/migrations/009_chronograph.sql` (standalone — applied against the Chronograph connection, not the main one).
+Chronograph lives in its own SQLite file — `~/.memgentic/chronograph.sqlite` — rather than extending `memgentic.sqlite`. Two reasons: (1) graph churn shouldn't bloat the memory metadata DB or contend for its WAL; (2) it lets us swap the backend to PostgreSQL in Phase C without rewriting the main store. Because the database is standalone, its schema is defined and applied inline by `memgentic/memgentic/graph/temporal.py` (not by the main `storage/migrations.py` counter). The Chronograph DB keeps its own `schema_version` sentinel table; the reserved version constant `_CHRONOGRAPH_SCHEMA_VERSION = 9` is kept aligned with the main metadata store's counter (which tops out at `8`) so the two stay intuitive when read together.
 
 ```sql
-CREATE TABLE entities (
-    id           TEXT PRIMARY KEY,          -- lowercase normalised name
-    name         TEXT NOT NULL,             -- display name
-    type         TEXT,                      -- person | project | tool | concept | place | other
-    aliases      JSON DEFAULT '[]',
-    properties   JSON DEFAULT '{}',
-    workspace_id TEXT,                      -- Phase C scoping, NULL in local mode
-    created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+-- applied against ~/.memgentic/chronograph.sqlite on Chronograph.initialize()
+
+CREATE TABLE IF NOT EXISTS entities (
+    id            TEXT PRIMARY KEY,         -- lowercase normalised name
+    name          TEXT NOT NULL,            -- display name
+    type          TEXT,                     -- person | project | tool | concept | place | other
+    aliases       TEXT NOT NULL DEFAULT '[]',  -- JSON-encoded list
+    properties    TEXT NOT NULL DEFAULT '{}',  -- JSON-encoded object
+    workspace_id  TEXT,                     -- Phase C scoping, NULL in local mode
+    created_at    TEXT NOT NULL
 );
 
-CREATE TABLE triples (
+CREATE TABLE IF NOT EXISTS triples (
     id                TEXT PRIMARY KEY,     -- hash(subject, predicate, object, valid_from)
     subject           TEXT NOT NULL,
     predicate         TEXT NOT NULL,
     object            TEXT NOT NULL,
-    valid_from        DATE,
-    valid_to          DATE,                 -- NULL = currently true
-    confidence        REAL DEFAULT 0.7,     -- 0.0–1.0; 1.0 for user-validated
+    valid_from        TEXT,                 -- ISO-8601 date; NULL = unknown
+    valid_to          TEXT,                 -- NULL = currently true
+    confidence        REAL NOT NULL DEFAULT 0.7,   -- 0.0–1.0; 1.0 for user-validated
     source_memory_id  TEXT,                 -- backlink to memories.id
-    status            TEXT DEFAULT 'proposed',   -- proposed | accepted | rejected | edited
-    proposer          TEXT,                      -- llm | user | import
-    accepted_by       TEXT,                      -- user_id when validated
-    accepted_at       TIMESTAMP,
-    workspace_id      TEXT,                      -- Phase C
+    status            TEXT NOT NULL DEFAULT 'proposed',  -- proposed | accepted | rejected | edited
+    proposer          TEXT,                 -- llm | user | import
+    accepted_by       TEXT,                 -- user_id when validated
+    accepted_at       TEXT,
+    workspace_id      TEXT,                 -- Phase C
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
     FOREIGN KEY (subject) REFERENCES entities(id),
     FOREIGN KEY (object)  REFERENCES entities(id)
 );
 
-CREATE INDEX idx_triples_subject   ON triples(subject, valid_from);
-CREATE INDEX idx_triples_object    ON triples(object, valid_from);
-CREATE INDEX idx_triples_predicate ON triples(predicate);
-CREATE INDEX idx_triples_status    ON triples(status);
+CREATE INDEX IF NOT EXISTS idx_triples_subject    ON triples(subject, valid_from);
+CREATE INDEX IF NOT EXISTS idx_triples_object     ON triples(object, valid_from);
+CREATE INDEX IF NOT EXISTS idx_triples_predicate  ON triples(predicate);
+CREATE INDEX IF NOT EXISTS idx_triples_status     ON triples(status);
+CREATE INDEX IF NOT EXISTS idx_entities_workspace ON entities(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_triples_workspace  ON triples(workspace_id);
 ```
 
 **Chronograph public API** (`memgentic/graph/temporal.py`):
