@@ -22,6 +22,7 @@ from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
 from memgentic_api.routes import (
+    briefing,
     collections,
     import_export,
     ingestion,
@@ -83,6 +84,7 @@ def _create_test_app(
     app.include_router(ingestion.router, prefix="/api/v1")
     app.include_router(settings_routes.router, prefix="/api/v1")
     app.include_router(persona.router, prefix="/api/v1")
+    app.include_router(briefing.router, prefix="/api/v1")
 
     @app.get("/api/v1/health")
     async def health_check():

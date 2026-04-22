@@ -3096,5 +3096,171 @@ def graph_backfill(batch: int, dry_run: bool):
     asyncio.run(_run())
 
 
+# ---------------------------------------------------------------------------
+# Recall Tiers — ``memgentic briefing``
+# ---------------------------------------------------------------------------
+
+
+def _parse_weights_option(raw: str | None) -> dict[str, float]:
+    """Parse ``--weights importance=0.4,recency=0.3`` into a dict.
+
+    Silently drops malformed pairs so a typo in the CLI flag doesn't
+    kill the whole briefing. Unknown keys pass through; the scorer
+    filters them during construction.
+    """
+    if not raw:
+        return {}
+    parsed: dict[str, float] = {}
+    for chunk in raw.split(","):
+        chunk = chunk.strip()
+        if not chunk or "=" not in chunk:
+            continue
+        key, _, value = chunk.partition("=")
+        try:
+            parsed[key.strip()] = float(value.strip())
+        except ValueError:
+            continue
+    return parsed
+
+
+@main.command()
+@click.option(
+    "--tier",
+    type=click.Choice(["T0", "T1", "T2", "T3", "T4", "default"]),
+    default="default",
+    help="Tier to render. 'default' renders T0 + T1 (the wake-up bundle).",
+)
+@click.option("--collection", default=None, help="Scope T1/T2 to a collection name.")
+@click.option("--topic", default=None, help="Scope T2 to a topic tag.")
+@click.option("--query", default=None, help="Query text for T3 Deep Recall.")
+@click.option("--entity", default=None, help="Entity to traverse for T4 Atlas.")
+@click.option(
+    "--model-context",
+    type=int,
+    default=None,
+    help="Override detected model context window (tokens).",
+)
+@click.option(
+    "--max-tokens",
+    type=int,
+    default=None,
+    help="Clamp the tier's token budget below the tier ceiling.",
+)
+@click.option(
+    "--weights",
+    default=None,
+    help="Scorer weight overrides, e.g. 'importance=0.4,recency=0.3'.",
+)
+@click.option(
+    "--status",
+    "show_status",
+    is_flag=True,
+    help="Print the RecallStack status (budgets + last-run stats) as JSON.",
+)
+@click.option(
+    "--json",
+    "as_json",
+    is_flag=True,
+    help="Emit the briefing as JSON (tier text + token counts).",
+)
+def briefing(
+    tier: str,
+    collection: str | None,
+    topic: str | None,
+    query: str | None,
+    entity: str | None,
+    model_context: int | None,
+    max_tokens: int | None,
+    weights: str | None,
+    show_status: bool,
+    as_json: bool,
+):
+    """Render a Recall Tiers briefing.
+
+    \b
+    Examples:
+      memgentic briefing                              T0 + T1 (default)
+      memgentic briefing --collection myapp           T1 scoped to a collection
+      memgentic briefing --model-context 200000       Tune budget to the model
+      memgentic briefing --tier T2 --collection x     Orbit tier (filtered)
+      memgentic briefing --tier T3 --query "why graphql"
+      memgentic briefing --tier T4 --entity Kai       Knowledge-graph traversal
+      memgentic briefing --status                     Stack status JSON
+      memgentic briefing --weights importance=0.4,recency=0.3
+    """
+    import json as _json
+
+    from memgentic.briefing import BriefingContext, RecallStack, load_weights
+    from memgentic.graph.knowledge import create_knowledge_graph
+    from memgentic.processing.embedder import Embedder
+    from memgentic.storage.metadata import MetadataStore
+    from memgentic.storage.vectors import VectorStore
+
+    async def _run() -> int:
+        metadata_store = MetadataStore(settings.sqlite_path)
+        vector_store = VectorStore(settings)
+        embedder = Embedder(settings)
+        graph = create_knowledge_graph(settings.graph_path)
+
+        await metadata_store.initialize()
+        await vector_store.initialize()
+        try:
+            await graph.load()
+        except Exception as exc:  # pragma: no cover — graph is optional
+            logger.debug("briefing.cli.graph_load_failed", error=str(exc))
+
+        try:
+            overrides = _parse_weights_option(weights)
+            resolved_weights = load_weights(overrides)
+
+            ctx = BriefingContext(
+                metadata_store=metadata_store,
+                vector_store=vector_store,
+                embedder=embedder,
+                graph=graph,
+                collection=collection,
+                topic=topic,
+                query=query,
+                entity=entity,
+                model_context=model_context,
+                max_tokens=max_tokens,
+                weights=resolved_weights,
+            )
+
+            stack = RecallStack()
+
+            if show_status:
+                status = stack.status()
+                console.print_json(_json.dumps(status, default=str))
+                return 0
+
+            if tier == "default":
+                text = await stack.briefing(ctx)
+                status = stack.status()
+            else:
+                out = await stack.tier_recall(tier, ctx)
+                text = out.text
+                status = stack.status()
+
+            if as_json:
+                payload = {
+                    "briefing": text,
+                    "tokens": status["last_run"].get("tokens", 0),
+                    "tier": tier,
+                }
+                console.print_json(_json.dumps(payload, default=str))
+            else:
+                console.print(text)
+            return 0
+        finally:
+            await embedder.close()
+            await metadata_store.close()
+            await vector_store.close()
+
+    exit_code = asyncio.run(_run())
+    if exit_code:
+        raise SystemExit(exit_code)
+
+
 if __name__ == "__main__":
     main()

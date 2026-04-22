@@ -355,14 +355,20 @@ async def semantic_search(
     return SearchResultResponse(results=items, query=body.query, total=len(items))
 
 
-@router.get("/briefing")
+@router.get("/memories/briefing")
 @limiter.limit(lambda: f"{settings.rate_limit_default}/minute")
-async def get_briefing(
+async def get_memories_briefing(
     request: Request,
     metadata_store: MetadataStoreDep,
     since_hours: int = Query(default=24, ge=1, le=720),
 ) -> dict:
-    """Get a briefing of recent memories grouped by platform."""
+    """Legacy time-window briefing (pre-Recall-Tiers).
+
+    Kept for backward compat. The tiered briefing now lives at
+    ``/api/v1/briefing`` (see ``briefing.py``). Clients that want the
+    old platform-grouped shape can continue to call this endpoint by
+    its new, non-conflicting path ``/api/v1/memories/briefing``.
+    """
     from collections import Counter
     from datetime import timedelta
 

@@ -13,8 +13,13 @@ import type {
   IngestionJobListResponse,
   Memory,
   MemoryListResponse,
+  BriefingResponse,
+  BriefingTiersResponse,
+  BriefingWeights,
+  BriefingWeightsResponse,
   Persona,
   PersonaBootstrapResponse,
+  RecallTier,
   SearchResultResponse,
   Skill,
   SkillFile,
@@ -787,4 +792,45 @@ export async function invalidateTripleApi(
       body: JSON.stringify({ ended: ended ?? null }),
     },
   );
+}
+
+// --- Recall Tiers (briefing) ---
+
+export async function getBriefing(params: {
+  tier?: RecallTier;
+  collection?: string;
+  topic?: string;
+  query?: string;
+  entity?: string;
+  model_context?: number;
+  max_tokens?: number;
+} = {}): Promise<BriefingResponse> {
+  const qs = new URLSearchParams();
+  if (params.tier) qs.set("tier", params.tier);
+  if (params.collection) qs.set("collection", params.collection);
+  if (params.topic) qs.set("topic", params.topic);
+  if (params.query) qs.set("query", params.query);
+  if (params.entity) qs.set("entity", params.entity);
+  if (params.model_context) qs.set("model_context", String(params.model_context));
+  if (params.max_tokens) qs.set("max_tokens", String(params.max_tokens));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return fetchJson<BriefingResponse>(`${API_BASE}/briefing${suffix}`);
+}
+
+export async function listBriefingTiers(
+  model_context?: number,
+): Promise<BriefingTiersResponse> {
+  const qs = new URLSearchParams();
+  if (model_context) qs.set("model_context", String(model_context));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return fetchJson<BriefingTiersResponse>(`${API_BASE}/briefing/tiers${suffix}`);
+}
+
+export async function previewBriefingWeights(
+  weights: Partial<BriefingWeights>,
+): Promise<BriefingWeightsResponse> {
+  return fetchJson<BriefingWeightsResponse>(`${API_BASE}/briefing/weights`, {
+    method: "POST",
+    body: JSON.stringify(weights),
+  });
 }

@@ -19,6 +19,7 @@ from starlette.responses import Response
 from memgentic_api.auth import verify_api_key
 from memgentic_api.deps import limiter
 from memgentic_api.routes import (
+    briefing,
     chronograph,
     collections,
     graph,
@@ -278,6 +279,7 @@ app.include_router(skills.router, prefix="/api/v1", tags=["skills"], dependencie
 app.include_router(ingestion.router, prefix="/api/v1", tags=["ingestion"], dependencies=_auth)
 app.include_router(settings_routes.router, prefix="/api/v1", tags=["settings"], dependencies=_auth)
 app.include_router(persona.router, prefix="/api/v1", tags=["persona"], dependencies=_auth)
+app.include_router(briefing.router, prefix="/api/v1", tags=["briefing"], dependencies=_auth)
 
 # WebSocket — no auth dependency (clients authenticate via initial message if needed)
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])
