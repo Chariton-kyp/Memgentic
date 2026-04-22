@@ -17,9 +17,13 @@ export function AuthLayout({ children }: { children: ReactNode }) {
   const [checked, setChecked] = useState(false);
 
   const isLoginPage = pathname === "/login";
+  // `/welcome` is the public pitch page — no sidebar, no auth probe.
+  // Mirrors the login page's chrome-less treatment.
+  const isWelcomePage = pathname === "/welcome";
+  const isPublicPage = isLoginPage || isWelcomePage;
 
   useEffect(() => {
-    if (isLoginPage) {
+    if (isPublicPage) {
       setChecked(true);
       return;
     }
@@ -49,10 +53,10 @@ export function AuthLayout({ children }: { children: ReactNode }) {
         // API unreachable — let through, pages will show connection errors
         setChecked(true);
       });
-  }, [isLoginPage, router]);
+  }, [isPublicPage, router]);
 
-  // Login page: render without sidebar chrome
-  if (isLoginPage) {
+  // Public pages (login, welcome pitch): render without sidebar chrome
+  if (isPublicPage) {
     return <>{children}</>;
   }
 

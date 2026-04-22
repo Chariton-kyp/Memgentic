@@ -175,6 +175,8 @@ tags: [deploy, ops]
 
 ## Tool Integrations
 
+This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) above.
+
 | Tool | Capture | Skill injection |
 |------|---------|-----------|
 | Claude Code | Daemon | `~/.claude/skills/` + MCP + SessionStart hook |
@@ -209,6 +211,96 @@ memgentic doctor
 # See all commands
 memgentic --help
 ```
+
+---
+
+## Recall Tiers — tier-aware briefing
+
+Memgentic's briefing is a structured, token-budgeted stack rather than a flat dump. Five tiers, each loaded on demand:
+
+| Tier | Name | Loaded by default | Source |
+|---|---|---|---|
+| **T0** | Persona | yes | `~/.memgentic/persona.yaml` (identity, people, projects, preferences) |
+| **T1** | Horizon | yes | top-N memories + top-3 skills (importance × recency × pinned × cluster × skill-link, MMR-selected) |
+| **T2** | Orbit | on match | memories filtered by collection / topic |
+| **T3** | Deep Recall | explicit | hybrid semantic + FTS5 search |
+| **T4** | Atlas | on KG query | Chronograph graph traversal |
+
+The default `memgentic_briefing()` call returns **T0 + T1** under ~900 tokens (adaptive to the target model's context window). Deeper tiers are one call away.
+
+**Example — agent wakes up and asks for a briefing:**
+
+```jsonc
+// MCP call
+{
+  "name": "memgentic_briefing",
+  "arguments": { "collection": "journaling-app", "model_context": 200000 }
+}
+```
+
+**Sketch of the returned text:**
+
+```
+## T0 — Persona
+You are Atlas, personal AI assistant for Alice.
+Tone: warm, direct, remembers everything.
+Active projects: journaling-app (next.js + postgres).
+Remember: code stack choices, naming conventions, decisions with rationale.
+Avoid: apology-heavy responses, unrelated refactors during bug fixes.
+
+## T1 — Horizon
+[collection:journaling-app]
+  - decided Clerk over Auth0 (pricing) — 2026-02-01, pinned
+  - Kai fixed OAuth refresh flow in middleware.ts — 2026-02-08
+  - migrated to PostgreSQL 18 for pgvector support — 2026-03-14, pinned
+  - chose TanStack Query over SWR for shared cache semantics — 2026-03-22
+[skills:top]
+  - debugging/pr-review (used 34x)
+  - deploy-runbook (used 21x)
+  - postgres-migration-checklist (used 9x)
+```
+
+Explicit deeper calls:
+
+```bash
+memgentic briefing --tier T2 --collection journaling-app --topic auth
+memgentic briefing --tier T3 --query "why graphql"
+memgentic briefing --tier T4 --entity Kai
+memgentic briefing --status                  # show budgets + last-run stats
+memgentic briefing --weights importance=0.4,recency=0.3
+```
+
+Agents can also call `memgentic_tier_recall(tier="T3", query="...")` directly when they already know which tier they want.
+
+---
+
+## Watchers — cross-tool automatic capture
+
+Each AI tool uses the capture mechanism native to it. All paths converge on the same daemon (dedup → pipeline → store). Zero tokens spent in the chat window.
+
+| Tool | Capture mechanism | Status | Notes |
+|---|---|---|---|
+| Claude Code | Hook (`Stop`, `PreCompact`, `SessionStart`, `UserPromptSubmit`) | Shipped | Edits `~/.claude/settings.json`; SessionStart injects T0+T1 briefing |
+| Codex CLI | Hook (`Stop`, `PreCompact`) | Shipped | Edits `~/.codex/hooks.json` |
+| Gemini CLI | File watcher (JSONL tail) | Shipped | Watches `~/.gemini/tmp/*/chats/*.json`; delta-only via `last_offset` |
+| Copilot CLI | File watcher (log appends) | Shipped | Parses `~/.copilot/...` log stream |
+| Aider | File watcher (markdown appends) | Shipped | Parses `<project>/.aider.chat.history.md` by session header |
+| ChatGPT import | One-shot import (JSON) | Shipped | `memgentic import chatgpt <export.json>` |
+| Claude Web import | One-shot import (JSON) | Shipped | `memgentic import claude-web <export.json>` |
+| Cursor | MCP (agent-initiated) | Shipped | No file watcher — Cursor's agent calls `memgentic_remember` / `memgentic_recall` directly |
+| Antigravity | File watcher + protobuf decode | Shipped | Watches `~/.gemini/antigravity/conversations/`; schema-pinned, graceful skip on mismatch |
+
+Manage them uniformly:
+
+```bash
+memgentic watchers install   --tool claude_code
+memgentic watchers status
+memgentic watchers disable   --tool copilot_cli
+memgentic watchers uninstall --tool aider
+memgentic watchers logs      --tool claude_code --tail 50
+```
+
+The dashboard's `/watchers` page shows the same table live (last-capture timestamp, captured count, install state, per-tool logs).
 
 ---
 
