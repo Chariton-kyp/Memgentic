@@ -27,20 +27,15 @@ MANIFEST = ROOT / ".release-please-manifest.json"
 # Each component: the files whose version string must match the manifest.
 COMPONENT_FILES: dict[str, list[tuple[Path, str]]] = {
     "memgentic": [
-        (ROOT / "memgentic/memgentic/__version__.py",
-         r'__version__\s*=\s*"([^"]+)"'),
+        (ROOT / "memgentic/memgentic/__version__.py", r'__version__\s*=\s*"([^"]+)"'),
     ],
     "memgentic-api": [
-        (ROOT / "memgentic-api/memgentic_api/__init__.py",
-         r'__version__\s*=\s*"([^"]+)"'),
+        (ROOT / "memgentic-api/memgentic_api/__init__.py", r'__version__\s*=\s*"([^"]+)"'),
     ],
     "memgentic-native": [
-        (ROOT / "memgentic-native/pyproject.toml",
-         r'^version\s*=\s*"([^"]+)"'),
-        (ROOT / "memgentic-native/Cargo.toml",
-         r'^version\s*=\s*"([^"]+)"'),
-        (ROOT / "memgentic-native/Cargo.lock",
-         r'^name = "memgentic-native"\nversion = "([^"]+)"'),
+        (ROOT / "memgentic-native/pyproject.toml", r'^version\s*=\s*"([^"]+)"'),
+        (ROOT / "memgentic-native/Cargo.toml", r'^version\s*=\s*"([^"]+)"'),
+        (ROOT / "memgentic-native/Cargo.lock", r'^name = "memgentic-native"\nversion = "([^"]+)"'),
     ],
 }
 
