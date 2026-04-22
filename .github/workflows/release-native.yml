@@ -200,15 +200,21 @@ jobs:
       - name: Build SBOM
         working-directory: memgentic-native
         run: |
+          # ``cyclonedx-py environment`` needs a populated Python env
+          # with site-packages to inspect. This job has a bare interpreter
+          # (no ``uv sync`` — the wheel is Rust-built), so ``environment``
+          # fails with "Failed to find python in directory: .". Switch to
+          # ``pyproject`` mode which reads the static ``pyproject.toml``
+          # directly without needing installed deps.
           pip install cyclonedx-bom
           mkdir -p sbom
           TAG="${TAG_NAME}"
           VERSION="${TAG#native-v}"
-          cyclonedx-py environment \
+          cyclonedx-py pyproject pyproject.toml \
             --output-format json \
-            --output-file "sbom/sbom-memgentic-native-${VERSION}.cdx.json" \
+            --outfile "sbom/sbom-memgentic-native-${VERSION}.cdx.json" \
             --spec-version 1.6 \
-            .
+            --mc-type application
           ls -lh sbom/
       - uses: actions/upload-artifact@v4
         with:
