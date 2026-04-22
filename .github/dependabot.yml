@@ -18,7 +18,14 @@ updates:
         patterns: ["*"]
 
   - package-ecosystem: "pip"
-    directory: "/memgentic"
+    # Workspace layout — root ``pyproject.toml`` + root ``uv.lock`` hold
+    # the fully-resolved versions across all member packages
+    # (``memgentic/``, ``memgentic-api/``, ``memgentic-native/``). Earlier
+    # per-member ``/memgentic`` + ``/memgentic-api`` entries scanned bare
+    # ``pyproject.toml`` files with no lock alongside, so transitive-only
+    # vulns (like the lxml XXE CVE fixed in #81) weren't auto-PR'd.
+    # Single root entry covers everything.
+    directory: "/"
     schedule:
       interval: "weekly"
       day: "monday"
@@ -40,29 +47,9 @@ updates:
         applies-to: security-updates
         patterns: ["*"]
 
-  - package-ecosystem: "pip"
-    directory: "/memgentic-api"
-    schedule:
-      interval: "weekly"
-      day: "monday"
-      time: "06:00"
-      timezone: "Europe/Athens"
-    open-pull-requests-limit: 10
-    labels:
-      - "dependencies"
-      - "python"
-      - "api"
-    commit-message:
-      prefix: "chore(deps)"
-      prefix-development: "chore(deps-dev)"
-      include: "scope"
-    groups:
-      api-minor-patch:
-        applies-to: version-updates
-        update-types: ["minor", "patch"]
-      api-security:
-        applies-to: security-updates
-        patterns: ["*"]
+  # Removed: per-member ``pip`` entries for ``/memgentic`` and
+  # ``/memgentic-api``. The root entry above covers every workspace
+  # member because uv writes a single ``uv.lock`` at the repo root.
 
   - package-ecosystem: "cargo"
     directory: "/memgentic-native"

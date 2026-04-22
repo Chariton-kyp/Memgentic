@@ -109,6 +109,8 @@ jobs:
           node-version: "22"
       - name: Install dependencies
         run: cd dashboard && npm ci
+      - name: Lint
+        run: cd dashboard && npm run lint
       - name: Type check + build
         run: cd dashboard && npx next build
       - name: Run tests
