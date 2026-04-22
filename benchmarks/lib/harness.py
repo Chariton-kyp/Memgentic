@@ -207,9 +207,9 @@ class BenchmarkHarness:
         if self._vectors is not None:
             await self._vectors.close()
             self._vectors = None
-        if self._embedder is not None and hasattr(self._embedder, "close"):
+        if self._embedder is not None:
             with contextlib.suppress(Exception):  # pragma: no cover — defensive
-                await self._embedder.close()  # type: ignore[func-returns-value]
+                await self._embedder.close()
         self._embedder = None
         self._pipeline = None
 
