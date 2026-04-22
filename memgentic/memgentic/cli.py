@@ -3277,8 +3277,19 @@ def watchers_group():
     Subcommands:
       install   Install hooks / file watchers for a specific tool
       uninstall Reverse install
+      enable    Re-enable a previously-disabled watcher
+      disable   Stop capturing without uninstalling
       status    Show per-tool capture status
+      logs      Tail recent events for a tool
     """
+
+
+def _reject_unknown_tool(tool: str) -> None:
+    from memgentic.daemon.watchers import ALL_TOOLS
+
+    if tool not in ALL_TOOLS:
+        console.print(f"[red]Unknown tool:[/] {tool}. Known: {', '.join(ALL_TOOLS)}")
+        raise SystemExit(1)
 
 
 @watchers_group.command(name="install")
@@ -3287,8 +3298,9 @@ def watchers_install(tool: str):
     """Install watcher mechanism for TOOL."""
     from memgentic.daemon.watcher_install import install
 
+    _reject_unknown_tool(tool)
     result = install(tool)
-    tag = "[green]OK[/]" if result.changed else "[yellow]no-op[/]"
+    tag = "[green]OK[/]" if result.changed else "[yellow]noop[/]"
     console.print(f"{tag} {tool}: {result.message}")
 
 
@@ -3297,35 +3309,81 @@ def watchers_install(tool: str):
 def watchers_uninstall(tool: str):
     """Uninstall watcher for TOOL."""
     from memgentic.daemon.watcher_install import uninstall
+    from memgentic.daemon.watcher_state import WatcherStateStore
 
+    _reject_unknown_tool(tool)
     result = uninstall(tool)
-    tag = "[green]OK[/]" if result.changed else "[yellow]no-op[/]"
+    tag = "[green]OK[/]" if result.changed else "[yellow]noop[/]"
     console.print(f"{tag} {tool}: {result.message}")
+    # Clear state row so status no longer shows it as installed.
+    WatcherStateStore().remove_tool(tool)
+
+
+@watchers_group.command(name="enable")
+@click.option("--tool", required=True)
+def watchers_enable(tool: str):
+    """Re-enable a previously-disabled watcher."""
+    from memgentic.daemon.watcher_state import WatcherStateStore
+
+    _reject_unknown_tool(tool)
+    WatcherStateStore().upsert_status(tool, enabled=True)
+    console.print(f"[green]OK[/] {tool} enabled")
+
+
+@watchers_group.command(name="disable")
+@click.option("--tool", required=True)
+def watchers_disable(tool: str):
+    """Stop capturing without uninstalling."""
+    from memgentic.daemon.watcher_state import WatcherStateStore
+
+    _reject_unknown_tool(tool)
+    WatcherStateStore().upsert_status(tool, enabled=False)
+    console.print(f"[yellow]OK[/] {tool} disabled")
 
 
 @watchers_group.command(name="status")
 def watchers_status():
-    """Show per-tool watcher status."""
+    """Show per-tool watcher status across all known tools."""
     from memgentic.daemon.watcher_state import WatcherStateStore
+    from memgentic.daemon.watchers import ALL_TOOLS, classify_tool
 
     store = WatcherStateStore()
-    rows = store.list_statuses()
-    if not rows:
-        console.print("[dim]no watchers installed[/]")
-        return
+    statuses = {s.tool: s for s in store.list_statuses()}
     table = Table(title="Watchers")
     table.add_column("tool")
+    table.add_column("mechanism")
+    table.add_column("installed")
     table.add_column("enabled")
-    table.add_column("installed at")
-    table.add_column("last error")
-    for row in rows:
+    table.add_column("last capture")
+    for tool in ALL_TOOLS:
+        row = statuses.get(tool)
         table.add_row(
-            row.tool,
-            "yes" if row.enabled else "no",
-            str(row.installed_at or "—"),
-            row.last_error or "—",
+            tool,
+            classify_tool(tool),
+            "yes" if row and row.installed_at else "no",
+            "yes" if row and row.enabled else "no",
+            str(getattr(row, "last_captured_at", None) or "—"),
         )
     console.print(table)
+
+
+@watchers_group.command(name="logs")
+@click.option("--tool", required=True)
+@click.option("--limit", default=50)
+def watchers_logs(tool: str, limit: int):
+    """Tail recent events for TOOL."""
+    from memgentic.daemon.watcher_state import WatcherStateStore
+
+    _reject_unknown_tool(tool)
+    store = WatcherStateStore()
+    entries = store.list_logs(tool, limit=limit) if hasattr(store, "list_logs") else []
+    if not entries:
+        console.print("No log entries yet.")
+        return
+    for entry in entries:
+        console.print(
+            f"{entry.get('ts', '?')} [{entry.get('level', 'info')}] {entry.get('message', '')}"
+        )
 
 
 if __name__ == "__main__":
