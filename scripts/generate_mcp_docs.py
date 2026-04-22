@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import inspect
 import json
 import sys
 from pathlib import Path
@@ -48,7 +49,11 @@ async def _collect_tools() -> list[dict]:
         rows.append(
             {
                 "name": tool.name,
-                "description": (tool.description or "").strip(),
+                # ``inspect.cleandoc`` normalises docstring indentation so the
+                # output is identical across Python versions / FastMCP builds
+                # that hand the description back with different leading
+                # whitespace (observed drift between 3.12 and 3.13).
+                "description": inspect.cleandoc(tool.description or ""),
                 "annotations": _annotations_to_dict(tool.annotations),
                 "input_schema": getattr(tool, "inputSchema", None)
                 or getattr(tool, "input_schema", None)
