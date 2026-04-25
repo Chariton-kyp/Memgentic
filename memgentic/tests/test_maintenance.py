@@ -16,7 +16,7 @@ from memgentic.models import (
     Platform,
     SourceMetadata,
 )
-from memgentic.processing.consolidation import (
+from memgentic.processing.maintenance import (
     ConsolidationReport,
     consolidate,
 )

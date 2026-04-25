@@ -863,7 +863,7 @@ def consolidate():
 
     async def _run():
         try:
-            from memgentic.processing.consolidation import consolidate as run_consolidation
+            from memgentic.processing.maintenance import consolidate as run_consolidation
         except ImportError:
             console.print(
                 "[red]Intelligence extras required for consolidation.[/]\n"

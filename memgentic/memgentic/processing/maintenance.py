@@ -1,4 +1,16 @@
-"""Background consolidation — merge duplicates, flag contradictions, recompute importance."""
+"""Background maintenance — merge duplicates, flag contradictions, recompute importance.
+
+Renamed from ``processing/consolidation.py`` (Plan 12 §6.5) to free the
+``consolidation`` namespace for the future Layer-S/P LLM-distillation
+worker (``memgentic/consolidation/distiller.py``). Behavior is unchanged
+from the prior ``consolidation.py``: this module covers the deterministic
+maintenance ops that operate on Layer E (episodic) memories — duplicate
+merging, contradiction flagging, importance recomputation.
+
+Public functions (``consolidate``, ``find_duplicates``, etc.) keep the
+same signatures and return types so call sites update only the import
+path, not the call.
+"""
 
 from __future__ import annotations
 
