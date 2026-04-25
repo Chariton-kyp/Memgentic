@@ -28,6 +28,18 @@ from typing import Any
 
 from benchmarks.lib.corpus_loader import CorpusLoaderError, load_longmemeval
 from benchmarks.lib.harness import BenchmarkHarness
+from benchmarks.lib.scorers import (
+    aggregate_chunks_to_sessions,
+    rank_of_gold_session_aggregated,
+    recall_at_k_session_aggregated,
+)
+
+# Plan 12 Phase 0 PR-B: over-fetch chunks so session-aggregation has a
+# real candidate pool to dedupe from. With 5-20 chunks per session and
+# k=5 distinct sessions, fetching k*5 = 25 chunks reliably surfaces the
+# top ~5 distinct sessions. Higher factors trade ingest-side memory for
+# better recall on dense-haystack benchmarks.
+DEFAULT_OVER_FETCH_FACTOR = 5
 
 
 async def run(
@@ -37,6 +49,7 @@ async def run(
     output_dir: str | Path = "benchmarks/results",
     *,
     harness: BenchmarkHarness | None = None,
+    over_fetch_factor: int = DEFAULT_OVER_FETCH_FACTOR,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -66,24 +79,32 @@ async def run(
             await active.ingest_session(session)
 
         records: list[dict[str, Any]] = []
+        # Plan 12 PR-B: over-fetch chunks, then aggregate to distinct
+        # sessions before scoring. See benchmarks/lib/scorers.py header.
+        n_results = max(k, k * over_fetch_factor)
         for question in questions:
-            hits = await active.search(question.text, n_results=k)
-            retrieved_session_ids = [(h.get("payload") or {}).get("session_id") for h in hits]
-            retrieved_session_ids = [sid for sid in retrieved_session_ids if sid is not None]
-            recall = any(sid in question.gold for sid in retrieved_session_ids)
-            rank_of_gold = next(
-                (i + 1 for i, sid in enumerate(retrieved_session_ids) if sid in question.gold),
-                None,
-            )
+            hits = await active.search(question.text, n_results=n_results)
+            chunk_session_score = [
+                ((h.get("payload") or {}).get("session_id"), float(h.get("score") or 0.0))
+                for h in hits
+            ]
+            distinct_sessions = aggregate_chunks_to_sessions(chunk_session_score)
+            retrieved_session_ids = [sid for sid, _ in distinct_sessions[:k]]
+            recall = recall_at_k_session_aggregated(chunk_session_score, question.gold, k)
+            rank_of_gold = rank_of_gold_session_aggregated(chunk_session_score, question.gold)
             records.append(
                 {
                     "question_id": question.id,
                     "question": question.text,
                     "gold_session_ids": sorted(question.gold),
                     "retrieved_session_ids": retrieved_session_ids,
+                    "retrieved_chunks_total": len(chunk_session_score),
+                    "distinct_sessions_in_chunks": len(distinct_sessions),
                     "rank_of_gold": rank_of_gold,
                     "recall_at_k": recall,
                     "category": question.category,
+                    "scoring_method": "session_aggregated_max_chunk_score",
+                    "over_fetch_factor": over_fetch_factor,
                 }
             )
 
@@ -130,6 +151,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--k", type=int, default=5, help="Top-k for R@k.")
     parser.add_argument(
+        "--over-fetch-factor",
+        type=int,
+        default=DEFAULT_OVER_FETCH_FACTOR,
+        help=(
+            "Multiplier on k for raw chunk retrieval before session "
+            "aggregation. Default 5 → fetch k*5 chunks, dedupe to top-k "
+            "distinct sessions. See benchmarks/lib/scorers.py header "
+            "(Plan 12 PR-B)."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmarks/results"),
@@ -150,7 +182,15 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        asyncio.run(run(args.dataset, profile=args.profile, k=args.k, output_dir=args.output_dir))
+        asyncio.run(
+            run(
+                args.dataset,
+                profile=args.profile,
+                k=args.k,
+                output_dir=args.output_dir,
+                over_fetch_factor=args.over_fetch_factor,
+            )
+        )
     except CorpusLoaderError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
