@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "result_file": "results_longmemeval_raw_20260422_baseline.jsonl",
+  "benchmark": "LongMemEval-S (cleaned)",
+  "dataset_source": "huggingface.co/datasets/xiaowu0162/longmemeval/resolve/main/longmemeval_s",
+  "dataset_subset": "first 50 questions of cleaned variant",
+  "dataset_questions_total": 500,
+  "dataset_questions_run": 50,
+  "metric": "R@5",
+  "result": 0.6000,
+  "result_n": 50,
+  "result_hits": 30,
+  "captured_at_utc": "2026-04-22T20:21:00Z",
+  "memgentic_commit_sha": "c0f796d834aecb4c6ae7a30d7f01bfa85121e4c8",
+  "memgentic_branch": "feat/benchmarks-harness",
+  "profile": "raw",
+  "k": 5,
+  "models": {
+    "embedder": "qwen3-embedding:0.6b",
+    "embedder_dimensions": 768,
+    "embedder_provider": "ollama",
+    "reranker": null,
+    "llm_consolidation": null,
+    "llm_classification": "heuristic_only_fallback"
+  },
+  "stack": {
+    "vector_store": "sqlite-vec",
+    "vector_store_version": "0.1.9",
+    "metadata_store": "sqlite-fts5",
+    "ollama_endpoint": "http://localhost:11434"
+  },
+  "hardware": {
+    "machine": "MSI Vector 17 HX A14VHG",
+    "os": "Windows 11 Pro",
+    "cpu_arch": "x86_64",
+    "ram_gb": 64,
+    "gpu": "NVIDIA GeForce RTX 4080 Laptop GPU",
+    "gpu_vram_gb_used_for_embedder": 1.5
+  },
+  "reproducibility": {
+    "command": "uv run python -m benchmarks.runners.longmemeval_bench --dataset benchmarks/datasets/longmemeval_s_cleaned_50.json --profile raw --k 5",
+    "subset_creation": "first 50 questions of full longmemeval_s_cleaned (slice [0:50])",
+    "deterministic": true,
+    "seed_used": "n/a (model inference deterministic via Ollama batch mode)",
+    "expected_runtime_minutes": 50,
+    "ingest_phase_sessions_total": 2436
+  },
+  "notes": [
+    "First Memgentic baseline number committed to repo (per Plan 12 Phase 0 PR-A).",
+    "Establishes 60% R@5 as starting point against which subsequent PRs (B/C/D/E) measure attribution.",
+    "Run on cleaned LongMemEval-S subset; full 500-question run not yet executed (~3.5 hours estimated).",
+    "Heuristic-only classification: pipeline.intelligence_heuristic_only fired throughout — confirms Phase 0 PR-C LLM-wiring fix is genuinely needed.",
+    "All 50 questions in this subset are category=single-session-user (first 50 happen to share that type).",
+    "Misses are concentrated on questions where the gold session is an answer_* QA-pair (semantically dissimilar from the question) rather than a topical conversation."
+  ],
+  "phase_0_attribution_anchor": {
+    "purpose": "This is the PR-A baseline. PRs B (session-level scoring), C (LLM wiring), D (BM25 hybrid), E (Qwen3-Reranker) each report their delta against this number.",
+    "expected_deltas_per_plan_12": {
+      "pr_b_session_level_scoring": "+10 to +20 pp",
+      "pr_c_llm_wiring_fix": "+3 to +10 pp",
+      "pr_d_bm25_hybrid": "+3 to +8 pp",
+      "pr_e_qwen3_reranker": "+4 to +10 pp"
+    },
+    "phase_0_target_after_all_prs": "R@5 >= 85% on held-out 450q (per Plan 12 §7)"
+  }
+}

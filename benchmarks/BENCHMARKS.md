@@ -48,11 +48,13 @@ comparable hardware and get the same answer.
 
 ### LongMemEval R@5 — by capture profile
 
-| Profile | R@5 | LLM in pipeline | Date | Commit |
-|---|---|---|---|---|
-| raw      | _TBD — runs land after Capture Profiles merges_ | None               | — | — |
-| enriched | _TBD_                                           | Gemini Flash Lite  | — | — |
-| dual     | _TBD_                                           | Gemini Flash Lite  | — | — |
+| Profile | R@5 | Subset | LLM in pipeline | Date | Commit | Result file |
+|---|---|---|---|---|---|---|
+| raw      | **0.6000 (30/50)** | first 50q of `longmemeval_s_cleaned` | None (heuristic-only fallback fired throughout — Plan 12 PR-C will fix this) | 2026-04-22 | `c0f796d8` (feat/benchmarks-harness) | [`results_longmemeval_raw_20260422_baseline.jsonl`](results/results_longmemeval_raw_20260422_baseline.jsonl) + [`.meta.json`](results/results_longmemeval_raw_20260422_baseline.meta.json) |
+| enriched | _TBD — needs Plan 12 Phase 0 PR-C (LLM-wiring fix in benchmarks/lib/harness.py)_ | — | Qwen3.5-4B (planned) | — | — | — |
+| dual     | _TBD — same gate as enriched_ | — | Qwen3.5-4B (planned) | — | — | — |
+
+**Status note (2026-04-22)**: The `raw` row is the first Memgentic baseline number committed to this repo. It establishes the `R@5 = 60%` starting point against which Plan 12 Phase 0 PRs B/C/D/E will report attribution. The full 500-question run is pending (~3.5h estimated wall-clock); the 50-question subset is the working dev split.
 
 ### LoCoMo R@10 — session-top-10
 
