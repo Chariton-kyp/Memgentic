@@ -33,6 +33,7 @@ from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBacken
 from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
+from memgentic.retrieval import RerankCandidate, Reranker
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
@@ -122,6 +123,7 @@ class BenchmarkHarness:
         *,
         seed: int = DEFAULT_SEED,
         settings_override: MemgenticSettings | None = None,
+        reranker: Reranker | None = None,
     ) -> None:
         """Construct a harness without touching disk.
 
@@ -150,6 +152,7 @@ class BenchmarkHarness:
         self.backend_label = backend
         self.seed = seed
         self._settings_override = settings_override
+        self._reranker = reranker  # Plan 12 PR-E: optional cross-encoder rerank
 
         self._tmp_root: Path | None = None
         self._settings: MemgenticSettings | None = None
@@ -271,6 +274,57 @@ class BenchmarkHarness:
         vectors = self._require(self._vectors, "vector store")
         embedding = await embedder.embed(text)
         return await vectors.search(embedding, limit=n_results)
+
+    async def search_with_rerank(
+        self,
+        text: str,
+        n_results: int = 5,
+        *,
+        retrieve_k: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Dense retrieval over-fetched, then cross-encoder rerank to top-``n_results``.
+
+        Plan 12 PR-E. Requires a ``reranker`` to have been passed at
+        harness construction (e.g. ``LlamaCppReranker(model_path=...)``);
+        without one this method raises ``RuntimeError``.
+
+        Args:
+            text: Query text.
+            n_results: Top-k to return after reranking.
+            retrieve_k: How many candidates to fetch from the vector
+                store before reranking. Defaults to ``n_results * 4``
+                (e.g. 20 candidates → top-5 reranked output).
+
+        Returns:
+            Same dict shape as :meth:`search`, but with rerank scores
+            and order. Each dict carries ``id``, ``score`` (rerank
+            score, not cosine), and ``payload``.
+        """
+        if self._reranker is None:
+            raise RuntimeError(
+                "search_with_rerank() requires a reranker. Pass one to "
+                "BenchmarkHarness(reranker=LlamaCppReranker(...))."
+            )
+        if retrieve_k is None:
+            retrieve_k = n_results * 4
+        candidates_raw = await self.search(text, n_results=retrieve_k)
+        rerank_input = [
+            RerankCandidate(
+                id=hit["id"],
+                text=str((hit.get("payload") or {}).get("content") or hit.get("id")),
+                payload=hit.get("payload"),
+            )
+            for hit in candidates_raw
+        ]
+        reranked = await self._reranker.rerank(text, rerank_input, top_k=n_results)
+        return [
+            {
+                "id": r.id,
+                "score": r.score,
+                "payload": r.payload or {},
+            }
+            for r in reranked
+        ]
 
     async def evaluate(
         self,
