@@ -32,6 +32,7 @@ from typing import Any
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
 from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
 from memgentic.processing.embedder import Embedder
+from memgentic.processing.llm import LLMClient
 from memgentic.processing.pipeline import IngestionPipeline
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
@@ -122,6 +123,7 @@ class BenchmarkHarness:
         *,
         seed: int = DEFAULT_SEED,
         settings_override: MemgenticSettings | None = None,
+        enable_llm: bool | None = None,
     ) -> None:
         """Construct a harness without touching disk.
 
@@ -151,11 +153,25 @@ class BenchmarkHarness:
         self.seed = seed
         self._settings_override = settings_override
 
+        # Plan 12 PR-C: LLM enrichment flag.
+        # Default behavior preserves backward compatibility:
+        #   - profile=raw → enable_llm=False (no LLM, fast, deterministic)
+        #   - profile=enriched/dual → enable_llm=True (Gemma/Qwen via Ollama
+        #     for topic/entity extraction, classification, summarization)
+        # Explicit override wins. The harness used to hard-code llm_client=None
+        # regardless of profile, which silently broke the enriched/dual paths
+        # in benchmark runs (see pipeline.intelligence_heuristic_only logs).
+        if enable_llm is None:
+            self.enable_llm = self.profile in ("enriched", "dual")
+        else:
+            self.enable_llm = enable_llm
+
         self._tmp_root: Path | None = None
         self._settings: MemgenticSettings | None = None
         self._metadata: MetadataStore | None = None
         self._vectors: VectorStore | None = None
         self._embedder: Embedder | None = None
+        self._llm: LLMClient | None = None
         self._pipeline: IngestionPipeline | None = None
 
         random.seed(self.seed)
@@ -186,16 +202,28 @@ class BenchmarkHarness:
 
         self._embedder = Embedder(self._settings)
 
-        # LLM client is intentionally left ``None`` in the skeleton.
-        # The pipeline degrades gracefully to heuristic classification.
-        # Runners that want LLM-driven extraction can pass one through
-        # ``settings_override`` plus a post-setup hook; Phase 1 does not.
+        # Plan 12 PR-C: build LLM client when the harness was asked for
+        # LLM-aware ingestion. Default flag derives from profile:
+        # raw=disabled, enriched/dual=enabled. The pipeline degrades to
+        # heuristic classification when the LLM client is None or the
+        # underlying provider is unavailable, so this is safe to enable
+        # by default for enriched/dual.
+        if self.enable_llm:
+            self._llm = LLMClient(self._settings)
+            if not self._llm.available:
+                # Provider not configured (no Ollama, no API key). Fall back
+                # to heuristic-only — same behavior as the pre-PR-C skeleton
+                # but now signaled as a skipped capability, not a silent miss.
+                self._llm = None
+        else:
+            self._llm = None
+
         self._pipeline = IngestionPipeline(
             settings=self._settings,
             metadata_store=self._metadata,
             vector_store=self._vectors,
             embedder=self._embedder,
-            llm_client=None,
+            llm_client=self._llm,
             graph=None,
         )
 
@@ -334,18 +362,21 @@ class BenchmarkHarness:
             "qdrant": StorageBackend.QDRANT,
         }.get(self.backend_label, StorageBackend.SQLITE_VEC)
 
+        # Plan 12 PR-C: when LLM enrichment is enabled, flip the toggles
+        # the IngestionPipeline reads to decide whether to call the LLM
+        # for classification / extraction / summarization. The actual
+        # provider (Ollama local or cloud API) comes from environment
+        # variables (GOOGLE_API_KEY for Gemini, MEMGENTIC_LOCAL_LLM_MODEL
+        # for the Ollama tag, etc.) — see memgentic.config for the full set.
         return MemgenticSettings(
             data_dir=tmp_root / "data",
             storage_backend=backend,
             collection_name="memgentic_bench",
             embedding_dimensions=768,
-            # Everything LLM-adjacent is disabled by default in phase 1 —
-            # runners can override via ``settings_override`` once profiles
-            # are wired up.
             enable_credential_scrubbing=True,
-            # Stay on Ollama by default; tests pass settings_override with
-            # a mocked embedder so no network calls happen in CI.
             embedding_provider=EmbeddingProvider.OLLAMA,
+            enable_llm_processing=self.enable_llm,
+            enable_local_llm=self.enable_llm,
         )
 
     @staticmethod

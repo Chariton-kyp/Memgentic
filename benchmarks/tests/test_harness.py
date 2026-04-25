@@ -201,3 +201,42 @@ class TestEvaluate:
         assert by_id["q2"]["recall_at_k"] is False
         assert by_id["q1"]["gold"] == ["s-a"]
         assert by_id["q1"]["question"] == "what is A"
+
+
+# ---------------------------------------------------------------------------
+# Plan 12 PR-C: LLM wiring flag
+# ---------------------------------------------------------------------------
+class TestEnableLLMFlag:
+    def test_raw_profile_disables_llm_by_default(self) -> None:
+        h = BenchmarkHarness(profile="raw")
+        assert h.enable_llm is False
+
+    def test_enriched_profile_enables_llm_by_default(self) -> None:
+        h = BenchmarkHarness(profile="enriched")
+        assert h.enable_llm is True
+
+    def test_dual_profile_enables_llm_by_default(self) -> None:
+        h = BenchmarkHarness(profile="dual")
+        assert h.enable_llm is True
+
+    def test_explicit_enable_overrides_raw_default(self) -> None:
+        # Allow forcing LLM on for a raw-profile run (rare but useful for
+        # ablation studies)
+        h = BenchmarkHarness(profile="raw", enable_llm=True)
+        assert h.enable_llm is True
+
+    def test_explicit_disable_overrides_enriched_default(self) -> None:
+        # Useful when comparing an enriched-profile run against an LLM-off
+        # baseline on the same chunking strategy
+        h = BenchmarkHarness(profile="enriched", enable_llm=False)
+        assert h.enable_llm is False
+
+    def test_verbatim_alias_keeps_llm_off(self) -> None:
+        # verbatim → raw → LLM off
+        h = BenchmarkHarness(profile="verbatim")
+        assert h.enable_llm is False
+
+    def test_llm_alias_enables_llm(self) -> None:
+        # llm → enriched → LLM on
+        h = BenchmarkHarness(profile="llm")
+        assert h.enable_llm is True
