@@ -37,6 +37,9 @@ async def run(
     output_dir: str | Path = "benchmarks/results",
     *,
     harness: BenchmarkHarness | None = None,
+    retrieval_mode: str = "dense",
+    dense_weight: float = 1.0,
+    bm25_weight: float = 1.0,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -67,7 +70,15 @@ async def run(
 
         records: list[dict[str, Any]] = []
         for question in questions:
-            hits = await active.search(question.text, n_results=k)
+            if retrieval_mode == "hybrid":
+                hits = await active.search_hybrid(
+                    question.text,
+                    n_results=k,
+                    dense_weight=dense_weight,
+                    bm25_weight=bm25_weight,
+                )
+            else:
+                hits = await active.search(question.text, n_results=k)
             retrieved_session_ids = [(h.get("payload") or {}).get("session_id") for h in hits]
             retrieved_session_ids = [sid for sid in retrieved_session_ids if sid is not None]
             recall = any(sid in question.gold for sid in retrieved_session_ids)
@@ -130,6 +141,28 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument("--k", type=int, default=5, help="Top-k for R@k.")
     parser.add_argument(
+        "--retrieval-mode",
+        default="dense",
+        choices=["dense", "hybrid"],
+        help=(
+            "Retrieval mode: 'dense' uses vector search only (PR-A baseline); "
+            "'hybrid' fuses dense + BM25/FTS5 via reciprocal rank fusion "
+            "(Plan 12 PR-D). Default: dense."
+        ),
+    )
+    parser.add_argument(
+        "--dense-weight",
+        type=float,
+        default=1.0,
+        help="RRF weight for the dense list when --retrieval-mode hybrid.",
+    )
+    parser.add_argument(
+        "--bm25-weight",
+        type=float,
+        default=1.0,
+        help="RRF weight for the BM25 list when --retrieval-mode hybrid.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmarks/results"),
@@ -150,7 +183,17 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        asyncio.run(run(args.dataset, profile=args.profile, k=args.k, output_dir=args.output_dir))
+        asyncio.run(
+            run(
+                args.dataset,
+                profile=args.profile,
+                k=args.k,
+                output_dir=args.output_dir,
+                retrieval_mode=args.retrieval_mode,
+                dense_weight=args.dense_weight,
+                bm25_weight=args.bm25_weight,
+            )
+        )
     except CorpusLoaderError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2

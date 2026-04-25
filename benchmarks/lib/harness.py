@@ -272,6 +272,81 @@ class BenchmarkHarness:
         embedding = await embedder.embed(text)
         return await vectors.search(embedding, limit=n_results)
 
+    async def search_fulltext(self, text: str, n_results: int = 5) -> list[dict[str, Any]]:
+        """BM25/FTS5 keyword search via :class:`MetadataStore.search_fulltext`.
+
+        Plan 12 PR-D — exposes the FTS5 surface (already populated by every
+        ingest) for use in hybrid retrieval. Returns the same dict shape as
+        :meth:`search` so fusion code does not need to special-case the
+        source.
+        """
+        metadata = self._require(self._metadata, "metadata store")
+        memories = await metadata.search_fulltext(text, limit=n_results)
+        # Synthesize a search-result dict per memory. FTS5 rank is opaque;
+        # we expose the 1-indexed position as a "score" so RRF can ignore it,
+        # but weighted_score_fusion still gets a usable signal.
+        return [
+            {
+                "id": memory.id,
+                "score": 1.0 / (1 + idx),  # monotone-decreasing positional score
+                "payload": {
+                    "session_id": memory.source.session_id if memory.source else None,
+                    "content_type": memory.content_type,
+                    "platform": memory.source.platform if memory.source else None,
+                },
+            }
+            for idx, memory in enumerate(memories)
+        ]
+
+    async def search_hybrid(
+        self,
+        text: str,
+        n_results: int = 5,
+        *,
+        dense_weight: float = 1.0,
+        bm25_weight: float = 1.0,
+        fetch_each: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Hybrid retrieval — dense + BM25 fused via reciprocal rank fusion.
+
+        Plan 12 PR-D. Calls :meth:`search` and :meth:`search_fulltext` in
+        parallel (well, sequentially — the bottleneck is the embedder, not
+        SQLite), fuses the two ranked lists with
+        :func:`memgentic.retrieval.hybrid.reciprocal_rank_fusion`, and
+        returns the top ``n_results``.
+
+        Args:
+            text: Query text.
+            n_results: Top-k to return after fusion.
+            dense_weight: RRF weight for the dense list. Default 1.0.
+            bm25_weight: RRF weight for the BM25 list. Default 1.0.
+            fetch_each: Per-strategy fetch depth before fusion. Defaults
+                to ``n_results * 5`` so fusion has a real candidate pool.
+        """
+        from memgentic.retrieval import reciprocal_rank_fusion
+
+        if fetch_each is None:
+            fetch_each = n_results * 5
+        dense_hits = await self.search(text, n_results=fetch_each)
+        bm25_hits = await self.search_fulltext(text, n_results=fetch_each)
+        dense_ids = [h["id"] for h in dense_hits]
+        bm25_ids = [h["id"] for h in bm25_hits]
+        fused = reciprocal_rank_fusion(
+            [dense_ids, bm25_ids],
+            weights=[dense_weight, bm25_weight],
+        )
+        # Build a lookup so we can return the same dict shape callers expect.
+        all_hits = {h["id"]: h for h in dense_hits}
+        for h in bm25_hits:
+            all_hits.setdefault(h["id"], h)
+        result: list[dict[str, Any]] = []
+        for memory_id, fused_score in fused[:n_results]:
+            hit = dict(all_hits[memory_id])
+            hit["score"] = fused_score  # Replace per-strategy score with fused
+            hit.setdefault("payload", {})
+            result.append(hit)
+        return result
+
     async def evaluate(
         self,
         queries: Sequence[BenchmarkQuery],
