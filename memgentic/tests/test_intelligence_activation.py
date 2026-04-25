@@ -27,7 +27,7 @@ from memgentic.models import (
     Platform,
     SourceMetadata,
 )
-from memgentic.processing.consolidation import consolidate
+from memgentic.processing.maintenance import consolidate
 from memgentic.processing.intelligence import (
     ClassificationResult,
     ExtractionResult,
