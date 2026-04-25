@@ -2,6 +2,16 @@
 
 Uses shared httpx connection pool, retry logic with exponential backoff,
 and concurrent batch embedding with bounded parallelism.
+
+Asymmetric encoding
+-------------------
+Modern instruction-tuned embedders (Qwen3-Embedding, EmbeddingGemma) are
+trained with explicit query and document prefixes. Encoding a query the
+same way as a document drops retrieval recall by 1-5% per the Qwen3
+model card and similar amounts for Gemma. Use ``embed_query()`` for
+search inputs and ``embed_document()`` for stored content. The legacy
+``embed()`` / ``embed_batch()`` methods alias the document path so older
+ingest call sites stay correct, but search code MUST migrate.
 """
 
 from __future__ import annotations
@@ -32,11 +42,64 @@ _RETRY_DECORATOR = retry(
     reraise=True,
 )
 
+# Default retrieval task description used by Qwen3-Embedding when the
+# caller doesn't override. Kept generic so it works for memory recall,
+# code search, and conversation transcript retrieval.
+_QWEN3_DEFAULT_TASK = (
+    "Given a search query, retrieve relevant memory passages that match the query"
+)
+
+
+def _model_family(model_name: str) -> str:
+    """Detect the prefix dialect a given embedding model expects.
+
+    Returns one of: ``qwen3``, ``gemma``, ``bge-m3``, ``bge``, ``unknown``.
+    """
+    name = model_name.lower()
+    if "qwen3" in name or "qwen-3" in name:
+        return "qwen3"
+    if "embeddinggemma" in name or "embedding-gemma" in name or "embeddinggemma-300m" in name:
+        return "gemma"
+    if "bge-m3" in name or "bge_m3" in name:
+        return "bge-m3"
+    if "bge" in name:
+        return "bge"
+    return "unknown"
+
+
+def format_query(model_name: str, text: str, task: str | None = None) -> str:
+    """Apply the model-appropriate query prefix.
+
+    - Qwen3-Embedding: ``Instruct: <task>\\nQuery: <text>``
+    - EmbeddingGemma: ``task: search result | query: <text>``
+    - bge / bge-m3 / unknown: no prefix (passthrough)
+    """
+    family = _model_family(model_name)
+    if family == "qwen3":
+        instruction = task or _QWEN3_DEFAULT_TASK
+        return f"Instruct: {instruction}\nQuery: {text}"
+    if family == "gemma":
+        return f"task: search result | query: {text}"
+    return text
+
+
+def format_document(model_name: str, text: str, title: str | None = None) -> str:
+    """Apply the model-appropriate document prefix.
+
+    Only EmbeddingGemma documents an explicit document template
+    (``title: <title|none> | text: <text>``). Qwen3 and BGE families
+    leave documents unprefixed.
+    """
+    family = _model_family(model_name)
+    if family == "gemma":
+        return f"title: {title or 'none'} | text: {text}"
+    return text
+
 
 class Embedder:
     """Generate embeddings from text using Ollama or OpenAI.
 
-    Default: Ollama with Qwen3-Embedding-4B (local, free, multilingual).
+    Default: Ollama with Qwen3-Embedding-0.6B (local, free, multilingual).
 
     Uses a shared ``httpx.AsyncClient`` with connection pooling for efficiency.
     Call :meth:`close` (or use as an async context manager) to release resources.
@@ -56,8 +119,51 @@ class Embedder:
 
     # -- Public API -----------------------------------------------------------
 
+    async def embed_query(self, text: str, task: str | None = None) -> list[float]:
+        """Embed a search query with the model-appropriate query prefix.
+
+        Use this for any text the user is searching with. ``task`` lets
+        callers override the default retrieval instruction string for
+        Qwen3-Embedding (e.g. code search vs prose recall).
+        """
+        formatted = format_query(self._settings.embedding_model, text, task=task)
+        return await self.embed(formatted)
+
+    async def embed_document(self, text: str, title: str | None = None) -> list[float]:
+        """Embed a document/passage with the model-appropriate document prefix.
+
+        Use this for content being stored in the vector index.
+        ``title`` is consumed by EmbeddingGemma's document template;
+        other model families ignore it.
+        """
+        formatted = format_document(self._settings.embedding_model, text, title=title)
+        return await self.embed(formatted)
+
+    async def embed_batch_documents(
+        self, texts: list[str], titles: list[str | None] | None = None
+    ) -> list[list[float]]:
+        """Batch-embed documents with the model-appropriate prefix."""
+        if not texts:
+            return []
+        if titles is not None and len(titles) != len(texts):
+            raise EmbeddingError(
+                f"titles length ({len(titles)}) must equal texts length ({len(texts)})"
+            )
+        model = self._settings.embedding_model
+        if titles is None:
+            formatted = [format_document(model, t) for t in texts]
+        else:
+            formatted = [format_document(model, t, title=ti) for t, ti in zip(texts, titles)]
+        return await self.embed_batch(formatted)
+
     async def embed(self, text: str) -> list[float]:
-        """Generate embedding for a single text."""
+        """Generate embedding for a single text — raw, no prefix.
+
+        Prefer :meth:`embed_query` or :meth:`embed_document` so the
+        model-appropriate instruction prefix gets applied. ``embed``
+        remains for backward compatibility with ingest call sites that
+        already pass document content.
+        """
         provider = self._settings.embedding_provider.value
         with trace_span("embedder.embed", provider=provider):
             _embed_start = time.perf_counter()

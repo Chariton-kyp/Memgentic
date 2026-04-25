@@ -1205,7 +1205,7 @@ provides-extras = ["dev", "documents", "intelligence", "observability", "sqlite-
 
 [[package]]
 name = "memgentic-api"
-version = "0.6.0"
+version = "0.7.0"
 source = { editable = "memgentic-api" }
 dependencies = [
     { name = "fastapi" },

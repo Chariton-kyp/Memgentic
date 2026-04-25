@@ -37,12 +37,17 @@ def pipeline_settings(tmp_path) -> MemgenticSettings:
 
 @pytest.fixture()
 def mock_embedder():
-    """Mock Embedder: embed() returns a single vector, embed_batch() returns a list."""
+    """Mock Embedder: embed/embed_query/embed_document share one AsyncMock so
+    legacy ``embed.assert_called_once()`` assertions keep working after the
+    asymmetric query/document split landed."""
     embedder = AsyncMock()
     embedder.embed.return_value = _fake_embedding()
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     embedder.embed_batch.side_effect = lambda texts: [
         _fake_embedding(0.1 * i) for i in range(len(texts))
     ]
+    embedder.embed_batch_documents = embedder.embed_batch
     return embedder
 
 

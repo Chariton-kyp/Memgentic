@@ -7,7 +7,7 @@ import pytest
 
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
 from memgentic.exceptions import EmbeddingError
-from memgentic.processing.embedder import Embedder
+from memgentic.processing.embedder import Embedder, format_document, format_query
 
 DIMS = 768
 
@@ -369,3 +369,151 @@ class TestClose:
         assert not embedder._client.is_closed
         await embedder.close()
         assert embedder._client.is_closed
+
+
+class TestPrefixFormatters:
+    """Pure-function tests for the model-aware query/document prefix logic."""
+
+    def test_qwen3_query_uses_instruct_template(self):
+        out = format_query("qwen3-embedding:0.6b", "find the auth bug")
+        assert out.startswith("Instruct:")
+        assert "\nQuery: find the auth bug" in out
+
+    def test_qwen3_query_accepts_custom_task(self):
+        out = format_query(
+            "qwen3-embedding:0.6b",
+            "load_user",
+            task="Given a function name, retrieve its definition",
+        )
+        assert out == (
+            "Instruct: Given a function name, retrieve its definition\n"
+            "Query: load_user"
+        )
+
+    def test_qwen3_document_unprefixed(self):
+        # Qwen3 docs leave document side raw.
+        out = format_document("qwen3-embedding:0.6b", "raw passage text")
+        assert out == "raw passage text"
+
+    def test_gemma_query_uses_pipe_template(self):
+        out = format_query("embeddinggemma-300m", "what color is the sky")
+        assert out == "task: search result | query: what color is the sky"
+
+    def test_gemma_document_uses_title_template(self):
+        out = format_document("embeddinggemma-300m", "body text", title="My Doc")
+        assert out == "title: My Doc | text: body text"
+
+    def test_gemma_document_defaults_title_to_none(self):
+        out = format_document("embeddinggemma-300m", "body text")
+        assert out == "title: none | text: body text"
+
+    def test_bge_m3_passes_through_unchanged(self):
+        # bge-m3 is symmetric — no prefix on either side.
+        assert format_query("bge-m3", "anything") == "anything"
+        assert format_document("bge-m3", "anything") == "anything"
+
+    def test_unknown_model_passes_through_unchanged(self):
+        assert format_query("nomic-embed-text", "q") == "q"
+        assert format_document("nomic-embed-text", "d") == "d"
+
+
+class TestEmbedQueryDocument:
+    """Verify the public embed_query / embed_document methods actually
+    apply the prefix when calling Ollama (regression for the missing-
+    instruct-prefix bug found in the v0.7.0 recall test)."""
+
+    async def test_embed_query_sends_instruct_prefix_for_qwen3(self, tmp_path):
+        captured: list[str] = []
+
+        def _capture_handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+
+            body = _json.loads(request.content.decode())
+            captured.append(body.get("input", ""))
+            return httpx.Response(200, json={"embeddings": [_fake_vector()]})
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "data",
+            storage_backend=StorageBackend.LOCAL,
+            embedding_provider=EmbeddingProvider.OLLAMA,
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=DIMS,
+            ollama_url="http://fake-ollama:11434",
+        )
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_capture_handler))
+        try:
+            await embedder.embed_query("find auth bug")
+            assert captured == [
+                "Instruct: Given a search query, retrieve relevant memory passages "
+                "that match the query\nQuery: find auth bug"
+            ]
+        finally:
+            await embedder.close()
+
+    async def test_embed_document_unprefixed_for_qwen3(self, tmp_path):
+        captured: list[str] = []
+
+        def _capture_handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+
+            body = _json.loads(request.content.decode())
+            captured.append(body.get("input", ""))
+            return httpx.Response(200, json={"embeddings": [_fake_vector()]})
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "data",
+            storage_backend=StorageBackend.LOCAL,
+            embedding_provider=EmbeddingProvider.OLLAMA,
+            embedding_model="qwen3-embedding:0.6b",
+            embedding_dimensions=DIMS,
+            ollama_url="http://fake-ollama:11434",
+        )
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_capture_handler))
+        try:
+            await embedder.embed_document("raw passage")
+            assert captured == ["raw passage"]
+        finally:
+            await embedder.close()
+
+    async def test_embed_query_uses_gemma_template(self, tmp_path):
+        captured: list[str] = []
+
+        def _capture_handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+
+            body = _json.loads(request.content.decode())
+            captured.append(body.get("input", ""))
+            return httpx.Response(200, json={"embeddings": [_fake_vector()]})
+
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "data",
+            storage_backend=StorageBackend.LOCAL,
+            embedding_provider=EmbeddingProvider.OLLAMA,
+            embedding_model="embeddinggemma-300m",
+            embedding_dimensions=DIMS,
+            ollama_url="http://fake-ollama:11434",
+        )
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_capture_handler))
+        try:
+            await embedder.embed_query("hello")
+            await embedder.embed_document("body", title="Doc1")
+            assert captured == [
+                "task: search result | query: hello",
+                "title: Doc1 | text: body",
+            ]
+        finally:
+            await embedder.close()
+
+    async def test_embed_batch_documents_lengths_must_match(self, tmp_path):
+        settings = _make_settings(tmp_path)
+        embedder = Embedder(settings)
+        try:
+            with pytest.raises(EmbeddingError, match="titles length"):
+                await embedder.embed_batch_documents(
+                    ["a", "b"], titles=["only-one"]
+                )
+        finally:
+            await embedder.close()

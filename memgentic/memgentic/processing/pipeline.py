@@ -352,7 +352,7 @@ class IngestionPipeline:
 
         t0 = time.perf_counter()
         try:
-            embeddings = await self._embedder.embed_batch(texts)
+            embeddings = await self._embedder.embed_batch_documents(texts)
         except (EmbeddingError, Exception) as exc:
             logger.error(
                 "pipeline.embedding_failed",
@@ -472,7 +472,7 @@ class IngestionPipeline:
 
             if raw_siblings:
                 try:
-                    raw_embeddings = await self._embedder.embed_batch(raw_texts)
+                    raw_embeddings = await self._embedder.embed_batch_documents(raw_texts)
                 except (EmbeddingError, Exception) as exc:
                     logger.warning(
                         "pipeline.dual_sibling_embedding_failed",
@@ -571,7 +571,7 @@ class IngestionPipeline:
 
         t0 = time.perf_counter()
         try:
-            embedding = await self._embedder.embed(content)
+            embedding = await self._embedder.embed_document(content)
         except (EmbeddingError, Exception) as exc:
             logger.error("pipeline.single_embedding_failed", error=str(exc))
             raise EmbeddingError(f"Failed to embed single memory: {exc}") from exc
@@ -610,7 +610,7 @@ class IngestionPipeline:
                 dual_sibling_id=memory.id,
             )
             try:
-                raw_embedding = await self._embedder.embed(content)
+                raw_embedding = await self._embedder.embed_document(content)
             except (EmbeddingError, Exception) as exc:
                 logger.warning("pipeline.single_dual_sibling_embedding_failed", error=str(exc))
             else:
@@ -642,7 +642,9 @@ class IngestionPipeline:
         """
         for memory in memories:
             try:
-                embedding = await self._embedder.embed(memory.content)
+                # Doc-vs-doc similarity (contradiction detection between two
+                # stored memories) → use document encoding on both sides.
+                embedding = await self._embedder.embed_document(memory.content)
                 results = await self._vectors.search(embedding, limit=5)
             except Exception:
                 continue

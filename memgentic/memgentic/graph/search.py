@@ -62,8 +62,9 @@ async def hybrid_search(
         settings: Optional settings for temporal decay configuration.
 
     Returns:
-        List of dicts, each with ``id``, ``score`` (0-1 normalized), and
-        ``payload`` keys, sorted by descending score.
+        List of dicts, each with ``id``, ``score`` (raw RRF * importance *
+        decay — NOT normalised to 0-1), and ``payload`` keys, sorted by
+        descending score.
     """
     with trace_span("search.hybrid", query_len=len(query)):
         _search_start = _t.perf_counter()
@@ -122,7 +123,7 @@ async def _hybrid_search_impl(
                 session_config.include_content_types = valid
 
     # Embed the cleaned query
-    query_embedding = await embedder.embed(search_query)
+    query_embedding = await embedder.embed_query(search_query)
 
     # Run semantic + keyword in parallel
     semantic_results, keyword_results = await asyncio.gather(
@@ -199,12 +200,12 @@ async def _hybrid_search_impl(
                     "session_title": memory.source.session_title or "",
                 }
 
-    # Normalize to 0-1 range
+    # Return raw fused RRF * importance * decay scores. We deliberately do
+    # NOT divide by max — that made the top result always read as 1.0 even
+    # when every candidate was a poor match (relevance lie). Callers that
+    # need a 0-1 display can normalise themselves with full context.
     ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
-    max_score = ranked[0][1] if ranked else 1.0
-    if max_score == 0:
-        max_score = 1.0
     return [
-        {"id": mid, "score": round(score / max_score, 4), "payload": payloads.get(mid, {})}
+        {"id": mid, "score": round(float(score), 6), "payload": payloads.get(mid, {})}
         for mid, score in ranked
     ]

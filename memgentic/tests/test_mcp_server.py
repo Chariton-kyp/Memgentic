@@ -80,6 +80,8 @@ def _mock_ctx(metadata_store, vector_store, embedder, pipeline, graph):
 def mock_embedder():
     embedder = AsyncMock()
     embedder.embed.return_value = _fake_embedding()
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     return embedder
 
 

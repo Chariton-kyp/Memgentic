@@ -323,7 +323,7 @@ def search(
 
             try:
                 # Probe embedder so we surface a clear error before search.
-                await embedder.embed(query)
+                await embedder.embed_query(query)
             except EmbeddingError as e:
                 console.print(f"[red]Embedding error:[/] {e}")
                 console.print("[yellow]Run 'memgentic doctor' to check your setup.[/]")
@@ -1629,7 +1629,7 @@ def re_embed(model_name: str | None, reembed_all: bool, batch_size: int):
                     texts = [m.content for m in batch]
 
                     try:
-                        embeddings = await embedder.embed_batch(texts)
+                        embeddings = await embedder.embed_batch_documents(texts)
                         await vector_store.upsert_memories_batch(batch, embeddings)
                         success_count += len(batch)
                     except Exception as e:

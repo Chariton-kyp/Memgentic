@@ -28,6 +28,12 @@ class _StubEmbedder:
     async def embed(self, text: str) -> list[float]:  # noqa: D401
         return list(self.embedding)
 
+    async def embed_query(self, text: str, task: str | None = None) -> list[float]:
+        return list(self.embedding)
+
+    async def embed_document(self, text: str, title: str | None = None) -> list[float]:
+        return list(self.embedding)
+
 
 @dataclass
 class _StubVectorStore:

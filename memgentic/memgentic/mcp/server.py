@@ -1902,7 +1902,11 @@ async def memgentic_dedupe_check(params: DedupeCheckInput, ctx: Context) -> dict
         embedder: Embedder = state["embedder"]
         vector_store: VectorStore = state["vector_store"]
 
-        embedding = await embedder.embed(params.content)
+        # dedupe_check compares a candidate memory against stored memories;
+        # both sides are documents, so use document encoding for symmetric
+        # similarity (otherwise asymmetric query-vs-doc scores undercount
+        # true duplicates).
+        embedding = await embedder.embed_document(params.content)
         raw_matches = await vector_store.search(
             query_embedding=embedding,
             session_config=None,

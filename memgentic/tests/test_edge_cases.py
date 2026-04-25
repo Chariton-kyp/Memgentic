@@ -58,9 +58,12 @@ def _make_memory(mid: str, content: str = "test content") -> Memory:
 def mock_embedder():
     embedder = AsyncMock()
     embedder.embed.return_value = _fake_embedding()
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     embedder.embed_batch.side_effect = lambda texts: [
         _fake_embedding(0.1 * i) for i in range(len(texts))
     ]
+    embedder.embed_batch_documents = embedder.embed_batch
     return embedder
 
 

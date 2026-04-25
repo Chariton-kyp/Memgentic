@@ -49,6 +49,8 @@ def _rrf_score(rank: int, k: int = RRF_K) -> float:
 def mock_embedder():
     embedder = AsyncMock()
     embedder.embed.return_value = _fake_embedding()
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     return embedder
 
 
@@ -96,11 +98,9 @@ async def test_hybrid_search_semantic_only(mock_embedder, mock_vector_store, moc
     assert len(results) == 2
     assert results[0]["id"] == "mem-1"
     assert results[1]["id"] == "mem-2"
-    # Top result is always normalized to 1.0
-    assert results[0]["score"] == 1.0
-    # Second result: rrf(rank=1) / rrf(rank=0) = (1/62) / (1/61)
-    expected = round(_rrf_score(1) / _rrf_score(0), 4)
-    assert results[1]["score"] == expected
+    # Raw RRF scores (no max-divide normalisation — that hid no-match cases)
+    assert results[0]["score"] == round(_rrf_score(0), 6)
+    assert results[1]["score"] == round(_rrf_score(1), 6)
     mock_embedder.embed.assert_awaited_once_with("test query")
 
 
@@ -126,15 +126,12 @@ async def test_hybrid_search_semantic_plus_keyword(
     )
 
     assert len(results) == 2
-    # mem-1 appears in both: semantic rank 0 + keyword rank 0
+    # mem-1 appears in both: semantic rank 0 + keyword rank 0 → 2 * rrf(0)
     assert results[0]["id"] == "mem-1"
-    # mem-1 has 2 * rrf(0) = max_score, so normalized = 1.0
-    assert results[0]["score"] == 1.0
-    # mem-2 keyword rank 1: rrf(1) / (2 * rrf(0))
-    max_score = 2 * _rrf_score(0)
-    expected_mem2 = round(_rrf_score(1) / max_score, 4)
+    assert results[0]["score"] == round(2 * _rrf_score(0), 6)
+    # mem-2 keyword rank 1 only
     assert results[1]["id"] == "mem-2"
-    assert results[1]["score"] == expected_mem2
+    assert results[1]["score"] == round(_rrf_score(1), 6)
 
 
 async def test_hybrid_search_all_three(
@@ -168,7 +165,7 @@ async def test_hybrid_search_all_three(
 
 
 async def test_hybrid_search_rrf_scoring(mock_embedder, mock_vector_store, mock_metadata_store):
-    """Verify RRF scoring produces correct normalized scores."""
+    """Verify RRF scoring produces correct raw fused scores."""
     mock_vector_store.search.return_value = [
         {"id": "mem-1", "score": 1.0, "payload": {}},
     ]
@@ -187,9 +184,9 @@ async def test_hybrid_search_rrf_scoring(mock_embedder, mock_vector_store, mock_
 
     assert len(results) == 2
     # mem-1 (semantic rank 0) and mem-2 (keyword rank 0) both get rrf(0) = 1/61
-    # They have equal scores, both normalized to 1.0
-    assert results[0]["score"] == 1.0
-    assert results[1]["score"] == 1.0
+    expected = round(_rrf_score(0), 6)
+    assert results[0]["score"] == expected
+    assert results[1]["score"] == expected
 
 
 async def test_hybrid_search_empty_results(mock_embedder, mock_vector_store, mock_metadata_store):
@@ -227,7 +224,7 @@ async def test_hybrid_search_limit_respected(mock_embedder, mock_vector_store, m
 async def test_hybrid_search_graph_boost_score(
     mock_embedder, mock_vector_store, mock_metadata_store, knowledge_graph
 ):
-    """Graph-boosted memories get rank-0 RRF score, normalized to 1.0 when alone."""
+    """Graph-boosted memories get rank-0 RRF score (raw 1/61) when alone."""
     # Add memory with two co-occurring topics so "testing" has a neighbor "pytest"
     # which carries the memory ID. The search queries "testing", finds neighbor "pytest",
     # and gets "mem-graph" from pytest's memory_ids.
@@ -247,5 +244,5 @@ async def test_hybrid_search_graph_boost_score(
 
     assert len(results) == 1
     assert results[0]["id"] == "mem-graph"
-    # Only result — normalized to 1.0
-    assert results[0]["score"] == 1.0
+    # Single result — raw rrf(0)
+    assert results[0]["score"] == round(_rrf_score(0), 6)
