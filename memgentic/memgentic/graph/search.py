@@ -16,6 +16,16 @@ from memgentic.processing.query import parse_query_intent
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
+# Per-signal RRF weights. Defaults bias the dense semantic signal because
+# it carries most of the meaning when memories are paraphrased; keyword
+# and graph contribute orthogonal signal but at lower confidence.
+# Pattern adapted from a sibling project's three-signal hybrid retriever
+# (semantic / tsvector / pg_trgm) where these weights consistently beat
+# uniform fusion across both Greek and English benchmarks.
+DEFAULT_SEMANTIC_WEIGHT = 0.6
+DEFAULT_KEYWORD_WEIGHT = 0.25
+DEFAULT_GRAPH_WEIGHT = 0.15
+
 
 async def hybrid_search(
     query: str,
@@ -28,6 +38,11 @@ async def hybrid_search(
     rrf_k: int = 60,
     settings: MemgenticSettings | None = None,
     user_id: str = "",
+    *,
+    semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
+    keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
+    graph_weight: float = DEFAULT_GRAPH_WEIGHT,
+    min_score: float = 0.0,
 ) -> list[dict]:
     """Merge results from semantic, keyword, and graph search using RRF.
 
@@ -62,9 +77,20 @@ async def hybrid_search(
         settings: Optional settings for temporal decay configuration.
 
     Returns:
-        List of dicts, each with ``id``, ``score`` (raw RRF * importance *
-        decay — NOT normalised to 0-1), and ``payload`` keys, sorted by
-        descending score.
+        List of dicts, each with ``id``, ``score`` (raw weighted RRF *
+        importance * decay — NOT normalised to 0-1), ``payload``, and
+        observability fields ``semantic_rank``, ``keyword_rank``,
+        ``graph_boosted``, ``search_method`` ("hybrid" / "semantic" /
+        "keyword" / "graph"), sorted by descending score.
+
+    Args (continued):
+        semantic_weight / keyword_weight / graph_weight: per-signal RRF
+            multipliers. Defaults bias dense semantic over keyword over
+            graph (0.6 / 0.25 / 0.15) per the sibling-project tuning.
+        min_score: drop results whose final fused score is below this
+            threshold. Default 0.0 = no filter (preserves v0.7 behaviour).
+            A value of ~0.005 effectively requires the result to appear
+            in at least one signal at rank 5 or better.
     """
     with trace_span("search.hybrid", query_len=len(query)):
         _search_start = _t.perf_counter()
@@ -79,6 +105,10 @@ async def hybrid_search(
             rrf_k=rrf_k,
             settings=settings,
             user_id=user_id,
+            semantic_weight=semantic_weight,
+            keyword_weight=keyword_weight,
+            graph_weight=graph_weight,
+            min_score=min_score,
         )
         record_histogram(
             "memgentic.search.duration_seconds",
@@ -99,6 +129,11 @@ async def _hybrid_search_impl(
     rrf_k: int = 60,
     settings: MemgenticSettings | None = None,
     user_id: str = "",
+    *,
+    semantic_weight: float = DEFAULT_SEMANTIC_WEIGHT,
+    keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
+    graph_weight: float = DEFAULT_GRAPH_WEIGHT,
+    min_score: float = 0.0,
 ) -> list[dict]:
     # Detect query intent — extracts implicit filters and a cleaned query.
     # Only substitute the cleaned query when intent rewrote it; otherwise pass
@@ -141,20 +176,26 @@ async def _hybrid_search_impl(
                     for mid in graph.get_node_memory_ids(n["name"]):
                         graph_boosted_ids.add(mid)
 
-    # RRF scoring — each retrieval method contributes 1/(k + rank)
+    # Weighted RRF scoring — each signal contributes weight/(k + rank).
+    # Tracking which signals contributed lets the result carry a
+    # search_method label and per-signal ranks for downstream debugging.
     scores: dict[str, float] = {}
     payloads: dict[str, dict] = {}
+    semantic_ranks: dict[str, int] = {}
+    keyword_ranks: dict[str, int] = {}
 
     # Semantic results (already sorted by similarity)
     for rank, r in enumerate(semantic_results):
         mid = r["id"]
-        scores[mid] = scores.get(mid, 0) + 1.0 / (rrf_k + rank + 1)
+        scores[mid] = scores.get(mid, 0) + semantic_weight / (rrf_k + rank + 1)
+        semantic_ranks[mid] = rank + 1  # 1-indexed rank for observability
         payloads[mid] = r.get("payload", {})
 
     # Keyword results (already sorted by FTS5 relevance)
     for rank, mem in enumerate(keyword_results):
         mid = mem.id
-        scores[mid] = scores.get(mid, 0) + 1.0 / (rrf_k + rank + 1)
+        scores[mid] = scores.get(mid, 0) + keyword_weight / (rrf_k + rank + 1)
+        keyword_ranks[mid] = rank + 1
         # Populate payload from keyword-only hits so we don't return empty
         # dicts for memories that the semantic search missed.
         if mid not in payloads:
@@ -169,7 +210,7 @@ async def _hybrid_search_impl(
 
     # Graph-boosted (treated as rank-0 results)
     for mid in graph_boosted_ids:
-        scores[mid] = scores.get(mid, 0) + 1.0 / (rrf_k + 1)
+        scores[mid] = scores.get(mid, 0) + graph_weight / (rrf_k + 1)
 
     # Apply importance_score weighting and temporal decay
     half_life = settings.memory_half_life_days if settings else 90
@@ -200,12 +241,42 @@ async def _hybrid_search_impl(
                     "session_title": memory.source.session_title or "",
                 }
 
-    # Return raw fused RRF * importance * decay scores. We deliberately do
-    # NOT divide by max — that made the top result always read as 1.0 even
-    # when every candidate was a poor match (relevance lie). Callers that
-    # need a 0-1 display can normalise themselves with full context.
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)[:limit]
-    return [
-        {"id": mid, "score": round(float(score), 6), "payload": payloads.get(mid, {})}
-        for mid, score in ranked
-    ]
+    # Return raw fused weighted RRF * importance * decay scores plus
+    # per-signal observability. We deliberately do NOT divide by max —
+    # that made the top result always read as 1.0 even when every
+    # candidate was a poor match (relevance lie). Callers that need a
+    # 0-1 display can normalise themselves with full context.
+    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    if min_score > 0.0:
+        ranked = [(mid, s) for mid, s in ranked if s >= min_score]
+    ranked = ranked[:limit]
+
+    out: list[dict] = []
+    for mid, score in ranked:
+        in_semantic = mid in semantic_ranks
+        in_keyword = mid in keyword_ranks
+        in_graph = mid in graph_boosted_ids
+        # search_method label: which signal(s) carried this result.
+        # "hybrid" when 2+ signals contributed (the strongest evidence
+        # of relevance), otherwise the single contributing signal.
+        flags = (in_semantic, in_keyword, in_graph)
+        if sum(flags) >= 2:
+            method = "hybrid"
+        elif in_semantic:
+            method = "semantic"
+        elif in_keyword:
+            method = "keyword"
+        else:
+            method = "graph"
+        out.append(
+            {
+                "id": mid,
+                "score": round(float(score), 6),
+                "payload": payloads.get(mid, {}),
+                "semantic_rank": semantic_ranks.get(mid),
+                "keyword_rank": keyword_ranks.get(mid),
+                "graph_boosted": in_graph,
+                "search_method": method,
+            }
+        )
+    return out
