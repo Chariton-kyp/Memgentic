@@ -28,6 +28,8 @@ from typing import Any
 
 from benchmarks.lib.corpus_loader import CorpusLoaderError, load_longmemeval
 from benchmarks.lib.harness import BenchmarkHarness
+from memgentic.processing.query_features import extract_features
+from memgentic.retrieval.feature_boost import apply_feature_boosts
 
 
 async def run(
@@ -44,6 +46,7 @@ async def run(
     session_concat: bool = False,
     reranker_path: str | Path | None = None,
     rerank_top_k: int = 30,
+    question_aware_boosts: bool = False,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -117,6 +120,13 @@ async def run(
                 )
             else:
                 hits = await active.search(question.text, n_results=chunk_fetch)
+            # Question-aware boosts: extract regex features from the query
+            # (temporal / quoted / proper-noun) and re-score candidates by
+            # combining cosine with rule-based multipliers. Empty features
+            # leave order intact.
+            if question_aware_boosts:
+                features = extract_features(question.text)
+                hits = apply_feature_boosts(hits, features)
             # Collapse to first-seen unique session_ids, then truncate to k.
             seen: set[str] = set()
             retrieved_session_ids: list[str] = []
@@ -217,6 +227,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--question-aware-boosts",
+        action="store_true",
+        help=(
+            "Apply rule-based regex boosts (temporal proximity, quoted-"
+            "phrase exact match, proper-noun mentions) to retrieval "
+            "candidates before truncating to top-k unique sessions. "
+            "Bilingual (Greek + English). Pure regex, no extra deps."
+        ),
+    )
+    parser.add_argument(
         "--dense-weight",
         type=float,
         default=1.0,
@@ -282,6 +302,7 @@ def main(argv: list[str] | None = None) -> int:
                 session_concat=args.session_concat,
                 reranker_path=args.reranker,
                 rerank_top_k=args.rerank_top_k,
+                question_aware_boosts=args.question_aware_boosts,
             )
         )
     except CorpusLoaderError as exc:
