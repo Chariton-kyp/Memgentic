@@ -41,6 +41,7 @@ async def run(
     dense_weight: float = 1.0,
     bm25_weight: float = 1.0,
     include_roles: frozenset[str] | None = None,
+    session_concat: bool = False,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -60,7 +61,11 @@ async def run(
             replicate the MemPalace LongMemEval pattern that drops
             assistant turns from the indexed unit.
     """
-    sessions, questions = load_longmemeval(dataset_path, include_roles=include_roles)
+    sessions, questions = load_longmemeval(
+        dataset_path,
+        include_roles=include_roles,
+        session_concat=session_concat,
+    )
 
     if harness is None:
         owns_harness = True
@@ -178,6 +183,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--session-concat",
+        action="store_true",
+        help=(
+            "Concatenate all kept turns into ONE document per session "
+            "instead of one document per turn. Combine with "
+            "--user-turns-only to reproduce the MemPalace 96.6% R@5 "
+            "indexing unit (one user-only doc per session)."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmarks/results"),
@@ -208,6 +223,7 @@ def main(argv: list[str] | None = None) -> int:
                 dense_weight=args.dense_weight,
                 bm25_weight=args.bm25_weight,
                 include_roles=frozenset({"user"}) if args.user_turns_only else None,
+                session_concat=args.session_concat,
             )
         )
     except CorpusLoaderError as exc:
