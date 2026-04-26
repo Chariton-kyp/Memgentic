@@ -91,24 +91,43 @@ async def run(
             await active.ingest_session(session)
 
         records: list[dict[str, Any]] = []
+        # Over-fetch chunks so that, after collapsing duplicate session_ids,
+        # we still have at least ``k`` unique sessions to score against.
+        # Without this, a single session contributing many top-ranked chunks
+        # eats the top-k slots and starves the recall metric — that was the
+        # observed failure mode where reranker put 3 chunks of the gold
+        # session at ranks 1-3 but R@5 only counted 3 unique sessions.
+        chunk_fetch = max(k * 6, 30)
+
         for question in questions:
             if retrieval_mode == "hybrid":
                 hits = await active.search_hybrid(
                     question.text,
-                    n_results=k,
+                    n_results=chunk_fetch,
                     dense_weight=dense_weight,
                     bm25_weight=bm25_weight,
                 )
             elif retrieval_mode == "rerank":
+                # retrieve_k must be >= n_results for the reranker to have
+                # enough candidates to fill the requested chunk_fetch slots.
                 hits = await active.search_with_rerank(
                     question.text,
-                    n_results=k,
-                    retrieve_k=rerank_top_k,
+                    n_results=chunk_fetch,
+                    retrieve_k=max(rerank_top_k, chunk_fetch),
                 )
             else:
-                hits = await active.search(question.text, n_results=k)
-            retrieved_session_ids = [(h.get("payload") or {}).get("session_id") for h in hits]
-            retrieved_session_ids = [sid for sid in retrieved_session_ids if sid is not None]
+                hits = await active.search(question.text, n_results=chunk_fetch)
+            # Collapse to first-seen unique session_ids, then truncate to k.
+            seen: set[str] = set()
+            retrieved_session_ids: list[str] = []
+            for hit in hits:
+                sid = (hit.get("payload") or {}).get("session_id")
+                if sid is None or sid in seen:
+                    continue
+                seen.add(sid)
+                retrieved_session_ids.append(sid)
+                if len(retrieved_session_ids) >= k:
+                    break
             recall = any(sid in question.gold for sid in retrieved_session_ids)
             rank_of_gold = next(
                 (i + 1 for i, sid in enumerate(retrieved_session_ids) if sid in question.gold),
