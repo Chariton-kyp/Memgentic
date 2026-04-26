@@ -42,6 +42,8 @@ async def run(
     bm25_weight: float = 1.0,
     include_roles: frozenset[str] | None = None,
     session_concat: bool = False,
+    reranker_path: str | Path | None = None,
+    rerank_top_k: int = 30,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -69,7 +71,17 @@ async def run(
 
     if harness is None:
         owns_harness = True
-        active = BenchmarkHarness(profile=profile, embedder="qwen3-0.6b", backend="sqlite-vec")
+        reranker = None
+        if reranker_path is not None:
+            from memgentic.retrieval.reranker import LlamaCppReranker
+
+            reranker = LlamaCppReranker(model_path=str(reranker_path))
+        active = BenchmarkHarness(
+            profile=profile,
+            embedder="qwen3-0.6b",
+            backend="sqlite-vec",
+            reranker=reranker,
+        )
         await active.setup()
     else:
         owns_harness = False
@@ -86,6 +98,12 @@ async def run(
                     n_results=k,
                     dense_weight=dense_weight,
                     bm25_weight=bm25_weight,
+                )
+            elif retrieval_mode == "rerank":
+                hits = await active.search_with_rerank(
+                    question.text,
+                    n_results=k,
+                    retrieve_k=rerank_top_k,
                 )
             else:
                 hits = await active.search(question.text, n_results=k)
@@ -153,11 +171,30 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--retrieval-mode",
         default="dense",
-        choices=["dense", "hybrid"],
+        choices=["dense", "hybrid", "rerank"],
         help=(
             "Retrieval mode: 'dense' uses vector search only (PR-A baseline); "
             "'hybrid' fuses dense + BM25/FTS5 via reciprocal rank fusion "
-            "(Plan 12 PR-D). Default: dense."
+            "(Plan 12 PR-D); 'rerank' over-fetches dense candidates and "
+            "re-scores them with a cross-encoder (Plan 12 PR-E). Default: dense."
+        ),
+    )
+    parser.add_argument(
+        "--reranker",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a Qwen3-Reranker GGUF (e.g. ggml-org/Qwen3-Reranker-0.6B-Q8_0). "
+            "Required when --retrieval-mode rerank."
+        ),
+    )
+    parser.add_argument(
+        "--rerank-top-k",
+        type=int,
+        default=30,
+        help=(
+            "How many candidates to fetch from dense before reranking. "
+            "Default 30. Higher = better recall ceiling, slower."
         ),
     )
     parser.add_argument(
@@ -224,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
                 bm25_weight=args.bm25_weight,
                 include_roles=frozenset({"user"}) if args.user_turns_only else None,
                 session_concat=args.session_concat,
+                reranker_path=args.reranker,
+                rerank_top_k=args.rerank_top_k,
             )
         )
     except CorpusLoaderError as exc:
