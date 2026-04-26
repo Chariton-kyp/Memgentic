@@ -29,6 +29,7 @@ from typing import Any
 from benchmarks.lib.corpus_loader import CorpusLoaderError, load_longmemeval
 from benchmarks.lib.harness import BenchmarkHarness
 from memgentic.processing.query_features import extract_features
+from memgentic.processing.query_rewriter import QueryRewriter
 from memgentic.retrieval.feature_boost import apply_feature_boosts
 
 
@@ -47,6 +48,7 @@ async def run(
     reranker_path: str | Path | None = None,
     rerank_top_k: int = 30,
     question_aware_boosts: bool = False,
+    rewrite_query_with: str | None = None,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -89,9 +91,26 @@ async def run(
     else:
         owns_harness = False
         active = harness
+    rewriter: QueryRewriter | None = None
+    if rewrite_query_with:
+        rewriter = QueryRewriter(model=rewrite_query_with)
+
     try:
         for session in sessions:
             await active.ingest_session(session)
+
+        # Pre-expand all queries once so rewriter latency lives outside
+        # the per-question loop and the cost is visible as a single batch.
+        if rewriter is not None:
+            expanded_texts = await rewriter.expand_many(
+                [q.text for q in questions], mode="concat"
+            )
+            for question, expanded in zip(questions, expanded_texts, strict=True):
+                # Replace question text in-place so downstream code uses the
+                # expansion. The original .text is preserved on the JSONL
+                # record so post-hoc analysis can compare.
+                question._original_text = question.text  # type: ignore[attr-defined]
+                question.text = expanded
 
         records: list[dict[str, Any]] = []
         # Over-fetch chunks so that, after collapsing duplicate session_ids,
@@ -171,6 +190,8 @@ async def run(
     finally:
         if owns_harness:
             await active.teardown()
+        if rewriter is not None:
+            await rewriter.close()
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -234,6 +255,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "phrase exact match, proper-noun mentions) to retrieval "
             "candidates before truncating to top-k unique sessions. "
             "Bilingual (Greek + English). Pure regex, no extra deps."
+        ),
+    )
+    parser.add_argument(
+        "--rewrite-query-with",
+        default=None,
+        help=(
+            "Ollama model name to use for query expansion (keyword "
+            "rewriter). Example: --rewrite-query-with gemma4:e2b. "
+            "When set, every benchmark question is expanded to "
+            "'query\\nkeyword1, keyword2, ...' before embedding. "
+            "Adds ~1-2s per query but broadens the embedder's vocabulary."
         ),
     )
     parser.add_argument(
@@ -303,6 +335,7 @@ def main(argv: list[str] | None = None) -> int:
                 reranker_path=args.reranker,
                 rerank_top_k=args.rerank_top_k,
                 question_aware_boosts=args.question_aware_boosts,
+                rewrite_query_with=args.rewrite_query_with,
             )
         )
     except CorpusLoaderError as exc:

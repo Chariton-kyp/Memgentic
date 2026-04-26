@@ -34,17 +34,25 @@ import structlog
 logger = structlog.get_logger()
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "gemma3:1b"
+DEFAULT_MODEL = "gemma4:e2b"  # 2B effective, instruction-tuned, fast on CPU
 DEFAULT_TIMEOUT_SECONDS = 30.0
 
-# HyDE prompt — terse, language-aware. Avoids long preamble that wastes
-# tiny-model tokens. Instructions live in system to keep the user turn
-# clean for the model to mirror in its answer.
-_SYSTEM_PROMPT = (
-    "You are a memory recall helper. Given a question, write ONE short "
-    "factual sentence that would directly answer it if you knew the "
-    "answer. Match the language of the question (English / Greek / etc). "
-    "Do NOT explain, ask back, or add caveats. Output the sentence only."
+# Query expansion prompt — keyword list, NOT HyDE.
+#
+# Empirical: gemma4-family instruction tunes refuse "what's the answer"
+# style HyDE prompts (return empty / safety completion) because they read
+# them as asking the model to invent personal knowledge it doesn't have.
+# They also refuse "expand the search query" framings (the phrase
+# "search query" trips a data-collection refusal pattern).
+#
+# What DOES work reliably: "Give me N keywords related to: <text>.
+# Output only the keywords separated by commas, nothing else."  This
+# returns one clean comma-separated line of 10 expansion terms. We
+# concat that with the original query before embedding so the embedder
+# sees both the user's exact phrasing and a vocabulary halo.
+_USER_PROMPT_TEMPLATE = (
+    "Give me 10 keywords related to: {query}. "
+    "Output only the keywords separated by commas, nothing else."
 )
 
 
@@ -135,36 +143,37 @@ class QueryRewriter:
     # -- Internal --------------------------------------------------------
 
     async def _chat(self, query: str) -> str:
-        """Single Ollama /api/generate round-trip; returns assistant text.
+        """Single Ollama /api/chat round-trip; returns assistant text.
 
-        We use ``/api/generate`` (single prompt) over ``/api/chat`` because
-        a few Gemma-family models don't honour the chat-template ``system``
-        slot — they return empty messages even when the same prompt body
-        sent through ``generate`` produces a real sentence. The downside is
-        we lose the system-message separation; the prompt template below
-        bakes the instruction into the body itself.
+        Uses ``/api/chat`` (with chat template applied by Ollama) because
+        gemma4-family instruction tunes return empty completions when
+        called via ``/api/generate``. The system slot carries the
+        keyword-expansion instruction so the user turn stays clean.
         """
-        prompt = (
-            f"{_SYSTEM_PROMPT}\n\n"
-            f"Question: {query}\n"
-            f"Answer:"
-        )
         response = await self._client.post(
-            f"{self._ollama_url}/api/generate",
+            f"{self._ollama_url}/api/chat",
             json={
                 "model": self._model,
-                "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.1,  # near-deterministic
-                    "num_predict": 80,  # one sentence cap
-                    "stop": ["\n\n", "Question:"],  # stop at next QA pair
+                    "temperature": 0.3,  # slight diversity for keyword variety
+                    # 400 token cap: gemma4 emits a thinking preamble before
+                    # the keyword list and was getting cut off mid-thought
+                    # at 120, returning an empty assistant message.
+                    "num_predict": 400,
                 },
+                "messages": [
+                    {"role": "user", "content": _USER_PROMPT_TEMPLATE.format(query=query)},
+                ],
             },
         )
         response.raise_for_status()
         data = response.json()
-        text = (data.get("response") or "").strip()
+        text = ((data.get("message") or {}).get("content") or "").strip()
         if not text:
             raise QueryRewriterError(f"empty response from {self._model}")
+        # Strip any leading / trailing markdown markers the model might emit.
+        for marker in ("**", "`", "- ", "* ", "Keywords:", "keywords:"):
+            text = text.replace(marker, " ")
+        text = " ".join(text.split())
         return text

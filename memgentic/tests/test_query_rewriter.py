@@ -10,7 +10,7 @@ from memgentic.processing.query_rewriter import QueryRewriter, QueryRewriterErro
 
 def _ok(text: str = "Maria said the SoW needs signing by Friday."):
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"response": text})
+        return httpx.Response(200, json={"message": {"role": "assistant", "content": text}})
 
     return handler
 
@@ -47,7 +47,7 @@ class TestHypothesise:
 
     async def test_empty_response_raises_then_falls_back(self):
         def empty(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"response": ""})
+            return httpx.Response(200, json={"message": {"role": "assistant", "content": ""}})
 
         rw = QueryRewriter()
         rw._client = httpx.AsyncClient(transport=httpx.MockTransport(empty))
@@ -137,7 +137,9 @@ class TestQueryRewriterErrorPath:
         rw = QueryRewriter()
         rw._client = httpx.AsyncClient(
             transport=httpx.MockTransport(
-                lambda _: httpx.Response(200, json={"response": "   "})
+                lambda _: httpx.Response(
+                    200, json={"message": {"role": "assistant", "content": "   "}}
+                )
             )
         )
         try:
