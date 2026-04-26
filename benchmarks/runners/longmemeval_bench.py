@@ -40,6 +40,7 @@ async def run(
     retrieval_mode: str = "dense",
     dense_weight: float = 1.0,
     bm25_weight: float = 1.0,
+    include_roles: frozenset[str] | None = None,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -54,8 +55,12 @@ async def run(
         output_dir: Root of the benchmark-results tree.
         harness: Optional pre-built harness (for tests). When omitted,
             the runner builds and tears down its own.
+        include_roles: Optional frozenset of conversation roles to ingest.
+            Defaults to None (all roles). Pass ``frozenset({"user"})`` to
+            replicate the MemPalace LongMemEval pattern that drops
+            assistant turns from the indexed unit.
     """
-    sessions, questions = load_longmemeval(dataset_path)
+    sessions, questions = load_longmemeval(dataset_path, include_roles=include_roles)
 
     if harness is None:
         owns_harness = True
@@ -163,6 +168,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="RRF weight for the BM25 list when --retrieval-mode hybrid.",
     )
     parser.add_argument(
+        "--user-turns-only",
+        action="store_true",
+        help=(
+            "Ingest only user-role turns (drop assistant). Replicates the "
+            "MemPalace LongMemEval pattern; assistant turns are mostly "
+            "noise that pulls embedding centroids away from concise "
+            "user-fact phrasing."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmarks/results"),
@@ -192,6 +207,7 @@ def main(argv: list[str] | None = None) -> int:
                 retrieval_mode=args.retrieval_mode,
                 dense_weight=args.dense_weight,
                 bm25_weight=args.bm25_weight,
+                include_roles=frozenset({"user"}) if args.user_turns_only else None,
             )
         )
     except CorpusLoaderError as exc:

@@ -56,7 +56,11 @@ class CorpusLoaderError(RuntimeError):
     """Raised when a corpus file is missing or malformed."""
 
 
-def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], list[BenchmarkQuery]]:
+def load_longmemeval(
+    dataset_path: str | Path,
+    *,
+    include_roles: frozenset[str] | None = None,
+) -> tuple[list[CorpusSession], list[BenchmarkQuery]]:
     """Load a LongMemEval dataset file into harness-ready objects.
 
     LongMemEval ships one JSON file per split. Each top-level record
@@ -112,7 +116,9 @@ def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], lis
 
     for idx, record in enumerate(records):
         try:
-            queries.append(_parse_longmemeval_record(record, sessions_by_id))
+            queries.append(
+                _parse_longmemeval_record(record, sessions_by_id, include_roles=include_roles)
+            )
         except KeyError as exc:
             raise CorpusLoaderError(
                 f"Record {idx} in {path} is missing required field {exc.args[0]!r}"
@@ -124,6 +130,8 @@ def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], lis
 def _parse_longmemeval_record(
     record: dict[str, Any],
     sessions_by_id: dict[str, CorpusSession],
+    *,
+    include_roles: frozenset[str] | None = None,
 ) -> BenchmarkQuery:
     """Mutate ``sessions_by_id`` in place and return the query for ``record``."""
     question_id = str(record["question_id"])
@@ -147,7 +155,7 @@ def _parse_longmemeval_record(
             continue
         sessions_by_id[sid] = CorpusSession(
             session_id=sid,
-            chunks=list(_turns_to_chunks(turns)),
+            chunks=list(_turns_to_chunks(turns, include_roles=include_roles)),
             platform=Platform.UNKNOWN,
             session_title=None,
         )
@@ -161,12 +169,25 @@ def _parse_longmemeval_record(
     )
 
 
-def _turns_to_chunks(turns: Any) -> Iterator[ConversationChunk]:
+def _turns_to_chunks(
+    turns: Any,
+    *,
+    include_roles: frozenset[str] | None = None,
+) -> Iterator[ConversationChunk]:
     """Yield one :class:`ConversationChunk` per non-empty turn.
 
     Each turn is expected to be a dict with ``role`` and ``content``
     keys. Plain strings are also accepted (treated as user turns) to
     tolerate minor schema drift across dataset versions.
+
+    Args:
+        turns: Sequence of turn dicts/strings to convert.
+        include_roles: When set, only yield chunks whose role is in
+            this frozenset. Defaults to None (all roles included with
+            their original behaviour). Pass ``frozenset({"user"})`` to
+            replicate the MemPalace LongMemEval pattern: index only
+            user turns so assistant verbosity doesn't pull the
+            embedding centroid away from concise user-fact phrasing.
     """
     if not isinstance(turns, list):
         raise CorpusLoaderError(f"Expected a list of turns, got {type(turns).__name__}")
@@ -178,6 +199,9 @@ def _turns_to_chunks(turns: Any) -> Iterator[ConversationChunk]:
             role = str(turn.get("role", "user"))
             content = str(turn.get("content", ""))
         else:
+            continue
+
+        if include_roles is not None and role not in include_roles:
             continue
 
         content = content.strip()
