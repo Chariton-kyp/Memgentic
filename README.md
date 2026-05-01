@@ -25,6 +25,8 @@ Every conversation with an AI assistant is **ephemeral**. What Claude figured ou
 ### Key features
 
 - **Captures from 11+ AI tools automatically** — Claude Code, Cursor, Gemini CLI, Codex CLI, Copilot CLI, Aider, ChatGPT, Antigravity, Claude Web, OpenCode
+- **Cross-tool continuation** — stop in Claude Code, reopen in Codex or Gemini CLI, and resume from the latest source-backed handoff context
+- **Transparent memory inventory** — inspect exactly what is stored and what memory has already been loaded into the current agent context
 - **Universal skill distribution** — create a skill once, push it to 26+ AI tools via the Agent Skills open standard
 - **Local-first** — your memories live on your machine, no cloud required, no telemetry, no tracking
 - **Rust native acceleration** — optional PyO3 module makes hot paths 5-50x faster (auto-detected, pure Python fallback)

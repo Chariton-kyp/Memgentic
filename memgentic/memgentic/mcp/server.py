@@ -7,6 +7,9 @@ Tools:
 - memgentic_configure_session: Set session-level source filters
 - memgentic_search: Full-text keyword search
 - memgentic_recent: Get recent memories
+- memgentic_handoff: Resume the latest cross-tool conversation context
+- memgentic_context: Show what memory is loaded in this MCP session
+- memgentic_inventory: Inspect the exact persistent memory inventory
 - memgentic_stats: Memory statistics
 - memgentic_briefing: Cross-agent briefing of recent memories
 - memgentic_persona_get: Read the current persona card (T0)
@@ -66,6 +69,7 @@ logger = structlog.get_logger()
 # Per-session configuration (keyed by session ID).
 # Stored as (config, last_touched_utc) so we can evict stale entries.
 _session_configs: dict[str, tuple[SessionConfig, datetime]] = {}
+_session_contexts: dict[str, tuple[dict[str, dict], datetime]] = {}
 _SESSION_TTL = timedelta(hours=2)
 
 
@@ -75,6 +79,11 @@ def _evict_stale_sessions() -> None:
     stale = [sid for sid, (_, ts) in _session_configs.items() if now - ts > _SESSION_TTL]
     for sid in stale:
         _session_configs.pop(sid, None)
+    stale_contexts = [
+        sid for sid, (_, ts) in _session_contexts.items() if now - ts > _SESSION_TTL
+    ]
+    for sid in stale_contexts:
+        _session_contexts.pop(sid, None)
 
 
 def _get_session_id(ctx: Context) -> str:
@@ -111,6 +120,64 @@ def _set_session_config(session_id: str, config: SessionConfig) -> None:
     """Store a session config with a fresh TTL timestamp and prune stale entries."""
     _evict_stale_sessions()
     _session_configs[session_id] = (config, datetime.now(UTC))
+
+
+def _record_loaded_context(ctx: Context, memories, *, returned_by: str) -> None:
+    """Track which memories were returned to the current MCP session.
+
+    This is deliberately lightweight and in-process: it answers "what memory
+    has this agent already loaded into *this* active context?" without changing
+    the durable storage model. The inventory tools answer what exists on disk.
+    """
+    session_id = _get_session_id(ctx)
+    loaded, _ = _session_contexts.get(session_id, ({}, datetime.now(UTC)))
+    now = datetime.now(UTC)
+
+    for memory in memories:
+        memory_id = getattr(memory, "id", None)
+        if not memory_id:
+            continue
+        source = getattr(memory, "source", None)
+        content_type = getattr(getattr(memory, "content_type", None), "value", None)
+        platform = getattr(getattr(source, "platform", None), "value", None)
+        loaded[str(memory_id)] = {
+            "id": str(memory_id),
+            "content_type": content_type or "",
+            "platform": platform or "",
+            "session_id": getattr(source, "session_id", None),
+            "session_title": getattr(source, "session_title", None),
+            "created_at": getattr(memory, "created_at", None).isoformat()
+            if getattr(memory, "created_at", None)
+            else None,
+            "returned_by": returned_by,
+            "returned_at": now.isoformat(),
+        }
+
+    _session_contexts[session_id] = (loaded, now)
+
+
+def _record_loaded_payloads(ctx: Context, payloads: list[dict], *, returned_by: str) -> None:
+    """Track memory payloads returned by vector search."""
+    session_id = _get_session_id(ctx)
+    loaded, _ = _session_contexts.get(session_id, ({}, datetime.now(UTC)))
+    now = datetime.now(UTC)
+
+    for payload in payloads:
+        memory_id = payload.get("id")
+        if not memory_id:
+            continue
+        loaded[str(memory_id)] = {
+            "id": str(memory_id),
+            "content_type": payload.get("content_type", ""),
+            "platform": payload.get("platform", ""),
+            "session_id": payload.get("session_id"),
+            "session_title": payload.get("session_title"),
+            "created_at": payload.get("created_at"),
+            "returned_by": returned_by,
+            "returned_at": now.isoformat(),
+        }
+
+    _session_contexts[session_id] = (loaded, now)
 
 
 @asynccontextmanager
@@ -352,6 +419,70 @@ class RecentInput(BaseModel):
     content_type: str | None = Field(default=None, description="Filter by content type")
 
 
+class HandoffInput(BaseModel):
+    """Input for cross-tool continuation handoff."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    since_hours: int = Field(
+        default=72,
+        ge=1,
+        le=720,
+        description="Lookback window for candidate source sessions.",
+    )
+    limit_sessions: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="How many recent source sessions to include.",
+    )
+    memories_per_session: int = Field(
+        default=5,
+        ge=1,
+        le=10,
+        description="How many recent memories/exchanges to show per source session.",
+    )
+    source: str | None = Field(
+        default=None,
+        description="Only show sessions from this source platform.",
+    )
+    current_source: str | None = Field(
+        default=None,
+        description="The tool asking for the handoff, e.g. 'codex_cli' or 'claude_code'.",
+    )
+    include_current_source: bool = Field(
+        default=True,
+        description="Whether to include sessions from the current source tool.",
+    )
+
+
+class ContextInput(BaseModel):
+    """Input for inspecting the current MCP session's loaded memory context."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    action: Literal["show", "clear"] = Field(
+        default="show",
+        description="Show or clear the memories already returned to this MCP session.",
+    )
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class InventoryInput(BaseModel):
+    """Input for exact memory-store inventory."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    limit: int = Field(default=50, ge=1, le=200)
+    offset: int = Field(default=0, ge=0)
+    source: str | None = Field(default=None, description="Filter by platform.")
+    content_type: str | None = Field(default=None, description="Filter by memory content type.")
+    detail: Literal["summary", "manifest"] = Field(
+        default="summary",
+        description="'summary' returns counts and samples; 'manifest' returns exact memory IDs.",
+    )
+
+
 # --- Helper Functions ---
 
 
@@ -422,6 +553,21 @@ def _format_memory_md(
 
     lines.append("---")
     return "\n".join(lines)
+
+
+def _format_dt(value: datetime | None) -> str:
+    """Format a datetime for compact handoff output."""
+    if value is None:
+        return "unknown"
+    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M UTC")
+
+
+def _preview_inline(text: str, limit: int = 420) -> str:
+    """Compact multiline memory text into a single handoff bullet."""
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3].rstrip() + "..."
 
 
 # --- MCP Tools ---
@@ -504,13 +650,16 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
         lines.append(f"Found {len(results)} relevant memories:")
         lines.append("")
 
+        returned_payloads: list[dict] = []
         for result in results:
             # Update access stats
             await metadata_store.update_access(result["id"])
             payload = dict(result.get("payload") or {})
             payload.setdefault("id", result["id"])
+            returned_payloads.append(payload)
             lines.append(_format_memory_md(payload, result["score"], detail=params.detail))
 
+        _record_loaded_payloads(ctx, returned_payloads, returned_by="memgentic_recall")
         return "\n".join(lines)
     except Exception as exc:
         logger.error("memgentic_recall.error", error=str(exc))
@@ -549,6 +698,7 @@ async def memgentic_expand(params: ExpandInput, ctx: Context) -> str:
             "topics": memory.topics,
             "session_title": memory.source.session_title or "",
         }
+        _record_loaded_context(ctx, [memory], returned_by="memgentic_expand")
         return _format_memory_md(data, detail="full")
     except Exception as exc:
         logger.error("memgentic_expand.error", error=str(exc))
@@ -843,6 +993,7 @@ async def memgentic_search(params: SearchInput, ctx: Context) -> str:
             lines.append(f"\n**Date:** {mem.created_at.strftime('%Y-%m-%d')}")
             lines.append("---")
 
+        _record_loaded_context(ctx, memories, returned_by="memgentic_search")
         return "\n".join(lines)
     except Exception as exc:
         logger.error("memgentic_search.error", error=str(exc))
@@ -905,10 +1056,304 @@ async def memgentic_recent(params: RecentInput, ctx: Context) -> str:
                 lines.append(f"\n**Topics:** {', '.join(mem.topics)}")
             lines.append("---")
 
+        _record_loaded_context(ctx, memories, returned_by="memgentic_recent")
         return "\n".join(lines)
     except Exception as exc:
         logger.error("memgentic_recent.error", error=str(exc))
         return f"Error retrieving recent memories: {exc}"
+
+
+@mcp.tool(
+    name="memgentic_handoff",
+    annotations={
+        "title": "Cross-Tool Handoff",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_handoff(params: HandoffInput, ctx: Context) -> str:
+    """Get a source-backed continuation brief from the latest AI-tool sessions.
+
+    This is the cross-tool resume surface: Codex, Claude Code, Gemini CLI, and
+    other MCP clients can call it at startup to understand what the user was
+    just doing in another tool and continue without making them restate the
+    project state.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        session_config = _get_session_config(ctx)
+        include_sources = session_config.include_sources
+        exclude_sources = list(session_config.exclude_sources or [])
+        warnings: list[str] = []
+
+        def _coerce_platform(value: str, label: str) -> Platform | None:
+            try:
+                return Platform(value)
+            except ValueError:
+                valid = ", ".join(sorted(p.value for p in Platform))
+                warnings.append(
+                    f"Unknown {label} '{value}'; ignored. Valid sources: {valid}."
+                )
+                return None
+
+        if params.source:
+            coerced = _coerce_platform(params.source, "source")
+            if coerced is not None:
+                include_sources = [coerced]
+        if params.current_source and not params.include_current_source:
+            current = _coerce_platform(params.current_source, "current_source")
+            if current is not None and current not in exclude_sources:
+                exclude_sources.append(current)
+
+        config = SessionConfig(
+            include_sources=include_sources,
+            exclude_sources=exclude_sources or None,
+            include_content_types=session_config.include_content_types,
+            min_confidence=session_config.min_confidence,
+        )
+
+        since = datetime.now(UTC) - timedelta(hours=params.since_hours)
+        bundles = await metadata_store.get_recent_session_handoffs(
+            since=since,
+            session_config=config,
+            limit_sessions=params.limit_sessions,
+            memories_per_session=params.memories_per_session,
+        )
+
+        if not bundles:
+            return (
+                f"No cross-tool handoff context found in the last {params.since_hours} hours. "
+                "Use `memgentic_recent` or `memgentic_recall` if you want to search older memory."
+            )
+
+        lines = ["# Cross-Tool Handoff", ""]
+        lines.append(
+            "Use this as source-backed context to continue the user's work across AI tools. "
+            "Most recent source session is first."
+        )
+        if params.current_source:
+            lines.append(f"**Current tool:** {params.current_source}")
+        lines.append(f"**Lookback:** last {params.since_hours} hours")
+        for warning in warnings:
+            lines.append(f"> ⚠ {warning}")
+        lines.append("")
+
+        returned_memories = []
+        for idx, bundle in enumerate(bundles, start=1):
+            platform = bundle.get("platform", "unknown")
+            title = bundle.get("session_title") or "(untitled session)"
+            last_activity = bundle.get("last_activity")
+            memories = bundle.get("memories", [])
+            memory_count = bundle.get("memory_count", len(memories))
+
+            lines.append(f"## {idx}. {platform} — {title}")
+            lines.append(f"- **Last captured:** {_format_dt(last_activity)}")
+            if bundle.get("session_id"):
+                lines.append(f"- **Session ID:** `{bundle['session_id']}`")
+            if bundle.get("file_path"):
+                lines.append(f"- **Source file:** `{bundle['file_path']}`")
+            lines.append(f"- **Stored memories:** {memory_count} (showing {len(memories)})")
+
+            topics = bundle.get("topics") or []
+            entities = bundle.get("entities") or []
+            if topics:
+                lines.append(f"- **Topics:** {', '.join(topics[:10])}")
+            if entities:
+                lines.append(f"- **Entities:** {', '.join(entities[:10])}")
+
+            lines.append("")
+            lines.append("### Latest captured context")
+            for memory in memories:
+                returned_memories.append(memory)
+                created = _format_dt(memory.created_at)
+                lines.append(
+                    f"- `{memory.id}` [{memory.content_type.value}] "
+                    f"{_preview_inline(memory.content)} "
+                    f"({memory.source.platform.value}, {created})"
+                )
+            lines.append("")
+
+        lines.append("## Continuation Instructions")
+        lines.append(
+            "- Treat the latest session above as the default continuation target "
+            "unless the user asks otherwise."
+        )
+        lines.append(
+            "- Preserve source uncertainty: these are captured memories/exchanges, "
+            "not a guaranteed full transcript."
+        )
+        lines.append(
+            "- If the next action is ambiguous, ask one concise question; "
+            "otherwise continue from the listed context."
+        )
+        lines.append(
+            "- Use `memgentic_expand` on a memory ID or `memgentic_recall` with "
+            "project keywords for deeper context."
+        )
+
+        _record_loaded_context(ctx, returned_memories, returned_by="memgentic_handoff")
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.error("memgentic_handoff.error", error=str(exc))
+        return f"Error generating cross-tool handoff: {exc}"
+
+
+@mcp.tool(
+    name="memgentic_context",
+    annotations={
+        "title": "Loaded Memory Context",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_context(params: ContextInput, ctx: Context) -> dict:
+    """Show or clear memories returned to the current MCP session.
+
+    This answers a different question than inventory: not "what exists in the
+    database?", but "what memory has Memgentic already handed to this agent
+    during this active context?" It gives agents continuity between memory
+    calls and reduces repeated recall requests.
+    """
+    try:
+        _evict_stale_sessions()
+        session_id = _get_session_id(ctx)
+
+        if params.action == "clear":
+            removed = len(_session_contexts.get(session_id, ({}, datetime.now(UTC)))[0])
+            _session_contexts.pop(session_id, None)
+            return {"session_id": session_id, "cleared": removed}
+
+        loaded, touched = _session_contexts.get(session_id, ({}, datetime.now(UTC)))
+        memories = sorted(
+            loaded.values(),
+            key=lambda item: str(item.get("returned_at") or ""),
+            reverse=True,
+        )
+        return {
+            "session_id": session_id,
+            "loaded_count": len(memories),
+            "last_touched": touched.isoformat(),
+            "memories": memories[: params.limit],
+            "scope": (
+                "Memories returned by Memgentic tools to this MCP session. "
+                "This is a context ledger, not the full persistent store."
+            ),
+        }
+    except Exception as exc:
+        logger.error("memgentic_context.error", error=str(exc))
+        return {"error": f"context inspection failed: {exc}"}
+
+
+@mcp.tool(
+    name="memgentic_inventory",
+    annotations={
+        "title": "Memory Inventory",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_inventory(params: InventoryInput, ctx: Context) -> dict:
+    """Return exact inventory for what is stored in Memgentic.
+
+    Use ``detail='summary'`` for counts and a small sample, or
+    ``detail='manifest'`` for a paginated list of exact memory IDs and source
+    metadata. This is designed to make memory transparent and auditable.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        config = SessionConfig()
+        warnings: list[str] = []
+        if params.source:
+            try:
+                config.include_sources = [Platform(params.source)]
+            except ValueError:
+                valid = ", ".join(sorted(p.value for p in Platform))
+                warnings.append(
+                    f"Unknown source '{params.source}'; returning unfiltered. Valid: {valid}."
+                )
+
+        content_type: ContentType | None = None
+        if params.content_type:
+            try:
+                content_type = ContentType(params.content_type)
+            except ValueError:
+                valid = ", ".join(sorted(c.value for c in ContentType))
+                warnings.append(
+                    f"Unknown content_type '{params.content_type}'; ignored. Valid: {valid}."
+                )
+        total = await metadata_store.get_filtered_count(
+            session_config=config,
+            content_type=content_type,
+        )
+        page = await metadata_store.get_memories_by_filter(
+            session_config=config,
+            content_type=content_type,
+            limit=params.limit,
+            offset=params.offset,
+        )
+
+        def manifest(memory) -> dict:
+            return {
+                "id": memory.id,
+                "content_type": memory.content_type.value,
+                "platform": memory.source.platform.value,
+                "session_id": memory.source.session_id,
+                "session_title": memory.source.session_title,
+                "capture_method": memory.source.capture_method.value,
+                "capture_profile": memory.capture_profile,
+                "created_at": memory.created_at.isoformat(),
+                "topics": memory.topics,
+                "entities": memory.entities,
+                "preview": _preview_inline(memory.content, limit=180),
+            }
+
+        if params.detail == "manifest":
+            payload = {
+                "total_matching_active_memories": total,
+                "limit": params.limit,
+                "offset": params.offset,
+                "filters": {
+                    "source": params.source,
+                    "content_type": params.content_type,
+                },
+                "memories": [manifest(memory) for memory in page],
+            }
+            if warnings:
+                payload["warnings"] = warnings
+            return payload
+
+        content_type_counts = await metadata_store.get_content_type_counts()
+        capture_profile_counts = await metadata_store.get_capture_profile_counts()
+
+        payload = {
+            "total_matching_active_memories": total,
+            "total_active_memories": await metadata_store.get_total_count(),
+            "sources": await metadata_store.get_source_stats(),
+            "content_types": content_type_counts,
+            "capture_profiles": capture_profile_counts,
+            "top_topics": await _aggregate_top_topics(metadata_store, 20),
+            "filters": {
+                "source": params.source,
+                "content_type": params.content_type,
+            },
+            "sample": [manifest(memory) for memory in page[: min(len(page), 10)]],
+        }
+        if warnings:
+            payload["warnings"] = warnings
+        return payload
+    except Exception as exc:
+        logger.error("memgentic_inventory.error", error=str(exc))
+        return {"error": f"inventory failed: {exc}"}
 
 
 @mcp.tool(
@@ -1266,6 +1711,21 @@ async def briefing_prompt(project: str = "") -> str:
     if project:
         base += f"\n\nFocus specifically on the project: {project}"
     return base
+
+
+@mcp.prompt(
+    name="continue",
+    description="Continue the latest work from another AI tool",
+)
+async def continue_prompt(current_tool: str = "") -> str:
+    """Resume from the latest captured cross-tool session."""
+    tool_hint = f' with current_source="{current_tool}"' if current_tool else ""
+    return (
+        f"Please call the memgentic_handoff tool{tool_hint} to load the latest "
+        f"cross-tool continuation context. Treat the newest source session as "
+        f"the default work to continue, preserve the cited source metadata, and "
+        f"only ask a clarifying question if the next action is genuinely ambiguous."
+    )
 
 
 @mcp.prompt(
