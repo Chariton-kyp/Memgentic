@@ -67,5 +67,4 @@ Permissions on the socket are `0600` (owner-only read/write).
 
 Unix sockets are not used by the current bash scripts on Windows. Users on
 Windows can install via Git Bash / WSL, or rely on file-watcher based
-capture which runs on any platform. A native-Windows fallback
-(loopback TCP + token file) is planned in a follow-up.
+capture which runs on any platform.

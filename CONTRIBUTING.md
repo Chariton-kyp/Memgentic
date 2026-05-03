@@ -11,7 +11,7 @@ uv sync --all-extras
 uv run python -m pytest tests/ -q
 ```
 
-You should see `500+ passed, 0 failed`.
+You should see the full test suite pass (`1000+ passed`).
 
 ### Prerequisites
 
@@ -90,22 +90,24 @@ See `memgentic/adapters/claude_code.py` for a reference implementation.
 
 ## Commit Message Style
 
-We follow a modified Conventional Commits style:
+We follow [Conventional Commits](https://www.conventionalcommits.org/) — see
+[`docs/architecture/conventional-commits.md`](docs/architecture/conventional-commits.md)
+for the allowed types and scopes. Commitlint runs in CI on PR titles.
 
 ```
-Phase N: short summary
+feat(scope): short imperative summary
 
 - Bullet point of what changed
 - Another bullet
 - Third bullet with rationale if non-obvious
-```
-
-For non-phase work:
-```
-Fix: short description
 
 Fixes #123
 ```
+
+Allowed types: `feat`, `fix`, `perf`, `security`, `revert` (these bump the
+version and surface in the CHANGELOG); `docs`, `chore`, `test`, `refactor`,
+`build`, `ci`, `style` (hidden from CHANGELOG). Breaking changes use `!` in
+the type or a `BREAKING CHANGE:` footer.
 
 Sign commits with `Co-Authored-By: <model> <noreply@anthropic.com>` if AI-assisted.
 
@@ -135,7 +137,7 @@ uv run python -m pytest -x --tb=short            # Stop on first failure
 
 ## Quality Bar for PRs
 
-- [ ] All 500+ existing tests pass
+- [ ] Full test suite passes (`make test`)
 - [ ] New functionality has tests
 - [ ] Ruff lint passes
 - [ ] CHANGELOG.md updated if user-visible
@@ -155,7 +157,7 @@ docs/               Technical documentation
 
 - GitHub Discussions: general questions, feature requests
 - GitHub Issues: bug reports, concrete tasks
-- Discord: real-time chat (link in README)
+- GitHub Security Advisories: private vulnerability reports
 
 ## Code of Conduct
 

@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 [![CI](https://github.com/Chariton-kyp/memgentic/actions/workflows/ci.yml/badge.svg)](https://github.com/Chariton-kyp/memgentic/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-500+-brightgreen)](memgentic/tests)
+[![Tests](https://img.shields.io/badge/tests-1000+-brightgreen)](memgentic/tests)
 
 Memgentic captures knowledge from every AI tool you use, then makes it searchable, shareable, and distributable across all of them. **One memory layer. Every AI tool. Local-first.**
 
@@ -126,7 +126,7 @@ tags: [deploy, ops]
                     │                           │                          │
               ┌─────▼──────┐             ┌─────▼──────┐            ┌──────▼──────┐
               │ MCP Server │             │  REST API  │            │  Dashboard  │
-              │  13 tools  │             │  FastAPI   │            │  Next.js 16 │
+              │  30+ tools │             │  FastAPI   │            │  Next.js 16 │
               └─────┬──────┘             └────────────┘            └─────────────┘
                     │
               ┌─────▼──────────────────────────────────┐
@@ -138,7 +138,7 @@ tags: [deploy, ops]
 
 ## Tool Integrations
 
-This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) above.
+This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) section.
 
 | Tool | Capture | Skill injection |
 |------|---------|-----------|
@@ -372,16 +372,6 @@ make dashboard  # Start the dashboard locally
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/](docs/) for details.
-
----
-
-## Performance
-
-- Search over 1000 memories: p50 < 200ms, p95 < 500ms
-- Ingestion of 100 chunks: < 10s
-- Batch memory lookup: < 100ms for 100 IDs
-
-See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers.
 
 ---
 

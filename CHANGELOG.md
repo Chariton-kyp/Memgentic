@@ -15,7 +15,7 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
 - **Chronograph** — bitemporal entity-relationship graph (separate `chronograph.sqlite`). LLM triple extractor, validation queue, `memgentic graph` CLI subgroup (11 commands), 13 REST endpoints, 5 MCP tools, dashboard `/chronograph` page.
 - **Capture Profiles** (raw / enriched / dual) — pipeline dispatches on profile; CLI `--profile`; REST + MCP surface; dashboard selector.
 - **MCP surface** expanded 14 → **27 tools**. New: `dedupe_check`, `overview`, `refresh`, `watchers_status`. `docs/MCP-TOOLS.md` auto-generated from the live tool registry with a CI drift guard.
-- **Benchmarks (phase 2)** — runners for LoCoMo, ConvoMem, MemBench, Cross-Tool Transfer in `benchmarks/runners/`. Profile flag now wires through `BenchmarkHarness` → `IngestionPipeline.ingest_conversation`. `docs/BENCHMARKS.md` has the full reproducibility walkthrough. Actual numbers are run-then-publish.
+- **Benchmarks** — runners for LoCoMo, ConvoMem, MemBench, Cross-Tool Transfer in `benchmarks/runners/`. Profile flag now wires through `BenchmarkHarness` → `IngestionPipeline.ingest_conversation`. `docs/BENCHMARKS.md` has the full reproducibility walkthrough. Actual numbers are run-then-publish.
 - **Dashboard landing page** (`/welcome`) with Recall Tiers diagram + Watchers matrix + "Why Memgentic".
 
 ### Fixed

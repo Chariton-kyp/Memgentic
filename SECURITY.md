@@ -2,13 +2,16 @@
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in Memgentic, please report it responsibly.
+If you discover a security vulnerability in Memgentic, please report it
+responsibly via **GitHub Security Advisories**:
 
-### How to report
+➡️ **[Open a private vulnerability report](https://github.com/Chariton-kyp/Memgentic/security/advisories/new)**
 
-**Email:** security@memgentic.dev
+This keeps the discussion private until a fix lands and a coordinated
+disclosure is published.
 
 Please include:
+
 - A description of the vulnerability
 - Steps to reproduce
 - Affected versions
@@ -16,16 +19,20 @@ Please include:
 
 ### What to expect
 
-- **Acknowledgment** within 48 hours
-- **Assessment** within 7 days
-- **Fix timeline** communicated within 14 days
-- **Credit** in the release notes (unless you prefer anonymity)
+This project is maintained by a single developer in their spare time, so
+response times are best-effort rather than contractual:
+
+- **Acknowledgment**: as soon as the maintainer sees the advisory
+- **Assessment / fix timeline**: communicated in the advisory thread once
+  the report has been triaged
+- **Credit** in the release notes and GitHub Security Advisory (unless
+  you prefer anonymity)
 
 ### Do NOT
 
 - Open a public GitHub issue for security vulnerabilities
 - Share the vulnerability publicly before it's been fixed
-- Test vulnerabilities against production systems you don't own
+- Test vulnerabilities against systems you don't own
 
 ## Scope
 
@@ -51,7 +58,10 @@ Memgentic includes several security measures by default:
 
 ## Supported Versions
 
-| Version | Supported |
-|---------|-----------|
-| 0.4.x   | Yes       |
-| < 0.4   | No        |
+Only the latest minor release receives security fixes. Older releases are
+documented in the GitHub Releases page but not patched.
+
+| Version                   | Supported |
+|---------------------------|-----------|
+| Latest minor (e.g. 0.7.x) | Yes       |
+| Older                     | No        |
