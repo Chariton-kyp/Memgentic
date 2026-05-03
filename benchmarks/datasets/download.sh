@@ -4,7 +4,7 @@
 # This script is NEVER invoked by CI — a full benchmark run would
 # exceed PR feedback latency and some of the datasets are large.
 # Maintainers run it manually (or inside the Docker image) before a
-# Phase 2 benchmark session.
+# benchmark session.
 #
 # Re-runs are idempotent: files that already exist on disk are left
 # alone. To force a re-download, remove the file first.
@@ -41,7 +41,7 @@ download() {
 # --- LongMemEval -----------------------------------------------------
 # Upstream: https://github.com/xiaowu0162/LongMemEval
 # Releases carry the actual JSON files. Pin a specific release tag in
-# the URL below once Phase 2 picks one — keep the placeholder until then.
+# the URL below once a release tag is selected.
 LONGMEMEVAL_BASE="https://github.com/xiaowu0162/LongMemEval/releases/latest/download"
 download "${LONGMEMEVAL_BASE}/longmemeval_s.json"      "${DATASETS_DIR}/longmemeval_s.json"      || true
 download "${LONGMEMEVAL_BASE}/longmemeval_m.json"      "${DATASETS_DIR}/longmemeval_m.json"      || true
@@ -49,8 +49,8 @@ download "${LONGMEMEVAL_BASE}/longmemeval_oracle.json" "${DATASETS_DIR}/longmeme
 
 # --- LoCoMo ----------------------------------------------------------
 # Upstream: https://github.com/snap-research/locomo
-# (Published under Salesforce AI Research; URL may move after Phase 2
-# picks a pinned release tag.)
+# (Published under Salesforce AI Research; URL may move once a pinned
+# release tag is selected.)
 download \
     "https://raw.githubusercontent.com/snap-research/locomo/main/data/locomo10.json" \
     "${DATASETS_DIR}/locomo10.json" || true

@@ -120,9 +120,9 @@ All subsequent `memgentic_recall` calls respect these filters.
 ### Automatic Capture Daemon
 File watcher monitors CLI tool directories:
 - Claude Code: `~/.claude/projects/**/*.jsonl`
-- Gemini CLI: `~/.gemini/tmp/*/chats/` (Phase 2)
-- Antigravity: `~/.gemini/antigravity/conversations/` (Phase 2)
-- Codex CLI: `~/.codex/sessions/` (Phase 2)
+- Gemini CLI: `~/.gemini/tmp/*/chats/`
+- Antigravity: `~/.gemini/antigravity/conversations/`
+- Codex CLI: `~/.codex/sessions/`
 
 ## MCP Tools
 
@@ -282,42 +282,12 @@ The daemon writes SKILL.md files to each tool's native discovery path:
 ## Planning & Implementation
 
 See `docs/` for technical documentation:
-- `docs/PRODUCT-ROADMAP.md` — Feature phases, personas, go-live checklist
-- `docs/TECHNICAL-PLAN.md` — Database schemas, API specs, skills architecture
+
 - `docs/FRONTEND-DESIGN.md` — Component tree, state management, UI specs
 - `docs/RUST-RESEARCH.md` — Rust acceleration analysis
 - `docs/adr/` — Architecture Decision Records
 - `docs/API_GUIDE.md` — REST API documentation
 - `docs/DEPLOYMENT.md` — Docker deployment guide
-
-### Current Status
-**Phase A (Enhanced Dashboard + Upload + Collections): COMPLETE**
-**Phase B (Skills + Real-time + Batch): COMPLETE**
-**Phase C (Auth + Workspaces + Teams): NEXT**
-**Phase D (Desktop App): PLANNED**
-
-### Phase C Implementation Guide
-Phase C adds multi-user support. See `docs/TECHNICAL-PLAN.md` for full details:
-- Database migration 7: users, auth_tokens, workspaces, workspace_members tables
-- Add `workspace_id` to memories, collections, skills, uploads
-- JWT (HS256) + email magic links (opt-in, local mode unchanged)
-- `X-Workspace-ID` header scoping on all queries
-- PostgreSQL + pgvector as alternative storage backend
-- Role-based access: owner, admin, member
-
-### Phase D Implementation Guide
-Phase D adds a desktop app. Key steps:
-- Extract dashboard components into shared packages (core/ui/views pattern from Multica)
-- Create Electron shell with electron-vite
-- System tray with global Cmd+Shift+M search shortcut
-- Shares all business logic with web dashboard
-
-### How to Implement a Phase
-Each plan doc contains:
-- Files to create/modify
-- Acceptance criteria (checkboxes)
-
-Agents should read the milestone doc, implement each phase's tasks, run tests, and verify acceptance criteria.
 
 ## Release Automation (critical — read `docs/RELEASE.md` for the full flow)
 

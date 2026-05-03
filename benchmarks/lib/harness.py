@@ -9,7 +9,7 @@ ConvoMem, MemBench, and Cross-Tool Transfer without branching.
 
 The ``profile`` argument accepts ``"raw"``, ``"enriched"``, ``"dual"`` and
 a small set of synonyms documented in :meth:`BenchmarkHarness.__init__`.
-Phase 2 wires the profile end-to-end: every ingestion call made through
+The profile is wired end-to-end: every ingestion call made through
 :meth:`BenchmarkHarness.ingest_session` forwards the profile to
 :meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
 via its ``capture_profile`` argument, so ``raw`` runs bypass LLM
@@ -189,10 +189,10 @@ class BenchmarkHarness:
 
         self._embedder = Embedder(self._settings)
 
-        # LLM client is intentionally left ``None`` in the skeleton.
-        # The pipeline degrades gracefully to heuristic classification.
-        # Runners that want LLM-driven extraction can pass one through
-        # ``settings_override`` plus a post-setup hook; Phase 1 does not.
+        # LLM client is intentionally left ``None`` here. The pipeline
+        # degrades gracefully to heuristic classification. Runners that
+        # want LLM-driven extraction can pass one through
+        # ``settings_override`` plus a post-setup hook.
         self._pipeline = IngestionPipeline(
             settings=self._settings,
             metadata_store=self._metadata,

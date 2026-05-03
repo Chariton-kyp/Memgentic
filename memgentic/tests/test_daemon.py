@@ -394,7 +394,7 @@ class TestMemgenticDaemon:
 
 
 # ---------------------------------------------------------------------------
-# Context file auto-update tests (Phase 3.A)
+# Context file auto-update tests
 # ---------------------------------------------------------------------------
 
 

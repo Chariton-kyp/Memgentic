@@ -16,8 +16,7 @@ Usage::
         --k 10
 
 LoCoMo reports R@10 (session-level). We still print R@k so the script
-composes with smaller values for a sanity check. Full numbers land
-after Phase 2 runs — this module only ships the runnable skeleton.
+composes with smaller values for a sanity check.
 """
 
 from __future__ import annotations

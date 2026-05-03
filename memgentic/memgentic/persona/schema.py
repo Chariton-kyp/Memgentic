@@ -90,7 +90,7 @@ class PersonaMetadata(BaseModel):
         default=False,
         description=(
             "When true, a workspace-level persona will be merged on top of the local "
-            "persona. Currently inert; activated when Phase C (workspaces) ships."
+            "persona. Reserved for multi-user mode; inert in single-user installs."
         ),
     )
     updated_at: datetime | None = Field(

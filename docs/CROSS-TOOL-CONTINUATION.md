@@ -48,29 +48,3 @@ The handoff output should therefore preserve uncertainty and cite sources rather
 than pretending it has a perfect transcript. The context ledger is also scoped
 to the active MCP server process/session; it does not prove what the model has
 kept in its hidden attention, only what Memgentic returned to that session.
-
-## Next Product Steps
-
-1. Add a session ledger table for explicit source sessions, last message time,
-   open/closed state, current branch/repo, and active task.
-2. Make SessionStart hooks call `memgentic_handoff` automatically for Claude
-   Code, Codex, and Gemini CLI.
-3. Add a dashboard "Continue" page showing recent cross-tool sessions and one
-   click copy/open prompts.
-4. Add a dashboard "Memory Inventory" page showing exactly what is stored,
-   loaded into the current context, trusted, stale, or pending review.
-5. Store structured `next_actions`, `blocked_on`, `files_touched`, and
-   `decisions` fields for high-quality resume cards.
-6. Add memory review states (`proposed`, `accepted`, `rejected`, `stale`) so
-   team continuation uses trusted context only by default.
-
-## Commercial Differentiator
-
-Most memory products sell "long-term agent memory." Memgentic should sell:
-
-> Shared project memory for AI coding teams. Continue work across Claude Code,
-> Codex, Cursor, Gemini CLI, ChatGPT, and MCP agents with local-first,
-> source-backed handoffs.
-
-That is more concrete, easier to demo, and easier to monetize than a generic
-vector-memory backend.

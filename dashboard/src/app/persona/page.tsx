@@ -544,7 +544,7 @@ export default function PersonaPage() {
           <CardHeader>
             <CardTitle>Advanced</CardTitle>
             <CardDescription>
-              Workspace inheritance (active when Phase C ships) and raw view.
+              Workspace inheritance and raw view.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -561,7 +561,7 @@ export default function PersonaPage() {
                   })
                 }
               />
-              Inherit workspace persona (no-op until Phase C)
+              Inherit workspace persona (reserved for multi-user mode)
             </label>
             <div>
               <label className="text-sm font-medium" htmlFor="raw">

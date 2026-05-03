@@ -91,7 +91,7 @@ class BriefingContext:
     Most fields are optional — T0 only needs ``persona_path``, T1
     needs stores + embedder, T3 needs a query, T4 needs a graph and
     an entity. The ``user_id`` plumbs through for future multi-user
-    (Phase C); today it's typically the empty string.
+    support; today it's typically the empty string.
     """
 
     metadata_store: Any | None = None

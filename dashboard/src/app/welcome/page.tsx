@@ -182,7 +182,7 @@ const COMPARISON_ROWS: ComparisonRow[] = [
   },
   {
     capability: "Team / workspace support",
-    memgentic: "Phase C on roadmap (auth + workspaces + RBAC)",
+    memgentic: "Single-user today; multi-user infrastructure in place",
     singleTool: "Typically single-user",
     verbatimLocal: "Typically single-user",
   },
@@ -320,9 +320,8 @@ function DemoSlot() {
   return (
     <section className="border-b bg-muted/20">
       <div className="mx-auto w-full max-w-6xl px-6 py-14">
-        {/* TODO: 60s muted-autoplay demo video slot */}
         <div className="flex aspect-video w-full items-center justify-center rounded-2xl border border-dashed bg-card text-sm text-muted-foreground">
-          Demo video — coming soon
+          Demo video
         </div>
       </div>
     </section>
@@ -595,12 +594,8 @@ function WhySection() {
                   <code className="rounded bg-muted px-1 font-mono text-xs">
                     workspace_id
                   </code>{" "}
-                  column today, ready for the Phase C auth + workspaces +
-                  RBAC milestone.
-                </p>
-                <p className="mt-3">
-                  The goal: a shared team brain where skills, personas, and
-                  validated triples move with the team — not a per-seat silo.
+                  column today, so the data model is already shaped for a
+                  multi-user backend.
                 </p>
               </>
             }

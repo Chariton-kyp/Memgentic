@@ -128,7 +128,7 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
   - petgraph-based knowledge graph engine (10-50x faster than NetworkX)
   - Auto-detected at import; pure Python fallback always works
 
-- **Enhanced Dashboard** (Phase A)
+- **Enhanced Dashboard**
   - New home page with collections sidebar, pinned memory row, responsive memory grid
   - Memory cards with source badges, topic badges, confidence dots, quick actions
   - Inline editing of topics and entities on memory detail page
@@ -152,7 +152,7 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
   - Pinned row always visible at top of dashboard
   - 3 new API endpoints + MCP `memgentic_pin` tool
 
-- **Universal Skills System** (Phase B) — Memgentic as a universal skill manager
+- **Universal Skills System** — Memgentic as a universal skill manager
   - Create, edit, delete skills with multi-file support (Agent Skills standard)
   - **Skill Distributor** writes `SKILL.md` files to each tool's native discovery path:
     - `~/.claude/skills/{name}/SKILL.md` — Claude Code
@@ -180,12 +180,8 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
   - `POST /api/v1/memories/batch-delete` — bulk archive
 
 - **Documentation**
-  - `docs/PRODUCT-ROADMAP.md` — feature phases, personas, MVP checklist
-  - `docs/TECHNICAL-PLAN.md` — schemas, APIs, skills architecture, dual-mode storage
   - `docs/FRONTEND-DESIGN.md` — component tree, state, UI specs
   - `docs/RUST-RESEARCH.md` — Rust acceleration analysis
-  - `docs/LANDING.md` — marketing landing page content
-  - CLAUDE.md updated with Phase C/D implementation guides
 
 ### Changed
 - WebSocket events now use typed format with topic prefixes (memory:created, skill:updated, etc.)
@@ -203,13 +199,14 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
 ## [0.3.0] — 2026-04-09 — Production Hardening
 
 ### Added
-- **Phase 0: Safety & Reliability**
+
+- **Safety & Reliability**
   - Credential scrubbing pipeline with 15+ patterns (OpenAI, Anthropic, GitHub, AWS, Google, Slack, Bearer, JWT, PEM) — enabled by default
   - SQLite WAL mode + busy_timeout=5000 for concurrent access
   - Full hybrid search in CLI (`memgentic search` now uses semantic + keyword + graph)
   - MCP session isolation via proper context derivation
 
-- **Phase 1: Intelligence & Search**
+- **Intelligence & Search**
   - Fact distillation node in intelligence pipeline (enabled by default)
   - Write-time memory deduplication (enabled by default)
   - Query intent detection (decision/learning/preference/bug_fix + time filters)
@@ -218,7 +215,7 @@ Linked release across all three packages (`memgentic` / `memgentic-api` / `memge
   - `memgentic_expand` MCP tool for drill-down
   - Batch memory lookup (fixed N+1 in hybrid search)
 
-- **Phase 2: Polish**
+- **Polish**
   - `memgentic status` CLI command
   - Cursor adapter (SQLite-based, read-only)
   - OpenAI embedding provider fallback (removes hard Ollama requirement)

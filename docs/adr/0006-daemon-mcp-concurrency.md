@@ -24,8 +24,8 @@ Qdrant's local file mode does **not** support multiple writers. If both the
 daemon and MCP server try to write to Qdrant simultaneously, one will fail
 with a lock error (or, worse, corrupt state).
 
-SQLite supports concurrent readers plus one writer via WAL mode (enabled in
-Phase 0). That side is fine.
+SQLite supports concurrent readers plus one writer via WAL mode (enabled
+at startup). That side is fine.
 
 ## Decision
 

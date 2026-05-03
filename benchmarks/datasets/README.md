@@ -7,9 +7,9 @@ generally require downloading directly from upstream. Use
 the script is never invoked automatically by CI.
 
 The table below points at the upstream source and the commit / revision
-we test against. Checksums are `TBD` until the Phase 2 benchmark runs
-complete; once a run is published, the pinned upstream revision and
-file SHA-256 will be written back here so future runs can detect drift.
+we test against. Checksums are `TBD` until benchmark runs complete; once
+a run is published, the pinned upstream revision and file SHA-256 will
+be written back here so future runs can detect drift.
 
 | Dataset | Upstream | Local path | Pinned rev | SHA-256 |
 |---|---|---|---|---|
@@ -36,8 +36,8 @@ copy dataset files into this repo to avoid licence ambiguity.
 
 ### Verifying a download
 
-After Phase 2 lands, every dataset file ships with a pinned SHA-256 in
-the table above. Recompute with `sha256sum <file>` (Linux / macOS) or
+Once published, every dataset file ships with a pinned SHA-256 in the
+table above. Recompute with `sha256sum <file>` (Linux / macOS) or
 `Get-FileHash <file>` (PowerShell) and compare. If the hashes differ,
 report it in the benchmark results — upstream occasionally re-cuts
 releases without bumping version numbers.

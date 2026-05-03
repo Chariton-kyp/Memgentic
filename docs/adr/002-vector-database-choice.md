@@ -9,7 +9,7 @@ Accepted (2026-03-15)
 Memgentic needs a vector database for similarity search over memory embeddings. Requirements:
 
 - Must support a zero-configuration local mode for single-user desktop use.
-- Must scale to a proper server deployment for future cloud/multi-user scenarios.
+- Must scale to a proper server deployment for self-hosted multi-process scenarios.
 - Must support metadata filtering (by platform, content type, date range) alongside vector search.
 - Must have an async Python client for integration with our asyncio-based pipeline.
 - Should not require a separate database process during local development.

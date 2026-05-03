@@ -1,10 +1,9 @@
 # Memgentic Published Benchmarks
 
 This document is the canonical place for Memgentic's retrieval benchmark
-numbers. It is intentionally empty of results today — Phase 1 of the
-benchmark rollout ships only the harness and runner skeletons, so there
-is no data to publish yet. Numbers will land after the Capture Profiles
-work (plan 07) merges and the full Phase 2 runs complete.
+numbers. It is intentionally empty of results today — the harness and
+runner skeletons are wired up but the full evaluation runs have not
+been executed against the published embedder/profile combinations yet.
 
 ## Methodology (summary)
 
@@ -18,9 +17,7 @@ work (plan 07) merges and the full Phase 2 runs complete.
 
 Each benchmark is run three times: once per capture profile (`raw`,
 `enriched`, `dual`) so the community can see the cost-vs-recall
-trade-off directly. Capture Profiles is plan 07 in the maintainer
-strategy; when it merges, the harness's `profile` argument will wire it
-in end-to-end without runner changes.
+trade-off directly.
 
 ## Reproducibility contract
 
@@ -82,8 +79,8 @@ comparable hardware and get the same answer.
 ## Comparing to MemPalace
 
 MemPalace publishes its own retrieval benchmarks for a comparable
-single-tool configuration. When Phase 2 lands we will link to
-MemPalace's `BENCHMARKS.md` (with commit SHA and date) next to each of
-our numbers so readers can compare like-for-like. We will not print a
-"beat them by X" headline when results sit within noise — the table
-above lets readers draw their own conclusions.
+single-tool configuration. Once the runs above complete, this section
+will link to MemPalace's `BENCHMARKS.md` (with commit SHA and date)
+next to each of our numbers so readers can compare like-for-like. We
+will not print a "beat them by X" headline when results sit within
+noise — the table above lets readers draw their own conclusions.

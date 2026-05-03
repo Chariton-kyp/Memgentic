@@ -5,7 +5,7 @@ and :class:`benchmarks.lib.harness.BenchmarkQuery` objects in memory.
 Network access and large-file streaming are deliberately out of scope
 — datasets live on disk via ``benchmarks/datasets/download.sh``.
 
-Phase 2 adds four loaders next to the original LongMemEval one:
+Loaders provided next to the original LongMemEval one:
 
 * :func:`load_locomo` — Salesforce/SNAP's long-conversation QA dataset
 * :func:`load_convomem` — Salesforce's multi-category conversational

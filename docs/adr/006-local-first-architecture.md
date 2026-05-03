@@ -24,10 +24,9 @@ Memgentic is **local-first by design**: all data stays on the user's machine by 
 - **Ollama for embeddings**: Embedding model runs locally — no API keys, no network calls for core functionality.
 - **No telemetry**: Zero analytics, tracking, or phone-home behavior.
 - **User owns data**: Standard file formats (SQLite, JSON graph). GDPR Article 20 export built into the CLI (`memgentic export-gdpr`).
-- **Optional cloud sync**: Planned for Milestone 9 as an opt-in feature for cross-device sync, not a requirement. Cloud deployment uses EU-based hosting (Hetzner) with the user's own credentials.
 
 ## Consequences
 
 - **Positive**: Complete privacy, offline operation, no recurring costs, no vendor dependency, full data portability, GDPR compliance by design.
-- **Negative**: No cross-device sync out of the box (planned for M9). Users must manage their own Ollama installation. No collaborative features without cloud.
-- **Mitigated**: Docker Compose provides one-command setup. The `memgentic doctor` command validates prerequisites. Cloud sync is on the roadmap with end-to-end encryption.
+- **Negative**: No cross-device sync out of the box. Users must manage their own Ollama installation. No collaborative features without a multi-user backend.
+- **Mitigated**: Docker Compose provides one-command setup. The `memgentic doctor` command validates prerequisites.

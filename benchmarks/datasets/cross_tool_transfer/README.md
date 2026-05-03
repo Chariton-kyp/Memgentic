@@ -18,9 +18,9 @@ number for cross-tool memory transfer.
 ## Reproducibility note
 
 The full dataset is **100 hand-curated multi-turn conversations across
-4 tools** (Claude Code, ChatGPT, Gemini CLI, Aider) per the Phase 2
-plan. Curation is an ongoing effort; the maintainers will commit the
-100-row JSONL to this directory once it's ready.
+4 tools** (Claude Code, ChatGPT, Gemini CLI, Aider). Curation is an
+ongoing effort; the maintainers will commit the 100-row JSONL to this
+directory once it's ready.
 
 Today this directory ships only the **tiny fixture** `example.jsonl`
 (5 rows) so:
@@ -88,6 +88,7 @@ elided, at the curator's preference.
 
 ### Fields we do not yet use
 
-The plan §7 mentions `source_tool` / `target_tool` breakdowns in the
-final report. The loader preserves both via `BenchmarkQuery.metadata`
-so a v2 scorer can slice by those dimensions without a schema bump.
+`source_tool` / `target_tool` breakdowns are intended for slice-level
+analytics in a future report. The loader preserves both via
+`BenchmarkQuery.metadata` so a v2 scorer can slice by those dimensions
+without a schema bump.
