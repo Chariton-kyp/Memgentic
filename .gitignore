@@ -62,3 +62,19 @@ Cargo.lock
 
 # Git worktrees
 .worktrees/
+
+# Codex CLI sentinel
+.codex
+
+# Benchmark datasets and results — large local artifacts, never commit.
+# `benchmarks/datasets/` may legitimately host small public-license
+# corpora; gate the large LongMemEval / LoCoMo / ConvoMem / MemBench
+# files explicitly. Synthetic test fixtures live under
+# `benchmarks/tests/fixtures/` and ARE tracked.
+benchmarks/datasets/longmemeval_*.json
+benchmarks/datasets/longmemeval_*.jsonl
+benchmarks/datasets/locomo*.json
+benchmarks/datasets/convomem*.json
+benchmarks/datasets/membench*.jsonl
+benchmarks/results/
+!benchmarks/results/.gitkeep

@@ -3,7 +3,7 @@
 A thin shell over :class:`benchmarks.lib.harness.BenchmarkHarness`
 plus :func:`benchmarks.lib.corpus_loader.load_longmemeval`; everything
 reusable lives in those modules so the same pattern drives LoCoMo,
-ConvoMem, MemBench and Cross-Tool Transfer in later PRs.
+ConvoMem, MemBench and Cross-Tool Transfer.
 
 Usage::
 
@@ -12,8 +12,8 @@ Usage::
         --profile raw \\
         --k 5
 
-Phase 1 does NOT auto-download the dataset. When ``--dataset`` points at
-a missing file the runner prints a clear error and exits ``2`` so CI
+The runner does NOT auto-download the dataset. When ``--dataset`` points
+at a missing file the runner prints a clear error and exits ``2`` so CI
 failures are easy to distinguish from a runtime exception.
 """
 
@@ -174,7 +174,7 @@ async def run(
                 }
             )
 
-        # Phase 2 output layout: results/{dataset}/{profile}/{timestamp}.jsonl
+        # Output layout: results/{dataset}/{profile}/{timestamp}.jsonl
         # so sweeps across profiles / reruns never clobber each other.
         timestamp = _dt.datetime.now(tz=_dt.UTC).strftime("%Y%m%dT%H%M%SZ")
         out_path = Path(output_dir) / "longmemeval" / profile / f"{timestamp}.jsonl"
@@ -197,9 +197,8 @@ async def run(
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "LongMemEval retrieval benchmark runner. Phase 1 skeleton — "
-            "requires the dataset to already be on disk (see "
-            "benchmarks/datasets/README.md)."
+            "LongMemEval retrieval benchmark runner. Requires the dataset "
+            "to already be on disk (see benchmarks/datasets/README.md)."
         )
     )
     parser.add_argument(
@@ -212,10 +211,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--profile",
         default="raw",
         choices=["raw", "enriched", "dual"],
-        help=(
-            "Capture profile. Phase 1 records the label; "
-            "Capture Profiles wiring lands with plan 07."
-        ),
+        help="Capture profile.",
     )
     parser.add_argument("--k", type=int, default=5, help="Top-k for R@k.")
     parser.add_argument(
@@ -223,10 +219,10 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default="dense",
         choices=["dense", "hybrid", "rerank"],
         help=(
-            "Retrieval mode: 'dense' uses vector search only (PR-A baseline); "
-            "'hybrid' fuses dense + BM25/FTS5 via reciprocal rank fusion "
-            "(Plan 12 PR-D); 'rerank' over-fetches dense candidates and "
-            "re-scores them with a cross-encoder (Plan 12 PR-E). Default: dense."
+            "Retrieval mode: 'dense' uses vector search only; "
+            "'hybrid' fuses dense + BM25/FTS5 via reciprocal rank fusion; "
+            "'rerank' over-fetches dense candidates and re-scores them "
+            "with a cross-encoder. Default: dense."
         ),
     )
     parser.add_argument(
