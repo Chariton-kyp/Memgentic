@@ -52,10 +52,29 @@ def _make_fake_embeddings(texts: list[str]) -> list[list[float]]:
 
 
 def _build_mock_embedder() -> AsyncMock:
-    """Create a mock Embedder whose embed/embed_batch return 768-dim vectors."""
+    """Create a mock Embedder whose embed methods return 768-dim vectors.
+
+    Mirrors the public surface of ``memgentic.processing.embedder.Embedder``:
+    ``embed`` / ``embed_batch`` (raw — no prefix), ``embed_query`` (search-side
+    prefix), and ``embed_document`` / ``embed_batch_documents`` (corpus-side
+    prefix). Any of these can land in the ingestion pipeline depending on the
+    code path; an unset attribute would silently return a default ``AsyncMock``
+    whose return value cannot be cast to a 768-dim numpy array, surfacing as
+    ``ValueError: could not broadcast input array from shape (0,) into shape
+    (768,)`` in the upload / batch / collection / pin tests.
+    """
     embedder = AsyncMock()
     embedder.embed = AsyncMock(side_effect=lambda text: _make_fake_embedding())
     embedder.embed_batch = AsyncMock(side_effect=lambda texts: _make_fake_embeddings(texts))
+    embedder.embed_query = AsyncMock(
+        side_effect=lambda text, task=None: _make_fake_embedding()
+    )
+    embedder.embed_document = AsyncMock(
+        side_effect=lambda text, title=None: _make_fake_embedding()
+    )
+    embedder.embed_batch_documents = AsyncMock(
+        side_effect=lambda texts, titles=None: _make_fake_embeddings(texts)
+    )
     embedder.close = AsyncMock()
     return embedder
 
