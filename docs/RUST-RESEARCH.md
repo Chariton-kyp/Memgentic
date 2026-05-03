@@ -1,7 +1,7 @@
 # Rust Integration Research for Memgentic
 
 **Date:** 2026-04-10
-**Status:** Research / Proposal
+**Status:** Design exploration — informs the existing `memgentic-native` module. Stage labels below describe a logical rollout order, not a committed timeline.
 
 ---
 
@@ -19,7 +19,7 @@ After a deep analysis of the entire Memgentic codebase — core library (2,700+ 
 2. [Where Rust Helps (High Impact)](#2-where-rust-helps-high-impact)
 3. [Where Rust Does NOT Help](#3-where-rust-does-not-help)
 4. [Recommended Architecture](#4-recommended-architecture)
-5. [Implementation Roadmap](#5-implementation-roadmap)
+5. [Implementation Stages](#5-implementation-stages)
 6. [Effort vs. Impact Matrix](#6-effort-vs-impact-matrix)
 7. [Rust Learning Path](#7-rust-learning-path)
 
@@ -288,9 +288,9 @@ native = ["memgentic-native"]
 
 ---
 
-## 5. Implementation Roadmap
+## 5. Implementation Stages
 
-### Phase 1: Text Processing (Highest ROI, Lowest Risk)
+### Stage 1: Text Processing (Highest ROI, Lowest Risk)
 
 **Scope:** Credential scrubbing + noise detection + text overlap
 
@@ -306,7 +306,7 @@ native = ["memgentic-native"]
 - Python fallback wrappers
 - Benchmark suite comparing Rust vs Python
 
-### Phase 2: Conversation Parsers
+### Stage 2: Conversation Parsers
 
 **Scope:** Claude Code JSONL + ChatGPT JSON + Antigravity Protobuf parsers
 
@@ -321,7 +321,7 @@ native = ["memgentic-native"]
 - Protobuf wire-format parser
 - Memory benchmarks (peak RSS comparison)
 
-### Phase 3: Knowledge Graph Engine
+### Stage 3: Knowledge Graph Engine
 
 **Scope:** Replace NetworkX with Rust-backed graph
 
@@ -336,7 +336,7 @@ native = ["memgentic-native"]
 - Graph query operations (BFS, neighbor lookup)
 - Migration script from existing JSON graph
 
-### Phase 4 (Optional): Search Ranking
+### Stage 4 (Optional): Search Ranking
 
 **Scope:** RRF scoring + temporal decay + result merging
 
@@ -352,7 +352,7 @@ native = ["memgentic-native"]
 ```
                         HIGH IMPACT
                             │
-     Phase 3                │  Phase 1          Phase 2
+     Stage 3                │  Stage 1          Stage 2
      Knowledge Graph        │  Text Processing  Parsers
      ┌──────────────┐       │  ┌──────────────┐ ┌──────────────┐
      │ 10-50x graph │       │  │ 20-50x scrub │ │ 5-10x parse  │
@@ -363,7 +363,7 @@ native = ["memgentic-native"]
                             │
   HIGH EFFORT ──────────────┼────────────────── LOW EFFORT
                             │
-                            │  Phase 4
+                            │  Stage 4
                             │  Search Ranking
                             │  ┌──────────────┐
                             │  │ 2-3x ranking │
@@ -373,13 +373,14 @@ native = ["memgentic-native"]
                         LOW IMPACT
 ```
 
-**Recommendation:** Start with Phase 1 (best ROI), then Phase 2 (biggest user-visible improvement), then Phase 3 (scales with growth).
+**Recommendation:** Start with Stage 1 (best ROI), then Stage 2 (biggest user-visible improvement), then Stage 3 (scales with growth).
 
 ---
 
 ## 7. Rust Learning Path
 
-Since you have zero Rust knowledge, here's a focused path for this project:
+For contributors new to Rust who want to extend the `memgentic-native`
+acceleration module, here's a focused path:
 
 ### Week 1-2: Foundations
 - **The Rust Book** (chapters 1-10): ownership, borrowing, structs, enums, pattern matching
@@ -398,9 +399,9 @@ Since you have zero Rust knowledge, here's a focused path for this project:
 
 ### Ongoing: Learn by Building
 - Each phase of the roadmap teaches new Rust concepts:
-  - Phase 1: strings, regex, iterators, HashMap
-  - Phase 2: serde, streaming I/O, error handling
-  - Phase 3: structs, traits, graph algorithms, serialization
+  - Stage 1: strings, regex, iterators, HashMap
+  - Stage 2: serde, streaming I/O, error handling
+  - Stage 3: structs, traits, graph algorithms, serialization
 
 ### Key Resources
 - **The Rust Book**: https://doc.rust-lang.org/book/

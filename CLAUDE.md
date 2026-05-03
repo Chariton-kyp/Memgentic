@@ -45,7 +45,7 @@ memgentic/              ← Independent package (core engine, extractable)
 │   ├── daemon/
 │   │   └── watcher.py   File system watcher (watchdog)
 │   └── mcp/
-│       └── server.py    MCP server (FastMCP) — 10 tools
+│       └── server.py    MCP server (FastMCP) — 30 tools (see docs/MCP-TOOLS.md)
 
 memgentic-api/               ← REST API package (FastAPI)
 ├── memgentic_api/
@@ -98,7 +98,6 @@ imports from `memgentic`, never the other way around.
 | Logging | structlog >=25.0 |
 | Linting | Ruff >=0.14 |
 | Package Manager | UV |
-| Database (cloud) | PostgreSQL 18 |
 | License | Apache 2.0 |
 
 ## Key Concepts
@@ -120,26 +119,50 @@ All subsequent `memgentic_recall` calls respect these filters.
 ### Automatic Capture Daemon
 File watcher monitors CLI tool directories:
 - Claude Code: `~/.claude/projects/**/*.jsonl`
-- Gemini CLI: `~/.gemini/tmp/*/chats/` (Phase 2)
-- Antigravity: `~/.gemini/antigravity/conversations/` (Phase 2)
-- Codex CLI: `~/.codex/sessions/` (Phase 2)
+- Gemini CLI: `~/.gemini/tmp/*/chats/`
+- Antigravity: `~/.gemini/antigravity/conversations/`
+- Codex CLI: `~/.codex/sessions/`
 
 ## MCP Tools
 
+The MCP server exposes 30 tools. The full reference is auto-generated at
+[`docs/MCP-TOOLS.md`](docs/MCP-TOOLS.md) (a CI guard fails the build if the
+file drifts from the live tool registry). Highlights:
+
 ```
 memgentic_recall             Semantic search with source filtering
-memgentic_remember           Store a new memory
-memgentic_sources            List sources and counts
-memgentic_configure_session  Set session-level filters
 memgentic_search             Full-text keyword search
-memgentic_recent             Recent memories
-memgentic_stats              Memory statistics
-memgentic_briefing           Cross-agent briefing of recent memories
-memgentic_forget             Archive (soft-delete) a memory
-memgentic_export             Export memories as JSON
-memgentic_skills             List available skills (name + description)
-memgentic_skill              Get a specific skill's content by name
+memgentic_remember           Store a new memory
+memgentic_recent             Latest memories
+memgentic_expand             Full content of a memory
 memgentic_pin                Pin or unpin a memory
+memgentic_sources            List sources and counts
+memgentic_stats              Memory statistics
+memgentic_export             Export memories as JSON
+memgentic_forget             Archive (soft-delete) a memory
+memgentic_configure_session  Set session-level filters
+
+memgentic_handoff            Cross-tool resume — source-backed continuation brief
+memgentic_context            What memory has been loaded into the current MCP session
+memgentic_inventory          Auditable manifest of stored memories
+
+memgentic_briefing           Recall Tiers briefing (T0 + T1 default, ~900 tokens)
+memgentic_tier_recall        Render a single Recall Tier (T0–T4) explicitly
+memgentic_persona_get        Read the current persona card (T0)
+memgentic_persona_update     Update a persona field via dotted path
+
+memgentic_skills             List available skills
+memgentic_skill              Get a specific skill's content by name
+
+memgentic_graph_*            Chronograph (bitemporal entity graph) — add / query / timeline / stats / invalidate
+
+memgentic_dedupe_check       Pre-write dedup probe
+memgentic_overview           Single-call combined stats / sources / topics
+memgentic_refresh            Re-hydrate runtime-mutable settings
+memgentic_watchers_status    Per-tool capture-watcher status
+
+memgentic_capture_profile    Read or set the per-session capture profile
+memgentic_export             Export memories as JSON
 ```
 
 ## CLI Commands
@@ -190,8 +213,8 @@ make pull-models  # Pull embedding model into Ollama
 
 - **Local-first** — Everything works offline, data stays on your machine
 - **Source metadata on every memory** — Full provenance, always
-- **Same embedding model everywhere** — Qwen3-Embedding-0.6B on both local and server
-- **Core package independence** — memgentic must NEVER import from cloud/api/dashboard
+- **Same embedding model everywhere** — Qwen3-Embedding-0.6B in every deployment target
+- **Core package independence** — `memgentic` must NEVER import from `memgentic-api`, `memgentic-native`, or `dashboard`
 - **Apache 2.0 License** — Free for any use
 - **Privacy** — No telemetry, no data collection, no external calls (except Ollama/LLM)
 - **Native acceleration is optional** — Rust/PyO3 module auto-detected at import; pure Python fallback always works
@@ -282,42 +305,12 @@ The daemon writes SKILL.md files to each tool's native discovery path:
 ## Planning & Implementation
 
 See `docs/` for technical documentation:
-- `docs/PRODUCT-ROADMAP.md` — Feature phases, personas, go-live checklist
-- `docs/TECHNICAL-PLAN.md` — Database schemas, API specs, skills architecture
+
 - `docs/FRONTEND-DESIGN.md` — Component tree, state management, UI specs
 - `docs/RUST-RESEARCH.md` — Rust acceleration analysis
 - `docs/adr/` — Architecture Decision Records
 - `docs/API_GUIDE.md` — REST API documentation
 - `docs/DEPLOYMENT.md` — Docker deployment guide
-
-### Current Status
-**Phase A (Enhanced Dashboard + Upload + Collections): COMPLETE**
-**Phase B (Skills + Real-time + Batch): COMPLETE**
-**Phase C (Auth + Workspaces + Teams): NEXT**
-**Phase D (Desktop App): PLANNED**
-
-### Phase C Implementation Guide
-Phase C adds multi-user support. See `docs/TECHNICAL-PLAN.md` for full details:
-- Database migration 7: users, auth_tokens, workspaces, workspace_members tables
-- Add `workspace_id` to memories, collections, skills, uploads
-- JWT (HS256) + email magic links (opt-in, local mode unchanged)
-- `X-Workspace-ID` header scoping on all queries
-- PostgreSQL + pgvector as alternative storage backend
-- Role-based access: owner, admin, member
-
-### Phase D Implementation Guide
-Phase D adds a desktop app. Key steps:
-- Extract dashboard components into shared packages (core/ui/views pattern from Multica)
-- Create Electron shell with electron-vite
-- System tray with global Cmd+Shift+M search shortcut
-- Shares all business logic with web dashboard
-
-### How to Implement a Phase
-Each plan doc contains:
-- Files to create/modify
-- Acceptance criteria (checkboxes)
-
-Agents should read the milestone doc, implement each phase's tasks, run tests, and verify acceptance criteria.
 
 ## Release Automation (critical — read `docs/RELEASE.md` for the full flow)
 

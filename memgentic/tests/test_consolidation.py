@@ -64,6 +64,8 @@ def settings(tmp_path):
 def mock_embedder():
     embedder = AsyncMock()
     embedder.embed = AsyncMock(return_value=[0.1] * 768)
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     return embedder
 
 

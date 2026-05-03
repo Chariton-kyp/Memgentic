@@ -2,16 +2,16 @@
 #
 # Reproducible environment for Memgentic benchmark runs.
 #
-# Phase 1 (this PR) bakes the harness layout + a pinned Memgentic source
-# checkout + the embedding-model pull step. It does NOT download any
-# dataset at build time — datasets are pulled by `benchmarks/datasets/
-# download.sh` either inside the running container or on the host before
+# Bakes the harness layout + a pinned Memgentic source checkout + the
+# embedding-model pull step. It does NOT download any dataset at build
+# time — datasets are pulled by `benchmarks/datasets/download.sh`
+# either inside the running container or on the host before
 # `docker run`. See benchmarks/BENCHMARKS.md §Reproducibility for why.
 #
 # Build:
 #     docker build -t memgentic-bench -f benchmarks/docker/Dockerfile .
 #
-# Run (Phase 2):
+# Run:
 #     docker run --rm \
 #         -v $(pwd)/benchmarks/datasets:/app/benchmarks/datasets \
 #         -v $(pwd)/benchmarks/results:/app/benchmarks/results \
@@ -63,8 +63,8 @@ VOLUME ["/app/benchmarks/datasets", "/app/benchmarks/results"]
 # --- Ollama model placeholder ----------------------------------------
 # The benchmark image talks to an Ollama sidecar at $OLLAMA_HOST. We
 # don't bundle Ollama into the Python image so the container stays
-# slim. In Phase 2 the docker-compose stack will wire an `ollama`
-# service with the Qwen3-Embedding-0.6B model pre-pulled and set
+# slim. A docker-compose stack can wire an `ollama` service with the
+# Qwen3-Embedding-0.6B model pre-pulled and set
 # `OLLAMA_HOST=http://ollama:11434`.
 ENV OLLAMA_HOST=http://host.docker.internal:11434 \
     MEMGENTIC_EMBEDDING_MODEL=qwen3-embedding:0.6b \

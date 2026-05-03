@@ -153,9 +153,13 @@ ws.onmessage = (event) => {
 
 ## Rate Limits
 
-| Tier | Default | Search | Import |
-|------|---------|--------|--------|
-| Unauthenticated | 60/min | 30/min | 10/min |
+Rate limits are intended for shared / hosted deployments. Local single-user
+installs are effectively unrestricted (the limits are configurable via
+``MEMGENTIC_RATE_LIMIT_*`` env vars and can be raised or removed).
+
+| Tier            | Default | Search | Import |
+|-----------------|---------|--------|--------|
+| Unauthenticated | 60/min  | 30/min | 10/min |
 
 Rate limit headers are returned on every response:
 - `X-RateLimit-Limit`

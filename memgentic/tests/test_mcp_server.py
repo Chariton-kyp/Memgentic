@@ -11,8 +11,11 @@ import pytest
 from memgentic.mcp.server import (
     BriefingInput,
     ConfigureSessionInput,
+    ContextInput,
     ExportInput,
     ForgetInput,
+    HandoffInput,
+    InventoryInput,
     RecallInput,
     RecentInput,
     RememberInput,
@@ -22,8 +25,11 @@ from memgentic.mcp.server import (
     _set_session_config,
     memgentic_briefing,
     memgentic_configure_session,
+    memgentic_context,
     memgentic_export,
     memgentic_forget,
+    memgentic_handoff,
+    memgentic_inventory,
     memgentic_recall,
     memgentic_recent,
     memgentic_remember,
@@ -80,6 +86,8 @@ def _mock_ctx(metadata_store, vector_store, embedder, pipeline, graph):
 def mock_embedder():
     embedder = AsyncMock()
     embedder.embed.return_value = _fake_embedding()
+    embedder.embed_query = embedder.embed
+    embedder.embed_document = embedder.embed
     return embedder
 
 
@@ -102,6 +110,7 @@ def mock_metadata_store():
     store.get_total_count.return_value = 15
     store.update_access.return_value = None
     store.get_memory.return_value = None  # Default: no memory lookup for decay
+    store._db = None
     return store
 
 
@@ -539,6 +548,189 @@ async def test_memgentic_recent_error_handling(ctx, mock_metadata_store):
     result = await memgentic_recent(params, ctx)
 
     assert "Error retrieving recent memories" in result
+
+
+# --- memgentic_handoff ---
+
+
+async def test_memgentic_handoff_groups_recent_sessions(ctx, mock_metadata_store):
+    """memgentic_handoff should render source-backed continuation bundles."""
+    mem1 = _make_memory("mem-h-1", "Human: fix the auth redirect\n\nAssistant: found login bug")
+    mem1.content_type = ContentType.RAW_EXCHANGE
+    mem1.source.session_id = "claude-session-1"
+    mem1.source.session_title = "Auth redirect debugging"
+    mem1.created_at = datetime(2026, 4, 30, 15, 30, tzinfo=UTC)
+
+    mem2 = _make_memory("mem-h-2", "Decision: keep API-key auth local-first for now")
+    mem2.source.session_id = "claude-session-1"
+    mem2.source.session_title = "Auth redirect debugging"
+    mem2.created_at = datetime(2026, 4, 30, 15, 25, tzinfo=UTC)
+
+    mock_metadata_store.get_recent_session_handoffs.return_value = [
+        {
+            "platform": "claude_code",
+            "session_id": "claude-session-1",
+            "session_title": "Auth redirect debugging",
+            "file_path": "/tmp/session.jsonl",
+            "last_activity": datetime(2026, 4, 30, 15, 30, tzinfo=UTC),
+            "memories": [mem1, mem2],
+            "memory_count": 2,
+            "topics": ["auth", "dashboard"],
+            "entities": ["Memgentic"],
+        }
+    ]
+
+    result = await memgentic_handoff(HandoffInput(current_source="codex_cli"), ctx)
+
+    assert "Cross-Tool Handoff" in result
+    assert "claude_code" in result
+    assert "Auth redirect debugging" in result
+    assert "mem-h-1" in result
+    assert "Continuation Instructions" in result
+    mock_metadata_store.get_recent_session_handoffs.assert_awaited_once()
+
+
+async def test_memgentic_handoff_empty(ctx, mock_metadata_store):
+    """Empty handoff should return a useful no-context message."""
+    mock_metadata_store.get_recent_session_handoffs.return_value = []
+
+    result = await memgentic_handoff(HandoffInput(since_hours=24), ctx)
+
+    assert "No cross-tool handoff context found" in result
+    assert "24 hours" in result
+
+
+async def test_memgentic_handoff_filters_current_source(ctx, mock_metadata_store):
+    """When requested, current_source should be excluded from handoff candidates."""
+    mock_metadata_store.get_recent_session_handoffs.return_value = []
+
+    await memgentic_handoff(
+        HandoffInput(current_source="codex_cli", include_current_source=False),
+        ctx,
+    )
+
+    call_kwargs = mock_metadata_store.get_recent_session_handoffs.call_args.kwargs
+    session_config = call_kwargs["session_config"]
+    assert session_config.exclude_sources == [Platform.CODEX_CLI]
+
+
+# --- memgentic_context ---
+
+
+async def test_memgentic_context_shows_loaded_handoff_memories(ctx, mock_metadata_store):
+    """Context ledger should show memories returned to this MCP session."""
+    await memgentic_context(ContextInput(action="clear"), ctx)
+
+    mem = _make_memory("mem-ctx-1", "Continue the dashboard auth fix")
+    mem.source.session_id = "session-ctx"
+    mock_metadata_store.get_recent_session_handoffs.return_value = [
+        {
+            "platform": "claude_code",
+            "session_id": "session-ctx",
+            "session_title": "Dashboard auth",
+            "file_path": None,
+            "last_activity": mem.created_at,
+            "memories": [mem],
+            "memory_count": 1,
+            "topics": ["auth"],
+            "entities": [],
+        }
+    ]
+
+    await memgentic_handoff(HandoffInput(), ctx)
+    result = await memgentic_context(ContextInput(), ctx)
+
+    assert result["loaded_count"] == 1
+    assert result["memories"][0]["id"] == "mem-ctx-1"
+    assert result["memories"][0]["returned_by"] == "memgentic_handoff"
+
+
+async def test_memgentic_context_clear(ctx):
+    """Context ledger can be cleared without deleting persistent memories."""
+    result = await memgentic_context(ContextInput(action="clear"), ctx)
+
+    assert "cleared" in result
+
+
+# --- memgentic_inventory ---
+
+
+async def test_memgentic_inventory_manifest(ctx, mock_metadata_store):
+    """Inventory manifest should expose exact stored memory IDs and metadata."""
+    mem = _make_memory("mem-inv-1", "Inventory test memory")
+    mem.source.session_id = "session-inv"
+    mock_metadata_store.get_filtered_count.return_value = 1
+    mock_metadata_store.get_memories_by_filter.return_value = [mem]
+
+    result = await memgentic_inventory(InventoryInput(detail="manifest"), ctx)
+
+    assert result["total_matching_active_memories"] == 1
+    assert result["memories"][0]["id"] == "mem-inv-1"
+    assert result["memories"][0]["session_id"] == "session-inv"
+
+
+async def test_memgentic_inventory_filters_source(ctx, mock_metadata_store):
+    """Inventory source filter should be passed as a SessionConfig."""
+    mock_metadata_store.get_filtered_count.return_value = 0
+    mock_metadata_store.get_memories_by_filter.return_value = []
+
+    await memgentic_inventory(InventoryInput(source="claude_code"), ctx)
+
+    call_kwargs = mock_metadata_store.get_memories_by_filter.call_args.kwargs
+    assert call_kwargs["session_config"].include_sources == [Platform.CLAUDE_CODE]
+
+
+async def test_memgentic_inventory_uses_public_count_helpers(ctx, mock_metadata_store):
+    """Inventory summary should call public count helpers, not raw _db."""
+    mock_metadata_store.get_filtered_count.return_value = 3
+    mock_metadata_store.get_memories_by_filter.return_value = []
+    mock_metadata_store.get_content_type_counts.return_value = {"fact": 2, "decision": 1}
+    mock_metadata_store.get_capture_profile_counts.return_value = {"enriched": 3}
+
+    result = await memgentic_inventory(InventoryInput(detail="summary"), ctx)
+
+    assert result["content_types"] == {"fact": 2, "decision": 1}
+    assert result["capture_profiles"] == {"enriched": 3}
+    mock_metadata_store.get_content_type_counts.assert_awaited_once()
+    mock_metadata_store.get_capture_profile_counts.assert_awaited_once()
+
+
+async def test_memgentic_inventory_unknown_source_warns(ctx, mock_metadata_store):
+    """Unknown source string should soft-fail with a warning, not raise."""
+    mock_metadata_store.get_filtered_count.return_value = 0
+    mock_metadata_store.get_memories_by_filter.return_value = []
+    mock_metadata_store.get_content_type_counts.return_value = {}
+    mock_metadata_store.get_capture_profile_counts.return_value = {}
+
+    result = await memgentic_inventory(InventoryInput(source="not_a_tool", detail="summary"), ctx)
+
+    assert "warnings" in result
+    assert any("not_a_tool" in w for w in result["warnings"])
+
+
+async def test_memgentic_handoff_unknown_current_source_warns(ctx, mock_metadata_store):
+    """Unknown current_source should warn instead of raising."""
+    mock_metadata_store.get_recent_session_handoffs.return_value = [
+        {
+            "platform": "claude_code",
+            "session_id": "s1",
+            "session_title": "t",
+            "file_path": None,
+            "last_activity": datetime(2026, 4, 30, tzinfo=UTC),
+            "memories": [],
+            "memory_count": 0,
+            "topics": [],
+            "entities": [],
+        }
+    ]
+
+    result = await memgentic_handoff(
+        HandoffInput(current_source="not_a_tool", include_current_source=False),
+        ctx,
+    )
+
+    assert "Unknown current_source" in result
+    assert "not_a_tool" in result
 
 
 # --- memgentic_configure_session ---

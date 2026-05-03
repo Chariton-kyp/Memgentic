@@ -104,7 +104,8 @@ async def _merge_duplicates(
             continue
 
         try:
-            embedding = await embedder.embed(memory.content)
+            # Doc-vs-doc dedup similarity → document encoding on both sides.
+            embedding = await embedder.embed_document(memory.content)
             results = await vector_store.search(embedding, limit=5)
         except Exception:
             continue

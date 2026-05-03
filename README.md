@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-green.svg)](LICENSE)
 [![CI](https://github.com/Chariton-kyp/memgentic/actions/workflows/ci.yml/badge.svg)](https://github.com/Chariton-kyp/memgentic/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/badge/tests-500+-brightgreen)](memgentic/tests)
+[![Tests](https://img.shields.io/badge/tests-1000+-brightgreen)](memgentic/tests)
 
 Memgentic captures knowledge from every AI tool you use, then makes it searchable, shareable, and distributable across all of them. **One memory layer. Every AI tool. Local-first.**
 
@@ -25,6 +25,8 @@ Every conversation with an AI assistant is **ephemeral**. What Claude figured ou
 ### Key features
 
 - **Captures from 11+ AI tools automatically** — Claude Code, Cursor, Gemini CLI, Codex CLI, Copilot CLI, Aider, ChatGPT, Antigravity, Claude Web, OpenCode
+- **Cross-tool continuation** — stop in Claude Code, reopen in Codex or Gemini CLI, and resume from the latest source-backed handoff context
+- **Transparent memory inventory** — inspect exactly what is stored and what memory has already been loaded into the current agent context
 - **Universal skill distribution** — create a skill once, push it to 26+ AI tools via the Agent Skills open standard
 - **Local-first** — your memories live on your machine, no cloud required, no telemetry, no tracking
 - **Rust native acceleration** — optional PyO3 module makes hot paths 5-50x faster (auto-detected, pure Python fallback)
@@ -33,45 +35,6 @@ Every conversation with an AI assistant is **ephemeral**. What Claude figured ou
 - **Write-time dedup + noise filtering** — only the stuff worth remembering gets stored
 - **Knowledge graph** — entity co-occurrence graph for associative recall
 - **MCP server + REST API + Dashboard** — use it however you like
-
----
-
-## Positioning
-
-If the AI memory space were a note-taking analogy:
-
-- **claude-mem** and **MemPalace** are the **Obsidian** of AI memory — solo user, CLI-first, deep in a single niche (session compression or verbatim capture), best-in-class at what they do.
-- **Memgentic** is the **Notion** of AI memory — **universal** across AI tools, **dashboard-first**, **team-ready**, multi-surface (CLI + MCP + REST + web UI).
-
-We respect those projects. They're mature, well-engineered, and each one is the right choice for users who match their shape. Memgentic is for people with a different shape: 3+ AI tools in parallel, appetite for a real dashboard, plans to share knowledge with a team, and a preference for Apache 2.0.
-
----
-
-## How Memgentic compares
-
-Feature comparison verified against each project's current public README (April 2026). Both neighbors are established — each has tens of thousands of GitHub stars and active development. Memgentic is earlier and makes different architectural bets.
-
-| Capability | Memgentic | claude-mem | MemPalace |
-|---|---|---|---|
-| License | Apache 2.0 | AGPL-3.0 (+ PolyForm NC for `ragtime/`) | MIT |
-| Primary shape | Universal, dashboard-first, team-ready (workspaces on roadmap) | Persistent memory compression for Claude Code | Local-first verbatim memory with published benchmarks |
-| Capture model | LLM-distilled summaries + noise filter (default). `raw` and `dual` profiles ship this month. | Semantic compression summaries | Verbatim (by design; no summarization, no paraphrase) |
-| AI tools captured | 10 adapters (Claude Code, Cursor, Gemini CLI, Codex CLI, Copilot CLI, Aider, Antigravity, OpenCode) + JSON import (ChatGPT, Claude Web) | Claude Code (primary), Gemini CLI, OpenCode | Claude Code, Gemini CLI, any MCP-compatible tool |
-| ChatGPT history import (JSON) | Yes | Not documented | Not documented |
-| Knowledge graph | Entity co-occurrence graph (NetworkX / Rust petgraph). LLM-extracted temporal triples with user validation ship this month. | Not documented | Temporal entity-relationship graph with validity windows (local SQLite) — more mature today |
-| Skills distribution (open Agent Skills standard) | Yes — filesystem write of `SKILL.md` to 26+ AI tools, daemon keeps them synced | Different model (`mem-search` + Claude Desktop Skill) | Not documented |
-| Primary surfaces | CLI, MCP, REST API (11 routes), Next.js 16 web dashboard | CLI, MCP, local Web Viewer UI | CLI, MCP (29 tools) |
-| Native acceleration | Optional Rust/PyO3 (5–50× on hot paths) | Not documented | Not documented |
-| Published retrieval benchmarks | Benchmark harness landing this month (LongMemEval, LoCoMo, ConvoMem, cross-tool transfer) | Not in README | Yes — 96.6% R@5 raw on LongMemEval (no LLM), reproducible |
-| Team / workspace support | Phase C milestone (authentication + workspaces + RBAC) | Not documented | Not documented |
-
-### When to pick which
-
-- **Pick claude-mem** if your workflow is mostly Claude Code (optionally Gemini CLI or OpenCode), you want a heavily-starred compression-based memory with a one-line `npx claude-mem install`, and AGPL-3.0 fits your distribution model.
-- **Pick MemPalace** if you want **verbatim** storage (every turn kept exactly as written, retrieved semantically), reproducible published benchmarks, a temporal knowledge graph today, and MIT suits you. Single-user, CLI-native.
-- **Pick Memgentic** if you use multiple AI tools in parallel (including ChatGPT / Aider / Antigravity — which neither neighbor currently documents), you want a real web dashboard + REST API, you care about Agent-Skills-standard distribution to 26+ tools, you want optional Rust acceleration, Apache 2.0 fits enterprise/team adoption, and your ambitions include workspaces and teams.
-
-None of these tools is universally better — they make different bets. Memgentic's bet is **breadth of tool coverage + multi-surface (dashboard, REST, MCP) + team-readiness**, at the cost of being the newest of the three.
 
 ---
 
@@ -163,7 +126,7 @@ tags: [deploy, ops]
                     │                           │                          │
               ┌─────▼──────┐             ┌─────▼──────┐            ┌──────▼──────┐
               │ MCP Server │             │  REST API  │            │  Dashboard  │
-              │  13 tools  │             │  FastAPI   │            │  Next.js 16 │
+              │  30+ tools │             │  FastAPI   │            │  Next.js 16 │
               └─────┬──────┘             └────────────┘            └─────────────┘
                     │
               ┌─────▼──────────────────────────────────┐
@@ -175,7 +138,7 @@ tags: [deploy, ops]
 
 ## Tool Integrations
 
-This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) above.
+This table pairs **capture** and **skill-injection** scopes per tool. The capture-mechanism breakdown (hook vs. file watcher vs. MCP vs. one-shot import) lives in the [Watchers matrix](#watchers--cross-tool-automatic-capture) section.
 
 | Tool | Capture | Skill injection |
 |------|---------|-----------|
@@ -310,6 +273,9 @@ When Memgentic's MCP server is connected to an AI tool, the tool can call:
 
 | Tool | Purpose |
 |------|---------|
+| `memgentic_handoff()` | **Cross-tool resume** — source-backed continuation brief grouped by recent source session (call this at session start) |
+| `memgentic_context()` | Show what memory has been loaded into the current MCP session |
+| `memgentic_inventory()` | Auditable manifest of stored memories (counts, sources, content types, paginated IDs) |
 | `memgentic_recall(query)` | Semantic search with source filtering |
 | `memgentic_search(query)` | Full-text keyword search |
 | `memgentic_remember(content)` | Save a new memory |
@@ -323,6 +289,8 @@ When Memgentic's MCP server is connected to an AI tool, the tool can call:
 | `memgentic_configure_session(filters)` | Session-level source filters |
 | `memgentic_stats()` | Memory statistics |
 | `memgentic_export()` | Export memories as JSON |
+
+A `continue` MCP prompt is also registered — clients that surface MCP prompts can invoke it at startup to ask the agent to call `memgentic_handoff` and resume from the latest source session.
 
 ---
 
@@ -404,39 +372,6 @@ make dashboard  # Start the dashboard locally
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/](docs/) for details.
-
----
-
-## Performance
-
-- Search over 1000 memories: p50 < 200ms, p95 < 500ms
-- Ingestion of 100 chunks: < 10s
-- Batch memory lookup: < 100ms for 100 IDs
-
-See [docs/BENCHMARKS.md](docs/BENCHMARKS.md) for full numbers.
-
----
-
-## Roadmap
-
-**Current: v0.6.0 — Zero-config Local + Release Automation**
-
-- [x] M1: Core memory engine
-- [x] M2: 11+ adapter ecosystem
-- [x] M3: Auto-injection layer (hooks, SKILL.md, context files)
-- [x] M4: Production hardening (credential scrubbing, WAL, write-time dedup)
-- [x] M5: Rust native acceleration
-- [x] M6: Enhanced dashboard + collections + uploads + pins
-- [x] M7: Universal skills system + GitHub import + LLM extraction
-- [x] M8: Real-time activity feed + ingestion tracking
-- [x] M9: Zero-config local (sqlite-vec backend, `serve --watch`, embedding safety pin)
-- [x] **M10: Release automation (release-please + linked versions + Conventional Commits + SBOM + SLSA L3)**
-- [ ] M11: Authentication + workspaces + teams (Phase C)
-- [ ] M12: PostgreSQL + pgvector backend (Phase C)
-- [ ] M13: Desktop app (Electron) (Phase D)
-- [ ] M14: Browser extension
-
-See [docs/PRODUCT-ROADMAP.md](docs/PRODUCT-ROADMAP.md) for the full plan.
 
 ---
 

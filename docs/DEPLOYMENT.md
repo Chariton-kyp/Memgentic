@@ -41,7 +41,7 @@ MEMGENTIC_EMBEDDING_DIMENSIONS=768
 MEMGENTIC_OLLAMA_URL=http://localhost:11434
 
 # Storage
-MEMGENTIC_SQLITE_PATH=~/.mneme/mneme.db
+MEMGENTIC_SQLITE_PATH=~/.memgentic/memgentic.db
 MEMGENTIC_QDRANT_URL=http://localhost:6333
 
 # API
@@ -100,7 +100,12 @@ curl localhost:8100/api/v1/health   # API health
 memgentic doctor          # Full diagnostic
 ```
 
-## Production Deployment
+## Self-Hosted Multi-User Deployment
+
+For single-user personal use, the local Docker setup above is enough — no
+HTTPS, no API key, no rate limiting required. The section below covers the
+hardened configuration for sharing a Memgentic instance across a team or
+exposing it on a network.
 
 ### Recommended Architecture
 
@@ -132,7 +137,7 @@ memgentic doctor          # Full diagnostic
 memgentic backup -o /path/to/backup.tar.gz
 
 # Restore from backup
-mneme restore /path/to/backup.tar.gz
+memgentic restore /path/to/backup.tar.gz
 
 # GDPR export (all user data)
 memgentic export --gdpr -o /path/to/export.json
@@ -156,8 +161,8 @@ curl localhost:6333   # Test connection
 
 **"No memories found after import"**
 ```bash
-mneme sources         # Check what was imported
-mneme search "test"   # Try a broad search
+memgentic sources         # Check what was imported
+memgentic search "test"   # Try a broad search
 ```
 
 **"API returns 429 Too Many Requests"**

@@ -5,7 +5,7 @@ and :class:`benchmarks.lib.harness.BenchmarkQuery` objects in memory.
 Network access and large-file streaming are deliberately out of scope
 — datasets live on disk via ``benchmarks/datasets/download.sh``.
 
-Phase 2 adds four loaders next to the original LongMemEval one:
+Loaders provided next to the original LongMemEval one:
 
 * :func:`load_locomo` — Salesforce/SNAP's long-conversation QA dataset
 * :func:`load_convomem` — Salesforce's multi-category conversational
@@ -56,7 +56,12 @@ class CorpusLoaderError(RuntimeError):
     """Raised when a corpus file is missing or malformed."""
 
 
-def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], list[BenchmarkQuery]]:
+def load_longmemeval(
+    dataset_path: str | Path,
+    *,
+    include_roles: frozenset[str] | None = None,
+    session_concat: bool = False,
+) -> tuple[list[CorpusSession], list[BenchmarkQuery]]:
     """Load a LongMemEval dataset file into harness-ready objects.
 
     LongMemEval ships one JSON file per split. Each top-level record
@@ -112,7 +117,14 @@ def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], lis
 
     for idx, record in enumerate(records):
         try:
-            queries.append(_parse_longmemeval_record(record, sessions_by_id))
+            queries.append(
+                _parse_longmemeval_record(
+                    record,
+                    sessions_by_id,
+                    include_roles=include_roles,
+                    session_concat=session_concat,
+                )
+            )
         except KeyError as exc:
             raise CorpusLoaderError(
                 f"Record {idx} in {path} is missing required field {exc.args[0]!r}"
@@ -124,6 +136,9 @@ def load_longmemeval(dataset_path: str | Path) -> tuple[list[CorpusSession], lis
 def _parse_longmemeval_record(
     record: dict[str, Any],
     sessions_by_id: dict[str, CorpusSession],
+    *,
+    include_roles: frozenset[str] | None = None,
+    session_concat: bool = False,
 ) -> BenchmarkQuery:
     """Mutate ``sessions_by_id`` in place and return the query for ``record``."""
     question_id = str(record["question_id"])
@@ -147,7 +162,13 @@ def _parse_longmemeval_record(
             continue
         sessions_by_id[sid] = CorpusSession(
             session_id=sid,
-            chunks=list(_turns_to_chunks(turns)),
+            chunks=list(
+                _turns_to_chunks(
+                    turns,
+                    include_roles=include_roles,
+                    session_concat=session_concat,
+                )
+            ),
             platform=Platform.UNKNOWN,
             session_title=None,
         )
@@ -161,15 +182,63 @@ def _parse_longmemeval_record(
     )
 
 
-def _turns_to_chunks(turns: Any) -> Iterator[ConversationChunk]:
-    """Yield one :class:`ConversationChunk` per non-empty turn.
+def _turns_to_chunks(
+    turns: Any,
+    *,
+    include_roles: frozenset[str] | None = None,
+    session_concat: bool = False,
+) -> Iterator[ConversationChunk]:
+    """Yield :class:`ConversationChunk` objects from raw conversation turns.
 
     Each turn is expected to be a dict with ``role`` and ``content``
     keys. Plain strings are also accepted (treated as user turns) to
     tolerate minor schema drift across dataset versions.
+
+    Args:
+        turns: Sequence of turn dicts/strings to convert.
+        include_roles: When set, only emit content from turns whose role
+            is in this frozenset. Defaults to None (all roles included).
+            Pass ``frozenset({"user"})`` to replicate the MemPalace
+            LongMemEval pattern: assistant verbosity adds embedding
+            noise that pulls centroids away from concise user-fact
+            phrasing.
+        session_concat: When True, emit ONE concatenated chunk per
+            session (joined with double-newline) instead of one chunk
+            per turn. Combined with ``include_roles={"user"}`` this
+            reproduces the MemPalace 96.6% R@5 indexing unit: one
+            user-only document per session.
     """
     if not isinstance(turns, list):
         raise CorpusLoaderError(f"Expected a list of turns, got {type(turns).__name__}")
+
+    if session_concat:
+        # Join all kept turns into a single concatenated doc per session.
+        parts: list[str] = []
+        for turn in turns:
+            if isinstance(turn, str):
+                role, content = "user", turn
+            elif isinstance(turn, dict):
+                role = str(turn.get("role", "user"))
+                content = str(turn.get("content", ""))
+            else:
+                continue
+
+            if include_roles is not None and role not in include_roles:
+                continue
+            content = content.strip()
+            if not content:
+                continue
+            parts.append(content if role == "user" else f"[{role}] {content}")
+
+        if parts:
+            yield ConversationChunk(
+                content="\n\n".join(parts),
+                content_type=ContentType.RAW_EXCHANGE,
+                topics=[],
+                entities=[],
+                confidence=1.0,
+            )
+        return
 
     for turn in turns:
         if isinstance(turn, str):
@@ -178,6 +247,9 @@ def _turns_to_chunks(turns: Any) -> Iterator[ConversationChunk]:
             role = str(turn.get("role", "user"))
             content = str(turn.get("content", ""))
         else:
+            continue
+
+        if include_roles is not None and role not in include_roles:
             continue
 
         content = content.strip()

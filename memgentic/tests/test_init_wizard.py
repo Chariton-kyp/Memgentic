@@ -168,7 +168,7 @@ class TestConfigureMcpGemini:
         assert data["mcpServers"]["memgentic"]["command"] == "uvx"
 
     def test_merges_with_existing_settings(self, tmp_path: Path):
-        """Preserves existing settings when adding mneme."""
+        """Preserves existing settings when adding memgentic."""
         gemini_dir = tmp_path / ".gemini"
         gemini_dir.mkdir()
         settings_path = gemini_dir / "settings.json"

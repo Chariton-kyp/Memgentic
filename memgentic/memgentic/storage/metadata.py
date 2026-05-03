@@ -457,6 +457,45 @@ class MetadataStore:
         row = await cursor.fetchone()
         return row[0] if row else 0
 
+    async def get_content_type_counts(self, user_id: str = "") -> dict[str, int]:
+        """Active memory counts grouped by content_type."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        if user_id:
+            cursor = await self._db.execute(
+                "SELECT content_type, COUNT(*) AS cnt FROM memories "
+                "WHERE status = 'active' AND user_id = ? GROUP BY content_type",
+                (user_id,),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT content_type, COUNT(*) AS cnt FROM memories "
+                "WHERE status = 'active' GROUP BY content_type"
+            )
+        rows = await cursor.fetchall()
+        return {row["content_type"]: int(row["cnt"]) for row in rows}
+
+    async def get_capture_profile_counts(self, user_id: str = "") -> dict[str, int]:
+        """Active memory counts grouped by capture_profile (defaults to 'enriched')."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        try:
+            if user_id:
+                cursor = await self._db.execute(
+                    "SELECT capture_profile, COUNT(*) AS cnt FROM memories "
+                    "WHERE status = 'active' AND user_id = ? GROUP BY capture_profile",
+                    (user_id,),
+                )
+            else:
+                cursor = await self._db.execute(
+                    "SELECT capture_profile, COUNT(*) AS cnt FROM memories "
+                    "WHERE status = 'active' GROUP BY capture_profile"
+                )
+            rows = await cursor.fetchall()
+            return {(row["capture_profile"] or "enriched"): int(row["cnt"]) for row in rows}
+        except Exception:
+            return {}
+
     async def get_total_count(self, user_id: str = "") -> int:
         """Get total active memory count."""
         if not self._db:
@@ -543,6 +582,96 @@ class MetadataStore:
         cursor = await self._db.execute(sql, params)
         rows = await cursor.fetchall()
         return [self._row_to_memory(row) for row in rows]
+
+    async def get_recent_session_handoffs(
+        self,
+        *,
+        since: datetime | None = None,
+        session_config: SessionConfig | None = None,
+        limit_sessions: int = 3,
+        memories_per_session: int = 5,
+        user_id: str = "",
+    ) -> list[dict]:
+        """Return recent memories grouped by original source session.
+
+        This is the backbone for cross-tool continuation: when an agent starts
+        in Codex, Claude Code, Gemini CLI, etc., it can ask for the most recent
+        source sessions and receive compact bundles that preserve provenance.
+        The method intentionally derives handoffs from the existing memories
+        table so the first version needs no new schema.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+
+        limit_sessions = max(1, min(20, int(limit_sessions)))
+        memories_per_session = max(1, min(20, int(memories_per_session)))
+
+        conditions = ["status = 'active'"]
+        params: list = []
+        if since is not None:
+            conditions.append("created_at > ?")
+            params.append(since.isoformat())
+
+        if session_config:
+            extra_conds, extra_params = self._build_filter_conditions(session_config)
+            conditions.extend(extra_conds)
+            params.extend(extra_params)
+
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+
+        where = " AND ".join(conditions)
+        # Over-fetch so a noisy latest session does not hide the next one.
+        row_limit = max(limit_sessions * memories_per_session * 8, 100)
+        sql = f"SELECT * FROM memories WHERE {where} ORDER BY created_at DESC LIMIT ?"
+        params.append(row_limit)
+
+        cursor = await self._db.execute(sql, params)
+        rows = await cursor.fetchall()
+
+        sessions: dict[tuple[str, str], dict] = {}
+        ordered_keys: list[tuple[str, str]] = []
+
+        for row in rows:
+            memory = self._row_to_memory(row)
+            platform = memory.source.platform.value
+            # Only bundle memories that come from a real source session.
+            # session_id or file_path is required; bare titles (from manual
+            # memgentic_remember calls) would otherwise become singleton bundles
+            # and pollute the top-N.
+            raw_session_key = memory.source.session_id or memory.source.file_path
+            if not raw_session_key:
+                continue
+            key = (platform, raw_session_key)
+            if key not in sessions:
+                sessions[key] = {
+                    "platform": platform,
+                    "session_id": memory.source.session_id,
+                    "session_title": memory.source.session_title,
+                    "file_path": memory.source.file_path,
+                    "last_activity": memory.created_at,
+                    "memories": [],
+                    "memory_count": 0,
+                    "topics": [],
+                    "entities": [],
+                }
+                ordered_keys.append(key)
+
+            bundle = sessions[key]
+            bundle["memory_count"] += 1
+            if memory.created_at > bundle["last_activity"]:
+                bundle["last_activity"] = memory.created_at
+            if len(bundle["memories"]) < memories_per_session:
+                bundle["memories"].append(memory)
+            for topic in memory.topics:
+                if topic not in bundle["topics"]:
+                    bundle["topics"].append(topic)
+            for entity in memory.entities:
+                if entity not in bundle["entities"]:
+                    bundle["entities"].append(entity)
+
+        return [sessions[key] for key in ordered_keys[:limit_sessions]]
 
     async def get_top_memories(
         self,

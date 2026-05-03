@@ -214,7 +214,7 @@ class MemgenticSettings(BaseSettings):
         description="Max memories included in SessionStart hook briefing",
     )
 
-    # --- Context file auto-update (Phase 3.A) ---
+    # --- Context file auto-update ---
     enable_context_file_auto_update: bool = Field(
         default=True,
         description="Daemon auto-updates .memgentic-context.md for non-MCP tools",
@@ -232,7 +232,7 @@ class MemgenticSettings(BaseSettings):
         description="How often the daemon checks whether to regenerate the context file",
     )
 
-    # --- Observability (Phase 3.B) ---
+    # --- Observability ---
     enable_observability: bool = Field(
         default=False,
         description="Enable OpenTelemetry tracing/metrics (requires [observability] extras)",

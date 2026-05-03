@@ -116,7 +116,7 @@ class Memory(BaseModel):
         default_factory=lambda: str(uuid.uuid4()),
         description="Unique memory identifier",
     )
-    # Reserved for future cloud multi-user support
+    # Reserved for multi-user setups; empty string in single-user installs.
     user_id: str = Field(default="", description="Owner user ID")
 
     # Content

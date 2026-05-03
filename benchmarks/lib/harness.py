@@ -9,7 +9,7 @@ ConvoMem, MemBench, and Cross-Tool Transfer without branching.
 
 The ``profile`` argument accepts ``"raw"``, ``"enriched"``, ``"dual"`` and
 a small set of synonyms documented in :meth:`BenchmarkHarness.__init__`.
-Phase 2 wires the profile end-to-end: every ingestion call made through
+The profile is wired end-to-end: every ingestion call made through
 :meth:`BenchmarkHarness.ingest_session` forwards the profile to
 :meth:`memgentic.processing.pipeline.IngestionPipeline.ingest_conversation`
 via its ``capture_profile`` argument, so ``raw`` runs bypass LLM
@@ -33,6 +33,7 @@ from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBacken
 from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
+from memgentic.retrieval import RerankCandidate, Reranker
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
@@ -122,6 +123,7 @@ class BenchmarkHarness:
         *,
         seed: int = DEFAULT_SEED,
         settings_override: MemgenticSettings | None = None,
+        reranker: Reranker | None = None,
     ) -> None:
         """Construct a harness without touching disk.
 
@@ -150,6 +152,7 @@ class BenchmarkHarness:
         self.backend_label = backend
         self.seed = seed
         self._settings_override = settings_override
+        self._reranker = reranker  # optional cross-encoder rerank
 
         self._tmp_root: Path | None = None
         self._settings: MemgenticSettings | None = None
@@ -186,10 +189,10 @@ class BenchmarkHarness:
 
         self._embedder = Embedder(self._settings)
 
-        # LLM client is intentionally left ``None`` in the skeleton.
-        # The pipeline degrades gracefully to heuristic classification.
-        # Runners that want LLM-driven extraction can pass one through
-        # ``settings_override`` plus a post-setup hook; Phase 1 does not.
+        # LLM client is intentionally left ``None`` here. The pipeline
+        # degrades gracefully to heuristic classification. Runners that
+        # want LLM-driven extraction can pass one through
+        # ``settings_override`` plus a post-setup hook.
         self._pipeline = IngestionPipeline(
             settings=self._settings,
             metadata_store=self._metadata,
@@ -271,6 +274,131 @@ class BenchmarkHarness:
         vectors = self._require(self._vectors, "vector store")
         embedding = await embedder.embed(text)
         return await vectors.search(embedding, limit=n_results)
+
+    async def search_fulltext(self, text: str, n_results: int = 5) -> list[dict[str, Any]]:
+        """BM25/FTS5 keyword search via :class:`MetadataStore.search_fulltext`.
+
+        Exposes the FTS5 surface (already populated by every ingest) for use
+        in hybrid retrieval. Returns the same dict shape as :meth:`search`
+        so fusion code does not need to special-case the source.
+        """
+        metadata = self._require(self._metadata, "metadata store")
+        memories = await metadata.search_fulltext(text, limit=n_results)
+        # Synthesize a search-result dict per memory. FTS5 rank is opaque;
+        # we expose the 1-indexed position as a "score" so RRF can ignore it,
+        # but weighted_score_fusion still gets a usable signal.
+        return [
+            {
+                "id": memory.id,
+                "score": 1.0 / (1 + idx),  # monotone-decreasing positional score
+                "payload": {
+                    "session_id": memory.source.session_id if memory.source else None,
+                    "content_type": memory.content_type,
+                    "platform": memory.source.platform if memory.source else None,
+                },
+            }
+            for idx, memory in enumerate(memories)
+        ]
+
+    async def search_hybrid(
+        self,
+        text: str,
+        n_results: int = 5,
+        *,
+        dense_weight: float = 1.0,
+        bm25_weight: float = 1.0,
+        fetch_each: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Hybrid retrieval — dense + BM25 fused via reciprocal rank fusion.
+
+        Calls :meth:`search` and :meth:`search_fulltext` in parallel (well,
+        sequentially — the bottleneck is the embedder, not SQLite), fuses
+        the two ranked lists with
+        :func:`memgentic.retrieval.hybrid.reciprocal_rank_fusion`, and
+        returns the top ``n_results``.
+
+        Args:
+            text: Query text.
+            n_results: Top-k to return after fusion.
+            dense_weight: RRF weight for the dense list. Default 1.0.
+            bm25_weight: RRF weight for the BM25 list. Default 1.0.
+            fetch_each: Per-strategy fetch depth before fusion. Defaults
+                to ``n_results * 5`` so fusion has a real candidate pool.
+        """
+        from memgentic.retrieval import reciprocal_rank_fusion
+
+        if fetch_each is None:
+            fetch_each = n_results * 5
+        dense_hits = await self.search(text, n_results=fetch_each)
+        bm25_hits = await self.search_fulltext(text, n_results=fetch_each)
+        dense_ids = [h["id"] for h in dense_hits]
+        bm25_ids = [h["id"] for h in bm25_hits]
+        fused = reciprocal_rank_fusion(
+            [dense_ids, bm25_ids],
+            weights=[dense_weight, bm25_weight],
+        )
+        # Build a lookup so we can return the same dict shape callers expect.
+        all_hits = {h["id"]: h for h in dense_hits}
+        for h in bm25_hits:
+            all_hits.setdefault(h["id"], h)
+        result: list[dict[str, Any]] = []
+        for memory_id, fused_score in fused[:n_results]:
+            hit = dict(all_hits[memory_id])
+            hit["score"] = fused_score  # Replace per-strategy score with fused
+            hit.setdefault("payload", {})
+            result.append(hit)
+        return result
+
+    async def search_with_rerank(
+        self,
+        text: str,
+        n_results: int = 5,
+        *,
+        retrieve_k: int | None = None,
+    ) -> list[dict[str, Any]]:
+        """Dense retrieval over-fetched, then cross-encoder rerank to top-``n_results``.
+
+        Requires a ``reranker`` to have been passed at harness construction
+        (e.g. ``LlamaCppReranker(model_path=...)``); without one this method
+        raises ``RuntimeError``.
+
+        Args:
+            text: Query text.
+            n_results: Top-k to return after reranking.
+            retrieve_k: How many candidates to fetch from the vector
+                store before reranking. Defaults to ``n_results * 4``
+                (e.g. 20 candidates → top-5 reranked output).
+
+        Returns:
+            Same dict shape as :meth:`search`, but with rerank scores
+            and order. Each dict carries ``id``, ``score`` (rerank
+            score, not cosine), and ``payload``.
+        """
+        if self._reranker is None:
+            raise RuntimeError(
+                "search_with_rerank() requires a reranker. Pass one to "
+                "BenchmarkHarness(reranker=LlamaCppReranker(...))."
+            )
+        if retrieve_k is None:
+            retrieve_k = n_results * 4
+        candidates_raw = await self.search(text, n_results=retrieve_k)
+        rerank_input = [
+            RerankCandidate(
+                id=hit["id"],
+                text=str((hit.get("payload") or {}).get("content") or hit.get("id")),
+                payload=hit.get("payload"),
+            )
+            for hit in candidates_raw
+        ]
+        reranked = await self._reranker.rerank(text, rerank_input, top_k=n_results)
+        return [
+            {
+                "id": r.id,
+                "score": r.score,
+                "payload": r.payload or {},
+            }
+            for r in reranked
+        ]
 
     async def evaluate(
         self,

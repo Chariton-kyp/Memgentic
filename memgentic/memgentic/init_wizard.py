@@ -87,7 +87,7 @@ def _configure_mcp_claude(dry_run: bool) -> bool:
     if not shutil.which("claude"):
         return False
     if dry_run:
-        console.print("  [dim]Would run: claude mcp add mneme[/]")
+        console.print("  [dim]Would run: claude mcp add memgentic[/]")
         return True
     try:
         result = subprocess.run(
@@ -151,7 +151,7 @@ def _configure_mcp_codex(dry_run: bool) -> bool:
     if not shutil.which("codex"):
         return False
     if dry_run:
-        console.print("  [dim]Would run: codex mcp add mneme[/]")
+        console.print("  [dim]Would run: codex mcp add memgentic[/]")
         return True
     try:
         result = subprocess.run(

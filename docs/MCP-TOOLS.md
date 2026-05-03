@@ -8,7 +8,7 @@ in ``memgentic/memgentic/mcp/`` and rerun the generator.
 Every tool is namespaced ``memgentic_*`` and exposed over the ``mcp[cli]``
 transport configured by ``memgentic serve``.
 
-Total tools: **27**
+Total tools: **30**
 
 ## `memgentic_briefing`
 
@@ -340,6 +340,61 @@ Examples:
     "params"
   ],
   "title": "memgentic_configure_sessionArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_context`
+
+**Loaded Memory Context** — `readOnlyHint=False` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+Show or clear memories returned to the current MCP session.
+
+This answers a different question than inventory: not "what exists in the
+database?", but "what memory has Memgentic already handed to this agent
+during this active context?" It gives agents continuity between memory
+calls and reduces repeated recall requests.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "ContextInput": {
+      "additionalProperties": false,
+      "description": "Input for inspecting the current MCP session's loaded memory context.",
+      "properties": {
+        "action": {
+          "default": "show",
+          "description": "Show or clear the memories already returned to this MCP session.",
+          "enum": [
+            "show",
+            "clear"
+          ],
+          "title": "Action",
+          "type": "string"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "ContextInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/ContextInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_contextArguments",
   "type": "object"
 }
 ```
@@ -858,6 +913,186 @@ Return triples in chronological order for an entity (or all).
     "params"
   ],
   "title": "memgentic_graph_timeline_toolArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_handoff`
+
+**Cross-Tool Handoff** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+Get a source-backed continuation brief from the latest AI-tool sessions.
+
+This is the cross-tool resume surface: Codex, Claude Code, Gemini CLI, and
+other MCP clients can call it at startup to understand what the user was
+just doing in another tool and continue without making them restate the
+project state.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "HandoffInput": {
+      "additionalProperties": false,
+      "description": "Input for cross-tool continuation handoff.",
+      "properties": {
+        "current_source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The tool asking for the handoff, e.g. 'codex_cli' or 'claude_code'.",
+          "title": "Current Source"
+        },
+        "include_current_source": {
+          "default": true,
+          "description": "Whether to include sessions from the current source tool.",
+          "title": "Include Current Source",
+          "type": "boolean"
+        },
+        "limit_sessions": {
+          "default": 3,
+          "description": "How many recent source sessions to include.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Limit Sessions",
+          "type": "integer"
+        },
+        "memories_per_session": {
+          "default": 5,
+          "description": "How many recent memories/exchanges to show per source session.",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Memories Per Session",
+          "type": "integer"
+        },
+        "since_hours": {
+          "default": 72,
+          "description": "Lookback window for candidate source sessions.",
+          "maximum": 720,
+          "minimum": 1,
+          "title": "Since Hours",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only show sessions from this source platform.",
+          "title": "Source"
+        }
+      },
+      "title": "HandoffInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/HandoffInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_handoffArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_inventory`
+
+**Memory Inventory** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+Return exact inventory for what is stored in Memgentic.
+
+Use ``detail='summary'`` for counts and a small sample, or
+``detail='manifest'`` for a paginated list of exact memory IDs and source
+metadata. This is designed to make memory transparent and auditable.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "InventoryInput": {
+      "additionalProperties": false,
+      "description": "Input for exact memory-store inventory.",
+      "properties": {
+        "content_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter by memory content type.",
+          "title": "Content Type"
+        },
+        "detail": {
+          "default": "summary",
+          "description": "'summary' returns counts and samples; 'manifest' returns exact memory IDs.",
+          "enum": [
+            "summary",
+            "manifest"
+          ],
+          "title": "Detail",
+          "type": "string"
+        },
+        "limit": {
+          "default": 50,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "offset": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Offset",
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter by platform.",
+          "title": "Source"
+        }
+      },
+      "title": "InventoryInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/InventoryInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_inventoryArguments",
   "type": "object"
 }
 ```

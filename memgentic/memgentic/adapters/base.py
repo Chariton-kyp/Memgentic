@@ -145,7 +145,7 @@ class BaseAdapter(abc.ABC):
     def _extract_topics(text: str) -> list[str]:
         """Simple keyword-based topic extraction.
 
-        In Phase 2, this will be replaced by LLM-powered extraction.
+        Future work: replace with LLM-powered extraction.
         """
         topics: list[str] = []
         tech_keywords = {

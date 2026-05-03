@@ -91,8 +91,3 @@ at 1000), then applies ``LIMIT`` on the filtered result. For very selective
 filters over very large corpora you may still see fewer-than-expected
 results — if you hit that, Qdrant server mode is the right choice.
 
-## TODO
-
-- `memgentic migrate-storage` command to copy memories + embeddings between
-  backends (e.g. re-ingest from Qdrant local into sqlite-vec). The migration
-  detection warning already fires on first start to guide users there.

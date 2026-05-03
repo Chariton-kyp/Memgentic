@@ -1,22 +1,11 @@
 # Memgentic Benchmarks
 
-Reproducible retrieval benchmarks for Memgentic. This directory ships the
-harness, scorers, corpus loaders, and a LongMemEval runner skeleton. The
-full benchmark runs — and the numbers that appear in
-[`BENCHMARKS.md`](BENCHMARKS.md) — land in a separate PR after the
-Capture Profiles feature merges.
-
-## Status
-
-**Phase 1:** harness + scorers + corpus loaders + LongMemEval runner
-skeleton. Landed in PR #62.
-
-**Phase 2 (this PR):** runnable runners for LoCoMo, ConvoMem, MemBench,
-and the Memgentic-only Cross-Tool Transfer benchmark, plus
-profile-aware ingestion that routes `raw` / `enriched` / `dual` through
-`IngestionPipeline.capture_profile`. Published numbers are pending —
-they will be committed to `results/` after maintainers run the full
-suite locally.
+Reproducible retrieval benchmarks for Memgentic. This directory ships
+the harness, scorers, corpus loaders, and runner scripts for
+LongMemEval, LoCoMo, ConvoMem, MemBench, and the Memgentic-only
+Cross-Tool Transfer benchmark. Published numbers in
+[`BENCHMARKS.md`](BENCHMARKS.md) are populated by running the suite
+locally.
 
 ## Methodology
 

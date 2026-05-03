@@ -1,4 +1,4 @@
-"""Runner-level tests for Phase 2 benchmark runners.
+"""Runner-level tests for the benchmark runners.
 
 These tests exercise the *shape* of every runner without spinning up
 Ollama or a real vector store. A fake harness subclass overrides
@@ -7,7 +7,7 @@ pipeline runs in pure Python and completes in milliseconds.
 
 Parametrised across:
 
-* LongMemEval      (phase 1, kept here for regression coverage)
+* LongMemEval      (kept here for regression coverage)
 * LoCoMo           (phase 2)
 * ConvoMem         (phase 2)
 * MemBench         (phase 2)
@@ -224,7 +224,7 @@ class TestRunnerShape:
 
 # ---------------------------------------------------------------------------
 # Profile pass-through — lives here rather than test_harness.py because it
-# only matters now that Phase 2 wires the profile through to the pipeline.
+# only matters once the harness wires the profile through to the pipeline.
 # ---------------------------------------------------------------------------
 class TestProfilePassThrough:
     async def test_profile_reaches_pipeline(self) -> None:

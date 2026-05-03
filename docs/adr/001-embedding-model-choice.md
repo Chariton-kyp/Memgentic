@@ -9,8 +9,8 @@ Accepted (2026-03-15)
 Memgentic needs an embedding model to convert memory text into vectors for semantic search. Key requirements:
 
 - Must run locally for privacy (no data leaves the user's machine).
-- Must be the same model in local development and any future cloud deployment to avoid embedding drift.
-- Must be open-source with a permissive license (BSL-1.1 project cannot depend on restrictively licensed models).
+- Must be the same model across all deployment targets to avoid embedding drift.
+- Must be open-source with a permissive license compatible with this project's distribution.
 - Must produce high-quality multilingual embeddings at reasonable VRAM cost.
 - Matryoshka Representation Learning (MRL) support is desirable so we can truncate dimensions for storage efficiency without retraining.
 
@@ -20,7 +20,7 @@ We evaluated OpenAI `text-embedding-3-small`, Nomic Embed, BGE-M3, and the Qwen3
 
 Use **Qwen3-Embedding-4B** served via Ollama 0.18+, with embeddings truncated to **768 dimensions** using MRL.
 
-- **License**: Apache 2.0 — fully compatible with BSL-1.1.
+- **License**: Apache 2.0.
 - **Local-first**: Runs on consumer GPUs (4 GB+ VRAM) through Ollama, no API key required.
 - **MRL truncation**: Native 2048-dimensional output truncated to 768d with minimal quality loss, cutting storage by 62%.
 - **Same model everywhere**: Ollama serves the identical model binary locally and in Docker, eliminating embedding drift between environments.

@@ -44,6 +44,8 @@ def _make_memory(content: str, ctype: ContentType = ContentType.FACT) -> Memory:
 def mock_embedder():
     e = AsyncMock()
     e.embed.return_value = _vec()
+    e.embed_query = e.embed
+    e.embed_document = e.embed
     return e
 
 

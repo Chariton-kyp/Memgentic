@@ -130,7 +130,11 @@ async def test_dedupe_check_returns_empty_when_below_threshold():
 
 async def test_dedupe_check_handles_embedder_failure():
     embedder = AsyncMock()
+    # dedupe_check now calls embed_document (asymmetric query/doc split);
+    # the failure path should propagate regardless of which embedder method
+    # raises.
     embedder.embed.side_effect = RuntimeError("ollama down")
+    embedder.embed_document = embedder.embed
     ctx = _mock_ctx(embedder=embedder)
 
     result = await memgentic_dedupe_check(DedupeCheckInput(content="something"), ctx)

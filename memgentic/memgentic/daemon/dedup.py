@@ -133,7 +133,7 @@ class SemanticDeduper:
     ) -> DedupDecision:
         """Decide whether a single chunk is a near-duplicate."""
         try:
-            embedding = await self._embedder.embed(chunk.content)
+            embedding = await self._embedder.embed_document(chunk.content)
         except Exception as exc:  # embedding failure is non-fatal for dedup
             logger.warning("watchers.dedup_embed_failed", error=str(exc))
             return DedupDecision(
