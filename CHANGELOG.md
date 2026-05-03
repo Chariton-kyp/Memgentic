@@ -4,6 +4,47 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-03 — Cross-Tool Continuation + Retrieval Wins
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
+
+### Added
+
+- **Cross-tool continuation** — three new MCP tools that turn Memgentic into a transparent cross-tool memory layer:
+  - `memgentic_handoff` — source-backed continuation brief grouped by recent source session (call this at session start to resume work that was happening in another AI tool)
+  - `memgentic_context` — in-process ledger of memories the current MCP session has already loaded
+  - `memgentic_inventory` — auditable manifest of stored memories (counts by source / content type / capture profile + paginated IDs)
+  - New `continue` MCP prompt — clients that surface MCP prompts can use it to ask the agent to call `memgentic_handoff` automatically at startup
+  - Backed by a schema-free `MetadataStore.get_recent_session_handoffs` helper so no migration is required for the first cut
+- **Retrieval improvements (LongMemEval 60q balanced):** R@5 0.7667 → 0.8333 (+6.7pp), MRR +10.7pp.
+  - Hybrid dense + BM25 / FTS5 retrieval with weighted RRF, per-signal observability, and a min-score gate
+  - HyDE-style query rewriter via a tiny local LLM (`gemma4:e2b`)
+  - Query expansion via a tiny local LLM
+  - Bilingual question-aware boosts (temporal / quoted / proper-noun)
+  - Session dedup in the retrieved list before R@k counting
+  - Qwen3-Reranker-0.6B cross-encoder reranker (opt-in)
+  - Asymmetric embedder fix — raw cosine scores are now exposed
+  - Greek text normalisation helpers for hybrid retrieval
+- **Benchmarks** — A/B harness, `--user-turns-only` and `--session-concat` ingest flags, balanced subset builder, embedder shootout, and a `--chunk-fetch` over-fetch-depth knob on the LongMemEval runner
+
+### Changed
+
+- MCP surface expanded **27 → 30** tools (`docs/MCP-TOOLS.md` regenerated)
+- README MCP Tools table now leads with the cross-tool tools
+
+### Fixed
+
+- API `embedder` mock fixture now stubs the full `Embedder` public surface (`embed_query`, `embed_document`, `embed_batch_documents`) — closes a CI test failure where 28 endpoint tests raised `ValueError: could not broadcast input array from shape (0,) into shape (768,)`
+- `--session-concat` argparse help text was emitting `MemPalace 96.6% R@5` and triggering `ValueError: unsupported format character 'R'` because argparse runs help strings through `% params`. Escaped to `96.6%%`.
+
+### Documentation
+
+- LICENSE copyright corrected: `Chariton Haritos` → `Chariton Kypraios` across all four LICENSE files
+- Replaced residual `mneme` / `mneme-core` references in user-facing strings (install hints, default backup / GDPR-export filenames, dry-run output, FastAPI 501 detail body) with `memgentic`
+- Aligned every public Markdown surface with the project's framing: dropped internal phase / sprint / milestone tags from agent-facing docstrings, ADRs, dashboard UI, benchmark READMEs, and PyPI metadata; rewrote `docs/DEPLOYMENT.md`'s "Production Deployment" section as "Self-Hosted Multi-User Deployment" with the local-only path documented up front; added a target-vs-measured disclaimer to `docs/BENCHMARKS.md`
+- Removed `docs/PRODUCT-ROADMAP.md`, `docs/TECHNICAL-PLAN.md`, and `docs/milestones/` (M01–M07) from the public repository — internal planning content
+- Hardened `.gitignore` to block accidental commits of large benchmark datasets / results / `.codex` sentinel
+
 ## [0.7.0] — 2026-04-22 — Intelligence Upgrades + Distribution
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
