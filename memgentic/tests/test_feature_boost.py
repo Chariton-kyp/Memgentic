@@ -14,7 +14,6 @@ from memgentic.retrieval.feature_boost import (
     apply_feature_boosts,
 )
 
-
 _NOW = _dt.datetime(2026, 4, 26, 12, 0, 0, tzinfo=_dt.UTC)
 
 

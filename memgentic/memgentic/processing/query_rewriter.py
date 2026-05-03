@@ -84,7 +84,7 @@ class QueryRewriter:
     async def close(self) -> None:
         await self._client.aclose()
 
-    async def __aenter__(self) -> "QueryRewriter":
+    async def __aenter__(self) -> QueryRewriter:
         return self
 
     async def __aexit__(self, *exc_info: object) -> None:

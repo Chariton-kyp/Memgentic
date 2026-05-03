@@ -152,7 +152,7 @@ class BenchmarkHarness:
         self.backend_label = backend
         self.seed = seed
         self._settings_override = settings_override
-        self._reranker = reranker  # Plan 12 PR-E: optional cross-encoder rerank
+        self._reranker = reranker  # optional cross-encoder rerank
 
         self._tmp_root: Path | None = None
         self._settings: MemgenticSettings | None = None
@@ -278,10 +278,9 @@ class BenchmarkHarness:
     async def search_fulltext(self, text: str, n_results: int = 5) -> list[dict[str, Any]]:
         """BM25/FTS5 keyword search via :class:`MetadataStore.search_fulltext`.
 
-        Plan 12 PR-D — exposes the FTS5 surface (already populated by every
-        ingest) for use in hybrid retrieval. Returns the same dict shape as
-        :meth:`search` so fusion code does not need to special-case the
-        source.
+        Exposes the FTS5 surface (already populated by every ingest) for use
+        in hybrid retrieval. Returns the same dict shape as :meth:`search`
+        so fusion code does not need to special-case the source.
         """
         metadata = self._require(self._metadata, "metadata store")
         memories = await metadata.search_fulltext(text, limit=n_results)
@@ -312,9 +311,9 @@ class BenchmarkHarness:
     ) -> list[dict[str, Any]]:
         """Hybrid retrieval — dense + BM25 fused via reciprocal rank fusion.
 
-        Plan 12 PR-D. Calls :meth:`search` and :meth:`search_fulltext` in
-        parallel (well, sequentially — the bottleneck is the embedder, not
-        SQLite), fuses the two ranked lists with
+        Calls :meth:`search` and :meth:`search_fulltext` in parallel (well,
+        sequentially — the bottleneck is the embedder, not SQLite), fuses
+        the two ranked lists with
         :func:`memgentic.retrieval.hybrid.reciprocal_rank_fusion`, and
         returns the top ``n_results``.
 
@@ -359,9 +358,9 @@ class BenchmarkHarness:
     ) -> list[dict[str, Any]]:
         """Dense retrieval over-fetched, then cross-encoder rerank to top-``n_results``.
 
-        Plan 12 PR-E. Requires a ``reranker`` to have been passed at
-        harness construction (e.g. ``LlamaCppReranker(model_path=...)``);
-        without one this method raises ``RuntimeError``.
+        Requires a ``reranker`` to have been passed at harness construction
+        (e.g. ``LlamaCppReranker(model_path=...)``); without one this method
+        raises ``RuntimeError``.
 
         Args:
             text: Query text.

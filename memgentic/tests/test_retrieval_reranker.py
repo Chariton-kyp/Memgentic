@@ -1,4 +1,4 @@
-"""Tests for memgentic.retrieval.reranker (Plan 12 PR-E).
+"""Tests for memgentic.retrieval.reranker.
 
 Real ``LlamaCppReranker`` integration tests require the GGUF model on
 disk and llama-cpp-python installed; those run in a nightly job, not

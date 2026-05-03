@@ -153,7 +153,10 @@ class Embedder:
         if titles is None:
             formatted = [format_document(model, t) for t in texts]
         else:
-            formatted = [format_document(model, t, title=ti) for t, ti in zip(texts, titles)]
+            formatted = [
+                format_document(model, t, title=ti)
+                for t, ti in zip(texts, titles, strict=False)
+            ]
         return await self.embed_batch(formatted)
 
     async def embed(self, text: str) -> list[float]:

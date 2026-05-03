@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # ---------------------------------------------------------------------------
 # Temporal references — relative ("two months ago") + absolute ("in 2024")
@@ -207,7 +207,9 @@ def extract_features(query: str, *, now: _dt.datetime | None = None) -> QueryFea
     relative_match = _RELATIVE_TIME_RE.search(query)
     if relative_match:
         amount_token = relative_match.group("en_amount") or relative_match.group("el_amount")
-        unit_token = (relative_match.group("en_unit") or relative_match.group("el_unit") or "").lower()
+        unit_token = (
+            relative_match.group("en_unit") or relative_match.group("el_unit") or ""
+        ).lower()
         amount = _word_to_int(amount_token or "")
         if amount is not None and unit_token in _TIME_UNIT_DAYS:
             temporal_days = amount * _TIME_UNIT_DAYS[unit_token]
@@ -215,9 +217,8 @@ def extract_features(query: str, *, now: _dt.datetime | None = None) -> QueryFea
     if temporal_days is None:
         lower_q = query.lower()
         for phrase, days in _IMPLICIT_ANCHORS.items():
-            if phrase in lower_q:
-                if temporal_days is None or days < temporal_days:
-                    temporal_days = days
+            if phrase in lower_q and (temporal_days is None or days < temporal_days):
+                temporal_days = days
 
     year_match = _YEAR_RE.search(query)
     absolute_year = int(year_match.group(1)) if year_match else None

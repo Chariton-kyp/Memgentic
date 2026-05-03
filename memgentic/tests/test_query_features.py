@@ -6,7 +6,6 @@ import datetime as _dt
 
 from memgentic.processing.query_features import QueryFeatures, extract_features
 
-
 _NOW = _dt.datetime(2026, 4, 26, 12, 0, 0, tzinfo=_dt.UTC)
 
 

@@ -1,13 +1,9 @@
 """Retrieval primitives — fusion, reranking, hybrid search.
 
-This package hosts the Plan 12 cascade orchestrator and its sub-
-strategies (Layer S/P direct, dense, BM25, graph PPR, reranker).
+This package hosts the cascade orchestrator and its sub-strategies
+(direct lookup, dense vector, BM25/FTS5, graph PPR, reranker).
 
-PR-D adds reciprocal rank fusion (combine dense vector + BM25/FTS5).
-PR-E adds the cross-encoder reranker interface + a llama-cpp-based
-Qwen3-Reranker implementation.
-
-Design notes (Plan 12 §7 / §3.2 cascade Stage 1+2):
+Design notes:
 - Each candidate strategy returns ``(memory_id, score)`` lists.
 - Fusion combines them at memory granularity. Session aggregation is
   a separate concern (``benchmarks/lib/scorers.py``) and runs after
@@ -33,10 +29,8 @@ from memgentic.retrieval.reranker import (
 )
 
 __all__ = [
-    # PR-D: fusion primitives
     "reciprocal_rank_fusion",
     "weighted_score_fusion",
-    # PR-E: reranker interface + implementations
     "LlamaCppReranker",
     "MockReranker",
     "RerankCandidate",

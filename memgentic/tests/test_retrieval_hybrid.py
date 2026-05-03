@@ -1,4 +1,4 @@
-"""Tests for memgentic.retrieval.hybrid (Plan 12 PR-D)."""
+"""Tests for memgentic.retrieval.hybrid."""
 
 from __future__ import annotations
 

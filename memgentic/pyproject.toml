@@ -75,7 +75,7 @@ intelligence = [
     # (falls back to stdlib difflib when this is not installed).
     "rapidfuzz>=3.9",
 ]
-# Reranker — Qwen3-Reranker-0.6B via llama-cpp-python (Plan 12 PR-E)
+# Reranker — Qwen3-Reranker-0.6B via llama-cpp-python.
 # Pin to ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF or Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp;
 # random community GGUFs silently drop the classifier head and produce garbage scores.
 reranker = [

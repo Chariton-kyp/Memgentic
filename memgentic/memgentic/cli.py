@@ -1261,7 +1261,7 @@ async def _status() -> None:
             mem_table.add_row(f"  {plat}", str(cnt))
     console.print(mem_table)
 
-    # --- Context file freshness (Phase 3.A) -------------------------------
+    # --- Context file freshness -------------------------------------------
     from datetime import UTC, datetime
     from pathlib import Path as _Path
 

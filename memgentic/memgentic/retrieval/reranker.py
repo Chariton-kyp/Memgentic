@@ -1,4 +1,4 @@
-"""Cross-encoder reranking for the Plan 12 cascade (PR-E + Phase 1).
+"""Cross-encoder reranking for the retrieval cascade.
 
 Reranking takes a query and a candidate list (typically top-20 from the
 hybrid retriever) and re-scores each candidate against the query with a
@@ -29,8 +29,8 @@ Provider strategy:
   support (roadmap)
 
 This module defines the abstract ``Reranker`` interface plus a
-``LlamaCppReranker`` implementation. The harness and Phase 1 cascade
-both consume the interface, so swapping implementations later is one
+``LlamaCppReranker`` implementation. The harness and the cascade both
+consume the interface, so swapping implementations later is one
 constructor call.
 """
 

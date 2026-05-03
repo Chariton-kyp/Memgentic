@@ -1,11 +1,11 @@
 """Hybrid retrieval — fusion of multiple ranked candidate lists.
 
-Plan 12 §7 PR-D: combine dense vector retrieval with BM25/FTS5 (and any
-future signal — graph PPR, cluster bonus, etc.) into a single ranked
-list. Reciprocal Rank Fusion (RRF) is the default because it is
-parameter-stable across heterogeneous score scales: vector cosine,
-sqlite FTS5 ``rank`` (ascending = better), and PageRank values are
-not comparable as raw scores. RRF normalises by rank position only.
+Combine dense vector retrieval with BM25/FTS5 (and any future signal —
+graph PPR, cluster bonus, etc.) into a single ranked list. Reciprocal
+Rank Fusion (RRF) is the default because it is parameter-stable across
+heterogeneous score scales: vector cosine, sqlite FTS5 ``rank``
+(ascending = better), and PageRank values are not comparable as raw
+scores. RRF normalises by rank position only.
 
 References
 ----------
@@ -21,9 +21,6 @@ each retrieval strategy and feeding the results in.
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
-from typing import TypeVar
-
-T = TypeVar("T")
 
 DEFAULT_RRF_K = 60
 """Smoothing constant from Cormack et al. 2009. Larger values flatten
@@ -32,7 +29,7 @@ contributions of high-ranked items relative to low-ranked items.
 heterogeneous-score-scale fusion tasks."""
 
 
-def reciprocal_rank_fusion(
+def reciprocal_rank_fusion[T](
     ranked_lists: Sequence[Sequence[T]],
     k: int = DEFAULT_RRF_K,
     weights: Sequence[float] | None = None,
@@ -93,7 +90,7 @@ def reciprocal_rank_fusion(
     )
 
 
-def weighted_score_fusion(
+def weighted_score_fusion[T](
     scored_lists: Sequence[Sequence[tuple[T, float]]],
     weights: Sequence[float] | None = None,
     *,
@@ -149,7 +146,7 @@ def weighted_score_fusion(
     )
 
 
-def _coerce_to_id_list(
+def _coerce_to_id_list[T](
     items: Iterable[T] | Iterable[tuple[T, float]],
 ) -> list[T]:
     """Accept either ``[id, ...]`` or ``[(id, score), ...]`` and return ``[id, ...]``.

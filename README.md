@@ -312,6 +312,9 @@ When Memgentic's MCP server is connected to an AI tool, the tool can call:
 
 | Tool | Purpose |
 |------|---------|
+| `memgentic_handoff()` | **Cross-tool resume** — source-backed continuation brief grouped by recent source session (call this at session start) |
+| `memgentic_context()` | Show what memory has been loaded into the current MCP session |
+| `memgentic_inventory()` | Auditable manifest of stored memories (counts, sources, content types, paginated IDs) |
 | `memgentic_recall(query)` | Semantic search with source filtering |
 | `memgentic_search(query)` | Full-text keyword search |
 | `memgentic_remember(content)` | Save a new memory |
@@ -325,6 +328,8 @@ When Memgentic's MCP server is connected to an AI tool, the tool can call:
 | `memgentic_configure_session(filters)` | Session-level source filters |
 | `memgentic_stats()` | Memory statistics |
 | `memgentic_export()` | Export memories as JSON |
+
+A `continue` MCP prompt is also registered — clients that surface MCP prompts can invoke it at startup to ask the agent to call `memgentic_handoff` and resume from the latest source session.
 
 ---
 
