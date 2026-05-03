@@ -209,9 +209,7 @@ class LlamaCppReranker:
         scored: list[RerankResult] = []
         for candidate in candidates:
             score = self._score_one(query, candidate.text)
-            scored.append(
-                RerankResult(id=candidate.id, score=score, payload=candidate.payload)
-            )
+            scored.append(RerankResult(id=candidate.id, score=score, payload=candidate.payload))
         scored.sort(key=lambda r: r.score, reverse=True)
         if top_k is not None:
             scored = scored[:top_k]
@@ -267,9 +265,7 @@ def _qwen3_reranker_prompt(query: str, document: str) -> str:
     is relevant to ``query``. We extract the 'yes' token probability as
     the relevance score.
     """
-    instruction = (
-        "Given a web search query, retrieve relevant passages that answer the query."
-    )
+    instruction = "Given a web search query, retrieve relevant passages that answer the query."
     return (
         "<|im_start|>system\n"
         "Judge whether the Document meets the requirements based on the Query "

@@ -102,9 +102,7 @@ class TestWeightedScoreFusion:
         # List 0: a=1.0, b=0.5 (normalized: a=1, b=0)
         # List 1: a=0.4, b=0.8 (normalized: a=0, b=1)
         # Sum: a=1, b=1 → tied. First-seen wins → a
-        result = weighted_score_fusion(
-            [[("a", 1.0), ("b", 0.5)], [("b", 0.8), ("a", 0.4)]]
-        )
+        result = weighted_score_fusion([[("a", 1.0), ("b", 0.5)], [("b", 0.8), ("a", 0.4)]])
         # Both sum to 1.0 → tied
         assert {item for item, _ in result[:2]} == {"a", "b"}
 

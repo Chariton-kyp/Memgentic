@@ -67,12 +67,8 @@ def _summarize(records: list[dict], label: str) -> RunStats:
     by_category = {
         cat: {
             "n": len(rs),
-            "recall_at_k": (sum(1 for r in rs if r.get("recall_at_k")) / len(rs))
-            if rs
-            else 0.0,
-            "mrr": (
-                sum(1.0 / r["rank_of_gold"] for r in rs if r.get("rank_of_gold")) / len(rs)
-            )
+            "recall_at_k": (sum(1 for r in rs if r.get("recall_at_k")) / len(rs)) if rs else 0.0,
+            "mrr": (sum(1.0 / r["rank_of_gold"] for r in rs if r.get("rank_of_gold")) / len(rs))
             if rs
             else 0.0,
         }
@@ -100,10 +96,7 @@ def _print_summary(old: RunStats, new: RunStats) -> None:
     def pp(metric: str, o: float, n: float, fmt: str = "{:.4f}") -> None:
         delta = n - o
         sign = "+" if delta >= 0 else ""
-        print(
-            f"{metric:<25} {fmt.format(o):>10} {fmt.format(n):>10} "
-            f"{sign}{fmt.format(delta):>9}"
-        )
+        print(f"{metric:<25} {fmt.format(o):>10} {fmt.format(n):>10} {sign}{fmt.format(delta):>9}")
 
     pp("R@k", old.recall_at_k, new.recall_at_k)
     pp("MRR", old.mrr, new.mrr)
@@ -113,8 +106,10 @@ def _print_summary(old: RunStats, new: RunStats) -> None:
 
 def _print_per_category(old: RunStats, new: RunStats) -> None:
     cats = sorted(set(old.by_category) | set(new.by_category))
-    print(f"{'category':<28} {'n':>4} {'old R@k':>8} {'new R@k':>8} {'d R@k':>8}  "
-          f"{'old MRR':>8} {'new MRR':>8} {'d MRR':>8}")
+    print(
+        f"{'category':<28} {'n':>4} {'old R@k':>8} {'new R@k':>8} {'d R@k':>8}  "
+        f"{'old MRR':>8} {'new MRR':>8} {'d MRR':>8}"
+    )
     print("-" * 96)
     for cat in cats:
         o = old.by_category.get(cat, {"n": 0, "recall_at_k": 0.0, "mrr": 0.0})
@@ -157,6 +152,7 @@ def _print_movers(old: RunStats, new: RunStats, n: int = 10) -> None:
 
 def _print_rank_distribution(old: RunStats, new: RunStats) -> None:
     """Median / p10 / p90 of rank-of-gold across questions where gold appears."""
+
     def stats(records_iter) -> tuple[float, float, float] | None:
         ranks = [r["rank_of_gold"] for r in records_iter if r.get("rank_of_gold")]
         if not ranks:

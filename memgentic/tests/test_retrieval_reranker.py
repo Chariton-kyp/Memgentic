@@ -65,9 +65,7 @@ class TestMockReranker:
     @pytest.mark.asyncio
     async def test_top_k_truncates_output(self) -> None:
         reranker = MockReranker()
-        candidates = [
-            RerankCandidate(id=f"m-{i}", text=f"word{i} query") for i in range(5)
-        ]
+        candidates = [RerankCandidate(id=f"m-{i}", text=f"word{i} query") for i in range(5)]
         result = await reranker.rerank("query", candidates, top_k=2)
         assert len(result) == 2
 

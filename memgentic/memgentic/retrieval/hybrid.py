@@ -64,8 +64,7 @@ def reciprocal_rank_fusion[T](
         raise ValueError(f"k must be > 0, got {k}")
     if weights is not None and len(weights) != len(ranked_lists):
         raise ValueError(
-            f"weights length ({len(weights)}) must equal "
-            f"ranked_lists length ({len(ranked_lists)})"
+            f"weights length ({len(weights)}) must equal ranked_lists length ({len(ranked_lists)})"
         )
 
     effective_weights: Sequence[float] = (
@@ -114,8 +113,7 @@ def weighted_score_fusion[T](
     """
     if weights is not None and len(weights) != len(scored_lists):
         raise ValueError(
-            f"weights length ({len(weights)}) must equal "
-            f"scored_lists length ({len(scored_lists)})"
+            f"weights length ({len(weights)}) must equal scored_lists length ({len(scored_lists)})"
         )
 
     effective_weights: Sequence[float] = (

@@ -702,9 +702,7 @@ async def test_memgentic_inventory_unknown_source_warns(ctx, mock_metadata_store
     mock_metadata_store.get_content_type_counts.return_value = {}
     mock_metadata_store.get_capture_profile_counts.return_value = {}
 
-    result = await memgentic_inventory(
-        InventoryInput(source="not_a_tool", detail="summary"), ctx
-    )
+    result = await memgentic_inventory(InventoryInput(source="not_a_tool", detail="summary"), ctx)
 
     assert "warnings" in result
     assert any("not_a_tool" in w for w in result["warnings"])

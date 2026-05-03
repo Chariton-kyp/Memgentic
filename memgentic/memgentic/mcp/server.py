@@ -79,9 +79,7 @@ def _evict_stale_sessions() -> None:
     stale = [sid for sid, (_, ts) in _session_configs.items() if now - ts > _SESSION_TTL]
     for sid in stale:
         _session_configs.pop(sid, None)
-    stale_contexts = [
-        sid for sid, (_, ts) in _session_contexts.items() if now - ts > _SESSION_TTL
-    ]
+    stale_contexts = [sid for sid, (_, ts) in _session_contexts.items() if now - ts > _SESSION_TTL]
     for sid in stale_contexts:
         _session_contexts.pop(sid, None)
 
@@ -1095,9 +1093,7 @@ async def memgentic_handoff(params: HandoffInput, ctx: Context) -> str:
                 return Platform(value)
             except ValueError:
                 valid = ", ".join(sorted(p.value for p in Platform))
-                warnings.append(
-                    f"Unknown {label} '{value}'; ignored. Valid sources: {valid}."
-                )
+                warnings.append(f"Unknown {label} '{value}'; ignored. Valid sources: {valid}.")
                 return None
 
         if params.source:

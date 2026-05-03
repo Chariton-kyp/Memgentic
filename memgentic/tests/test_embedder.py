@@ -385,10 +385,7 @@ class TestPrefixFormatters:
             "load_user",
             task="Given a function name, retrieve its definition",
         )
-        assert out == (
-            "Instruct: Given a function name, retrieve its definition\n"
-            "Query: load_user"
-        )
+        assert out == ("Instruct: Given a function name, retrieve its definition\nQuery: load_user")
 
     def test_qwen3_document_unprefixed(self):
         # Qwen3 docs leave document side raw.
@@ -512,8 +509,6 @@ class TestEmbedQueryDocument:
         embedder = Embedder(settings)
         try:
             with pytest.raises(EmbeddingError, match="titles length"):
-                await embedder.embed_batch_documents(
-                    ["a", "b"], titles=["only-one"]
-                )
+                await embedder.embed_batch_documents(["a", "b"], titles=["only-one"])
         finally:
             await embedder.close()

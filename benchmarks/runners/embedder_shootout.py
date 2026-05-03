@@ -28,7 +28,6 @@ import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
 from memgentic.processing.embedder import Embedder
@@ -160,7 +159,11 @@ QUERIES: tuple[Query, ...] = (
     Query("traditional Italian pasta dish without cream", ("en-cooking",), "en"),
     Query("how does sqlite do keyword search ranking", ("en-tech",), "en"),
     Query("who proposed the imitation game for machine intelligence", ("en-history",), "en"),
-    Query("memory tool that carries context across AI coding assistants", ("en-product", "el-product"), "en"),
+    Query(
+        "memory tool that carries context across AI coding assistants",
+        ("en-product", "el-product"),
+        "en",
+    ),
     # English query → Greek doc (cross-lingual)
     Query("ancient Greek king of Macedonia born in Pella", ("el-history",), "en"),
     Query("traditional Greek dish with eggplant minced meat and bechamel", ("el-cooking",), "en"),
@@ -270,7 +273,10 @@ def _print_summary(results: list[ModelResult]) -> None:
     print()
     print(f"Corpus: {len(CORPUS)} docs   Queries: {len(QUERIES)}")
     print()
-    header = f"{'model':<28} {'dim':>5} {'R@1':>6} {'R@5':>6} {'MRR':>6} {'corpus_s':>10} {'query_s':>10}"
+    header = (
+        f"{'model':<28} {'dim':>5} {'R@1':>6} {'R@5':>6} "
+        f"{'MRR':>6} {'corpus_s':>10} {'query_s':>10}"
+    )
     print(header)
     print("-" * len(header))
     for r in results:
@@ -288,7 +294,11 @@ def _print_per_query_breakdown(results: list[ModelResult]) -> None:
     print("Per-query gold rank (lower is better, '-' means missed entirely):")
     print()
     width = 5
-    head = f"{'#':>3} {'lang':>4} " + "".join(f"{r.model[:14]:>{width + 9}}" for r in results) + "  query"
+    head = (
+        f"{'#':>3} {'lang':>4} "
+        + "".join(f"{r.model[:14]:>{width + 9}}" for r in results)
+        + "  query"
+    )
     print(head)
     for i, query in enumerate(QUERIES):
         ranks = []

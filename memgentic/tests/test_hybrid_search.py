@@ -138,10 +138,7 @@ async def test_hybrid_search_semantic_plus_keyword(
     assert len(results) == 2
     # mem-1 in both: semantic rank 0 + keyword rank 0 with weighted RRF
     assert results[0]["id"] == "mem-1"
-    expected_mem1 = (
-        DEFAULT_SEMANTIC_WEIGHT * _rrf_score(0)
-        + DEFAULT_KEYWORD_WEIGHT * _rrf_score(0)
-    )
+    expected_mem1 = DEFAULT_SEMANTIC_WEIGHT * _rrf_score(0) + DEFAULT_KEYWORD_WEIGHT * _rrf_score(0)
     assert results[0]["score"] == round(expected_mem1, 6)
     assert results[0]["search_method"] == "hybrid"
     # mem-2 keyword rank 1 only — keyword-weighted contribution only
@@ -271,9 +268,7 @@ async def test_hybrid_search_graph_boost_score(
     assert results[0]["graph_boosted"] is True
 
 
-async def test_hybrid_search_custom_weights(
-    mock_embedder, mock_vector_store, mock_metadata_store
-):
+async def test_hybrid_search_custom_weights(mock_embedder, mock_vector_store, mock_metadata_store):
     """Caller-supplied weights override the per-signal RRF defaults."""
     mock_vector_store.search.return_value = [
         {"id": "mem-1", "score": 0.9, "payload": {}},

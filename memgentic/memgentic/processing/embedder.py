@@ -45,9 +45,7 @@ _RETRY_DECORATOR = retry(
 # Default retrieval task description used by Qwen3-Embedding when the
 # caller doesn't override. Kept generic so it works for memory recall,
 # code search, and conversation transcript retrieval.
-_QWEN3_DEFAULT_TASK = (
-    "Given a search query, retrieve relevant memory passages that match the query"
-)
+_QWEN3_DEFAULT_TASK = "Given a search query, retrieve relevant memory passages that match the query"
 
 
 def _model_family(model_name: str) -> str:
@@ -154,8 +152,7 @@ class Embedder:
             formatted = [format_document(model, t) for t in texts]
         else:
             formatted = [
-                format_document(model, t, title=ti)
-                for t, ti in zip(texts, titles, strict=False)
+                format_document(model, t, title=ti) for t, ti in zip(texts, titles, strict=False)
             ]
         return await self.embed_batch(formatted)
 

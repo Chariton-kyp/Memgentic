@@ -26,11 +26,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from benchmarks.lib.corpus_loader import CorpusLoaderError, load_longmemeval
-from benchmarks.lib.harness import BenchmarkHarness
 from memgentic.processing.query_features import extract_features
 from memgentic.processing.query_rewriter import QueryRewriter
 from memgentic.retrieval.feature_boost import apply_feature_boosts
+
+from benchmarks.lib.corpus_loader import CorpusLoaderError, load_longmemeval
+from benchmarks.lib.harness import BenchmarkHarness
 
 
 async def run(
@@ -49,6 +50,7 @@ async def run(
     rerank_top_k: int = 30,
     question_aware_boosts: bool = False,
     rewrite_query_with: str | None = None,
+    chunk_fetch: int | None = None,
 ) -> Path:
     """Run LongMemEval end-to-end and write the JSONL result file.
 
@@ -102,9 +104,7 @@ async def run(
         # Pre-expand all queries once so rewriter latency lives outside
         # the per-question loop and the cost is visible as a single batch.
         if rewriter is not None:
-            expanded_texts = await rewriter.expand_many(
-                [q.text for q in questions], mode="concat"
-            )
+            expanded_texts = await rewriter.expand_many([q.text for q in questions], mode="concat")
             for question, expanded in zip(questions, expanded_texts, strict=True):
                 # Replace question text in-place so downstream code uses the
                 # expansion. The original .text is preserved on the JSONL
@@ -119,13 +119,13 @@ async def run(
         # eats the top-k slots and starves the recall metric — that was the
         # observed failure mode where reranker put 3 chunks of the gold
         # session at ranks 1-3 but R@5 only counted 3 unique sessions.
-        chunk_fetch = max(k * 6, 30)
+        effective_chunk_fetch = chunk_fetch if chunk_fetch is not None else max(k * 6, 30)
 
         for question in questions:
             if retrieval_mode == "hybrid":
                 hits = await active.search_hybrid(
                     question.text,
-                    n_results=chunk_fetch,
+                    n_results=effective_chunk_fetch,
                     dense_weight=dense_weight,
                     bm25_weight=bm25_weight,
                 )
@@ -134,8 +134,8 @@ async def run(
                 # enough candidates to fill the requested chunk_fetch slots.
                 hits = await active.search_with_rerank(
                     question.text,
-                    n_results=chunk_fetch,
-                    retrieve_k=max(rerank_top_k, chunk_fetch),
+                    n_results=effective_chunk_fetch,
+                    retrieve_k=max(rerank_top_k, effective_chunk_fetch),
                 )
             else:
                 hits = await active.search(question.text, n_results=chunk_fetch)
@@ -265,6 +265,17 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--chunk-fetch",
+        type=int,
+        default=None,
+        help=(
+            "Override the per-question over-fetch depth (default "
+            "max(k*6, 30)). Larger values give the dedup-to-unique-"
+            "sessions step more candidates to choose from, at the cost "
+            "of more vector searches and BM25 / rerank work."
+        ),
+    )
+    parser.add_argument(
         "--dense-weight",
         type=float,
         default=1.0,
@@ -332,6 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 rerank_top_k=args.rerank_top_k,
                 question_aware_boosts=args.question_aware_boosts,
                 rewrite_query_with=args.rewrite_query_with,
+                chunk_fetch=args.chunk_fetch,
             )
         )
     except CorpusLoaderError as exc:

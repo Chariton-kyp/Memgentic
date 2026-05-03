@@ -81,13 +81,36 @@ _TIME_UNIT_DAYS: dict[str, float] = {
 # Number words to integer. Used so "two months ago" matches "2 months ago".
 _NUMBER_WORDS: dict[str, int] = {
     # English
-    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
-    "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
     # Greek
-    "ένα": 1, "ένας": 1, "μία": 1, "μια": 1, "δύο": 2, "δυο": 2,
-    "τρία": 3, "τρεις": 3, "τέσσερα": 4, "τέσσερις": 4,
-    "πέντε": 5, "έξι": 6, "επτά": 7, "εφτά": 7, "οκτώ": 8, "οχτώ": 8,
-    "εννέα": 9, "εννιά": 9, "δέκα": 10,
+    "ένα": 1,
+    "ένας": 1,
+    "μία": 1,
+    "μια": 1,
+    "δύο": 2,
+    "δυο": 2,
+    "τρία": 3,
+    "τρεις": 3,
+    "τέσσερα": 4,
+    "τέσσερις": 4,
+    "πέντε": 5,
+    "έξι": 6,
+    "επτά": 7,
+    "εφτά": 7,
+    "οκτώ": 8,
+    "οχτώ": 8,
+    "εννέα": 9,
+    "εννιά": 9,
+    "δέκα": 10,
 }
 
 # Pattern: (number-word OR digits) followed by a unit then optional "ago"/"πριν".
@@ -106,12 +129,22 @@ _RELATIVE_TIME_RE = re.compile(
 
 # Common implicit anchors → days back from now.
 _IMPLICIT_ANCHORS: dict[str, float] = {
-    "today": 0.0, "yesterday": 1.0, "this week": 3.5, "last week": 7.0,
-    "last month": 30.0, "this month": 15.0, "last year": 365.0,
-    "σήμερα": 0.0, "χθες": 1.0, "εχθές": 1.0,
-    "αυτή την εβδομάδα": 3.5, "την περασμένη εβδομάδα": 7.0,
-    "τον προηγούμενο μήνα": 30.0, "τον περασμένο μήνα": 30.0,
-    "πέρυσι": 365.0, "πέρσι": 365.0,
+    "today": 0.0,
+    "yesterday": 1.0,
+    "this week": 3.5,
+    "last week": 7.0,
+    "last month": 30.0,
+    "this month": 15.0,
+    "last year": 365.0,
+    "σήμερα": 0.0,
+    "χθες": 1.0,
+    "εχθές": 1.0,
+    "αυτή την εβδομάδα": 3.5,
+    "την περασμένη εβδομάδα": 7.0,
+    "τον προηγούμενο μήνα": 30.0,
+    "τον περασμένο μήνα": 30.0,
+    "πέρυσι": 365.0,
+    "πέρσι": 365.0,
 }
 
 # Absolute year — "in 2024", "το 2024", "2024".
@@ -125,11 +158,18 @@ _YEAR_RE = re.compile(r"\b(19[5-9]\d|20\d{2}|21\d{2})\b")
 # The regex deliberately requires at least 2 characters inside the quotes so
 # stray apostrophes ("don't") don't fire. Curly quotes are normalised to
 # straight before matching.
-_QUOTE_NORMALISATIONS = str.maketrans({
-    "‘": "'", "’": "'", "‚": "'",
-    "“": '"', "”": '"', "„": '"',
-    "«": '"', "»": '"',  # Greek/French guillemets → "
-})
+_QUOTE_NORMALISATIONS = str.maketrans(
+    {
+        "‘": "'",
+        "’": "'",
+        "‚": "'",
+        "“": '"',
+        "”": '"',
+        "„": '"',
+        "«": '"',
+        "»": '"',  # Greek/French guillemets → "
+    }
+)
 _QUOTED_RE = re.compile(r"""(?P<q>['"])(?P<inner>.{2,80}?)(?P=q)""")
 
 
@@ -140,20 +180,50 @@ _QUOTED_RE = re.compile(r"""(?P<q>['"])(?P<inner>.{2,80}?)(?P=q)""")
 # Allows Greek capitals via a dedicated character class. Skips a small list of
 # sentence-initial words (What/Who/Where/Πώς/Τι etc.) so "What did Maria say"
 # extracts only "Maria".
-_PROPER_NOUN_RE = re.compile(
-    r"\b[A-ZΑ-ΩΆΈΉΊΌΎΏΪΫ][A-Za-zΑ-ΩΆΈΉΊΌΎΏΪΫα-ωάέήίόύώϊϋΐΰ]{2,30}\b"
-)
+_PROPER_NOUN_RE = re.compile(r"\b[A-ZΑ-ΩΆΈΉΊΌΎΏΪΫ][A-Za-zΑ-ΩΆΈΉΊΌΎΏΪΫα-ωάέήίόύώϊϋΐΰ]{2,30}\b")
 _QUERY_INITIAL_STOPWORDS: frozenset[str] = frozenset(
     {
         # English question/imperative starts
-        "What", "Who", "Where", "When", "Why", "How", "Which", "Whose",
-        "Does", "Did", "Do", "Can", "Could", "Would", "Should", "Find",
-        "Get", "Tell", "Show", "List", "Search", "Recall",
+        "What",
+        "Who",
+        "Where",
+        "When",
+        "Why",
+        "How",
+        "Which",
+        "Whose",
+        "Does",
+        "Did",
+        "Do",
+        "Can",
+        "Could",
+        "Would",
+        "Should",
+        "Find",
+        "Get",
+        "Tell",
+        "Show",
+        "List",
+        "Search",
+        "Recall",
         # Greek
-        "Τι", "Ποιος", "Ποια", "Ποιο", "Πού", "Πότε", "Γιατί", "Πώς",
-        "Δείξε", "Βρες", "Πες", "Δες", "Θυμήσου",
+        "Τι",
+        "Ποιος",
+        "Ποια",
+        "Ποιο",
+        "Πού",
+        "Πότε",
+        "Γιατί",
+        "Πώς",
+        "Δείξε",
+        "Βρες",
+        "Πες",
+        "Δες",
+        "Θυμήσου",
         # Other commons
-        "The", "An", "A",
+        "The",
+        "An",
+        "A",
     }
 )
 

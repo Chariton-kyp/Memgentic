@@ -114,7 +114,7 @@ def apply_feature_boosts(
     boosted: list[dict[str, Any]] = []
     for cand in candidates:
         payload = cand.get("payload") or {}
-        content = (payload.get("content") or "")
+        content = payload.get("content") or ""
         content_lower = content.lower() if isinstance(content, str) else ""
 
         multiplier = 1.0
@@ -128,7 +128,7 @@ def apply_feature_boosts(
         if nouns_lower:
             hits = sum(1 for n in nouns_lower if n in content_lower)
             if hits:
-                noun_mult = min(proper_noun_boost ** hits, proper_noun_cap)
+                noun_mult = min(proper_noun_boost**hits, proper_noun_cap)
                 multiplier *= noun_mult
 
         # Temporal proximity to the target window.
