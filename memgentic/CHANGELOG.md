@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.7.0...v0.8.0) (2026-05-03)
+
+
+### Features
+
+* retrieval wins (R@5 +6.7pp) + cross-tool continuation ([#110](https://github.com/Chariton-kyp/Memgentic/issues/110)) ([2fb1011](https://github.com/Chariton-kyp/Memgentic/commit/2fb1011afb0923a73b54d3f9ce3c1b661f24966a))
+
 ## [0.7.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.6.0...v0.7.0) (2026-04-22)
 
 
