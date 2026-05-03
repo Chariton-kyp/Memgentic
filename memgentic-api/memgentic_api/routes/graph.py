@@ -19,7 +19,7 @@ def get_graph(request: Request) -> Any:
         raise HTTPException(
             status_code=501,
             detail="Knowledge graph requires intelligence extras. "
-            "Install with: pip install mneme-core[intelligence]",
+            "Install with: pip install memgentic[intelligence]",
         )
     return graph
 

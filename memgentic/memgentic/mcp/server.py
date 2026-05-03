@@ -198,7 +198,7 @@ async def app_lifespan(server: FastMCP):
         logger.info(
             "mcp_server.no_intelligence",
             msg="Intelligence extras not installed. Using basic search. "
-            "Install with: pip install mneme-core[intelligence]",
+            "Install with: pip install memgentic[intelligence]",
         )
 
     pipeline = IngestionPipeline(

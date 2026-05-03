@@ -338,7 +338,7 @@ class IngestionPipeline:
                 logger.info(
                     "pipeline.no_intelligence_package",
                     msg="Intelligence extras not installed. Using heuristic classification only. "
-                    "Install with: pip install mneme-core[intelligence]",
+                    "Install with: pip install memgentic[intelligence]",
                 )
             else:
                 logger.info(

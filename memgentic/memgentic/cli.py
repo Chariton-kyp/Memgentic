@@ -685,7 +685,7 @@ def import_existing(source: str | None, capture_profile: str | None):
     "-o",
     default=None,
     type=click.Path(),
-    help="Output file path (default: mneme-backup-<timestamp>.tar.gz)",
+    help="Output file path (default: memgentic-backup-<timestamp>.tar.gz)",
 )
 def backup(output: str | None):
     """Create a compressed backup of the Memgentic SQLite database.
@@ -712,7 +712,7 @@ def backup(output: str | None):
 
     timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     if output is None:
-        output = f"mneme-backup-{timestamp}.tar.gz"
+        output = f"memgentic-backup-{timestamp}.tar.gz"
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -748,7 +748,7 @@ def restore(backup_file: str, force: bool):
 
     \b
     Examples:
-      memgentic restore mneme-backup-20260401-120000.tar.gz
+      memgentic restore memgentic-backup-20260401-120000.tar.gz
       memgentic restore backup.tar.gz --force
     """
     import json
@@ -804,7 +804,7 @@ def restore(backup_file: str, force: bool):
     "-o",
     default=None,
     type=click.Path(),
-    help="Output file path (default: mneme-gdpr-export-<timestamp>.json)",
+    help="Output file path (default: memgentic-gdpr-export-<timestamp>.json)",
 )
 def export_gdpr(output: str | None):
     """Export all memories as JSON for GDPR Article 20 data portability.
@@ -833,7 +833,7 @@ def export_gdpr(output: str | None):
             memories = await store.get_memories_by_filter(limit=1_000_000)
 
             timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
-            out_path = output or f"mneme-gdpr-export-{timestamp}.json"
+            out_path = output or f"memgentic-gdpr-export-{timestamp}.json"
 
             export_data = {
                 "export_type": "gdpr_article_20",
@@ -867,7 +867,7 @@ def consolidate():
         except ImportError:
             console.print(
                 "[red]Intelligence extras required for consolidation.[/]\n"
-                "Install with: [cyan]pip install mneme-core[intelligence][/]"
+                "Install with: [cyan]pip install memgentic[intelligence][/]"
             )
             return
         from memgentic.processing.embedder import Embedder
@@ -1509,7 +1509,7 @@ def graph_neighbors(entity: str, depth: int):
         except ImportError:
             console.print(
                 "[red]Intelligence extras required for knowledge graph.[/]\n"
-                "Install with: [cyan]pip install mneme-core[intelligence][/]"
+                "Install with: [cyan]pip install memgentic[intelligence][/]"
             )
             return
 
