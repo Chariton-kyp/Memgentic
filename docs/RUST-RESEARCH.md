@@ -1,7 +1,7 @@
 # Rust Integration Research for Memgentic
 
 **Date:** 2026-04-10
-**Status:** Research / Proposal
+**Status:** Design exploration — informs the existing `memgentic-native` module. Stage labels below describe a logical rollout order, not a committed timeline.
 
 ---
 
@@ -379,7 +379,8 @@ native = ["memgentic-native"]
 
 ## 7. Rust Learning Path
 
-Since you have zero Rust knowledge, here's a focused path for this project:
+For contributors new to Rust who want to extend the `memgentic-native`
+acceleration module, here's a focused path:
 
 ### Week 1-2: Foundations
 - **The Rust Book** (chapters 1-10): ownership, borrowing, structs, enums, pattern matching

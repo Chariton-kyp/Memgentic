@@ -303,7 +303,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "Concatenate all kept turns into ONE document per session "
             "instead of one document per turn. Combine with "
-            "--user-turns-only to reproduce the MemPalace 96.6% R@5 "
+            "--user-turns-only to reproduce the MemPalace 96.6%% R@5 "
             "indexing unit (one user-only doc per session)."
         ),
     )

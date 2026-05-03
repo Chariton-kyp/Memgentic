@@ -1,8 +1,13 @@
 # Memgentic Benchmarks
 
-All benchmarks run on a Windows 11 / Intel-class machine with Qdrant in local
-file mode and Ollama serving `qwen3-embedding:0.6b`. Numbers below are
-placeholders and will be updated as the benchmark suite is executed.
+This document tracks **target latencies** for ingestion, search, and storage
+operations. The targets describe what the implementation should comfortably
+hit on commodity hardware (Windows 11 / Intel-class, Qdrant local file mode,
+Ollama serving `qwen3-embedding:0.6b`); the `Actual` column is filled in as
+local benchmark sessions complete. **Targets are aspirational reference
+values, not measured guarantees.** The retrieval-quality table further down
+sources its targets from published academic baselines and is similarly
+populated only after a real run.
 
 Last updated: 2026-04-09 | Commit: TBD
 
@@ -126,7 +131,11 @@ headline metric (R@k or p@k) on stdout.
 
 ### 5. Compare to targets
 
-| Benchmark | Metric | Target | Source |
+The table below lists target metrics derived from published academic
+baselines. They are reference points for honest reporting, not claims of
+superiority. Memgentic results are populated only after a real run.
+
+| Benchmark | Metric | Target (from upstream paper / baseline) | Source |
 |---|---|---|---|
 | LongMemEval (raw) | R@5 | ≥ 96.6% | MemPalace published baseline |
 | LoCoMo | R@10 | ≥ 85% | hybrid v5 in the LoCoMo paper |

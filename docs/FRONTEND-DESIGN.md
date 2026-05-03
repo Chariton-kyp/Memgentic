@@ -2,7 +2,7 @@
 
 **Status:** Planning
 **Date:** 2026-04-10
-**Philosophy:** Your memories, organized like your brain — by importance, recency, and association. Not a project management tool.
+**Philosophy:** Memories are organized by importance score, recency, and semantic relationship. The dashboard is a memory browser, not a project-management tool.
 
 ---
 

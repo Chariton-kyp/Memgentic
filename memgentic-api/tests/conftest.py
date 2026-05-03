@@ -66,12 +66,8 @@ def _build_mock_embedder() -> AsyncMock:
     embedder = AsyncMock()
     embedder.embed = AsyncMock(side_effect=lambda text: _make_fake_embedding())
     embedder.embed_batch = AsyncMock(side_effect=lambda texts: _make_fake_embeddings(texts))
-    embedder.embed_query = AsyncMock(
-        side_effect=lambda text, task=None: _make_fake_embedding()
-    )
-    embedder.embed_document = AsyncMock(
-        side_effect=lambda text, title=None: _make_fake_embedding()
-    )
+    embedder.embed_query = AsyncMock(side_effect=lambda text, task=None: _make_fake_embedding())
+    embedder.embed_document = AsyncMock(side_effect=lambda text, title=None: _make_fake_embedding())
     embedder.embed_batch_documents = AsyncMock(
         side_effect=lambda texts, titles=None: _make_fake_embeddings(texts)
     )
