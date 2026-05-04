@@ -1,4 +1,4 @@
-"""Tests for Copilot CLI adapter."""
+"""Tests for Copilot CLI adapter — reads ``~/.copilot/command-history-state.json``."""
 
 import json
 
@@ -13,59 +13,26 @@ def adapter():
     return CopilotCliAdapter()
 
 
-@pytest.fixture
-def sample_session(tmp_path):
-    """Create a sample Copilot CLI JSON session file."""
-    data = {
-        "session_id": "abc123",
-        "messages": [
-            {"role": "user", "content": "How do I use git rebase?"},
-            {
-                "role": "assistant",
-                "content": "To rebase, you can use `git rebase <branch>`. "
-                "This replays your commits on top of the target branch...",
-            },
-            {"role": "user", "content": "What about interactive rebase?"},
-            {
-                "role": "assistant",
-                "content": "For interactive rebase, use `git rebase -i HEAD~N` "
-                "where N is the number of commits to edit...",
-            },
-        ],
-    }
-
-    file_path = tmp_path / "session-abc123.json"
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-
+def _write_history(tmp_path, prompts):
+    file_path = tmp_path / "command-history-state.json"
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump({"commandHistory": prompts}, f)
     return file_path
 
 
 @pytest.fixture
-def sample_session_list_content(tmp_path):
-    """Create a session with content as list of parts."""
-    data = {
-        "session_id": "list-parts",
-        "messages": [
-            {"role": "user", "content": "Write a Python function to sort a list"},
-            {
-                "role": "assistant",
-                "content": [
-                    {"type": "text", "text": "Here's a sorting function:"},
-                    {
-                        "type": "text",
-                        "text": "```python\ndef sort_list(items):\n    return sorted(items)\n```",
-                    },
-                ],
-            },
+def sample_history(tmp_path):
+    """Realistic-shape history JSON with five prompts, one short slash command."""
+    return _write_history(
+        tmp_path,
+        [
+            "How do I configure Docker networking with custom subnets?",
+            "Write a Python function that sorts a list of dicts by nested key",
+            "/usage",  # too short — should be skipped
+            "Explain the difference between rebase and merge in git",
+            "Generate a fastapi endpoint with rate limiting and request size cap",
         ],
-    }
-
-    file_path = tmp_path / "session-list.json"
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-
-    return file_path
+    )
 
 
 def test_adapter_platform(adapter):
@@ -73,7 +40,7 @@ def test_adapter_platform(adapter):
 
 
 def test_adapter_file_patterns(adapter):
-    assert "*.json" in adapter.file_patterns
+    assert "command-history-state.json" in adapter.file_patterns
 
 
 def test_adapter_watch_paths(adapter):
@@ -82,95 +49,66 @@ def test_adapter_watch_paths(adapter):
 
 
 @pytest.mark.asyncio
-async def test_parse_file(adapter, sample_session):
-    chunks = await adapter.parse_file(sample_session)
-    assert len(chunks) > 0
-    for chunk in chunks:
-        assert chunk.content
+async def test_parse_file_emits_chunk_per_prompt(adapter, sample_history):
+    chunks = await adapter.parse_file(sample_history)
+    # 4 substantive prompts (one short ``/usage`` skipped) + 1 summary = 5
+    assert len(chunks) == 5
+    summary = chunks[0]
+    assert summary.content_type == ContentType.CONVERSATION_SUMMARY
+    body = chunks[1:]
+    for chunk in body:
+        assert chunk.content.startswith("Human:")
+        assert "GitHub Copilot CLI does not persist" in chunk.content
         assert chunk.content_type in ContentType
 
 
 @pytest.mark.asyncio
-async def test_parse_file_extracts_exchanges(adapter, sample_session):
-    chunks = await adapter.parse_file(sample_session)
-    # Should have 2 exchange chunks (2 user-assistant pairs)
-    assert len(chunks) == 2
-    assert "Human:" in chunks[0].content
-    assert "Assistant:" in chunks[0].content
-    assert "git rebase" in chunks[0].content.lower()
+async def test_parse_file_skips_short_prompts(adapter, tmp_path):
+    file_path = _write_history(tmp_path, ["/usage", "/resume", "?"])
+    chunks = await adapter.parse_file(file_path)
+    assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_parse_file_list_content(adapter, sample_session_list_content):
-    chunks = await adapter.parse_file(sample_session_list_content)
-    assert len(chunks) > 0
-    # Should contain the code from list content
-    assert "python" in chunks[0].content.lower()
+async def test_get_session_id_is_stable(adapter, sample_history):
+    sid = await adapter.get_session_id(sample_history)
+    assert sid == "copilot-history"
 
 
 @pytest.mark.asyncio
-async def test_get_session_id(adapter, sample_session):
-    session_id = await adapter.get_session_id(sample_session)
-    assert session_id == "abc123"
-
-
-@pytest.mark.asyncio
-async def test_get_session_id_fallback(adapter, tmp_path):
-    """Fall back to file stem when no session_id in JSON."""
-    data = {"messages": []}
-    file_path = tmp_path / "fallback-session.json"
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-
-    session_id = await adapter.get_session_id(file_path)
-    assert session_id == "fallback-session"
-
-
-@pytest.mark.asyncio
-async def test_get_session_title(adapter, sample_session):
-    title = await adapter.get_session_title(sample_session)
+async def test_get_session_title_is_first_substantive_prompt(adapter, sample_history):
+    title = await adapter.get_session_title(sample_history)
     assert title is not None
-    assert "git rebase" in title.lower()
+    assert "Docker" in title
 
 
 @pytest.mark.asyncio
-async def test_parse_empty_messages(adapter, tmp_path):
-    data = {"session_id": "empty", "messages": []}
-    file_path = tmp_path / "empty.json"
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-
+async def test_parse_empty_history(adapter, tmp_path):
+    file_path = _write_history(tmp_path, [])
     chunks = await adapter.parse_file(file_path)
     assert chunks == []
 
 
 @pytest.mark.asyncio
 async def test_parse_invalid_json(adapter, tmp_path):
-    file_path = tmp_path / "invalid.json"
-    file_path.write_text("not valid json {{{")
-
+    file_path = tmp_path / "command-history-state.json"
+    file_path.write_text("not valid json {{{", encoding="utf-8")
     chunks = await adapter.parse_file(file_path)
     assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_skips_system_messages(adapter, tmp_path):
-    data = {
-        "session_id": "sys",
-        "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
-            {"role": "user", "content": "How do I configure Docker containers with networking?"},
-            {
-                "role": "assistant",
-                "content": "You can configure Docker networking using docker-compose.yml...",
-            },
-        ],
-    }
-    file_path = tmp_path / "system.json"
-    with open(file_path, "w") as f:
-        json.dump(data, f)
-
+async def test_parse_missing_command_history_key(adapter, tmp_path):
+    file_path = tmp_path / "command-history-state.json"
+    file_path.write_text(json.dumps({"unrelated": []}), encoding="utf-8")
     chunks = await adapter.parse_file(file_path)
-    # System message should be skipped, only user-assistant exchange
-    assert len(chunks) == 1
-    assert "system" not in chunks[0].content.lower().split("human:")[0]
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_assistant_disclaimer_in_every_chunk(adapter, sample_history):
+    """The CLI does not persist responses; chunk content must say so."""
+    chunks = await adapter.parse_file(sample_history)
+    body = [c for c in chunks if c.content_type != ContentType.CONVERSATION_SUMMARY]
+    for chunk in body:
+        assert "[GitHub Copilot CLI does not persist assistant responses on disk" in chunk.content
