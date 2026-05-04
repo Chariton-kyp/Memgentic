@@ -25,6 +25,10 @@ class LLMClient:
 
     def __init__(self, settings: MemgenticSettings) -> None:
         self._settings = settings
+        # Identifies which provider produced ``self._model``. Used by
+        # ``generate_structured`` to pick a compatible structured-output method
+        # (function_calling for hosted OpenAI / Gemini, json_schema for local).
+        self._provider_kind: str | None = None
         self._model = self._create_model()
 
     @property
@@ -36,9 +40,12 @@ class LLMClient:
         """Create the best available LLM model.
 
         Priority order:
-        1. Gemini Flash Lite via API (if GOOGLE_API_KEY set)
-        2. Gemma 4 via local Ollama (if available, no API key needed)
-        3. None (falls back to heuristics)
+        1. Gemini Flash Lite via API (if GOOGLE_API_KEY set) — cheapest cloud
+        2. OpenAI-compatible endpoint (LM Studio / vLLM / llama.cpp llama-server)
+           — when ``openai_compat_base_url`` is set. Use this for model
+           architectures Ollama doesn't support yet (e.g. Unsloth gemma4 GGUFs).
+        3. Local Ollama (default fallback for laptop / single-node)
+        4. None (falls back to heuristics)
         """
         if not self._settings.enable_llm_processing:
             logger.info("llm.disabled", msg="LLM processing disabled in config")
@@ -58,17 +65,62 @@ class LLMClient:
                     provider="google",
                     model=self._settings.summarization_model,
                 )
+                self._provider_kind = "google"
                 return model
             except Exception as e:
                 logger.warning("llm.google_init_failed", error=str(e))
 
-        # Priority 2: Local LLM via Ollama (Gemma 4, no API key needed)
+        # Priority 2: OpenAI-compatible endpoint (opt-in via env)
+        if self._settings.openai_compat_base_url:
+            model = self._try_openai_compat_llm()
+            if model:
+                return model
+
+        # Priority 3: Local LLM via Ollama (no API key needed)
         if self._settings.enable_local_llm:
             model = self._try_ollama_llm()
             if model:
                 return model
 
         logger.info("llm.no_provider", msg="No LLM available -- using heuristics only")
+        return None
+
+    def _try_openai_compat_llm(self) -> BaseChatModel | None:
+        """Try to connect to an OpenAI-compatible chat-completions endpoint.
+
+        Covers LM Studio, vLLM, llama.cpp's ``llama-server``, OpenRouter, etc.
+        The base_url should include the ``/v1`` suffix where the upstream
+        expects it (most servers do).
+        """
+        try:
+            from langchain_openai import ChatOpenAI
+
+            kwargs: dict = {
+                "model": self._settings.openai_compat_model,
+                "base_url": self._settings.openai_compat_base_url,
+                "api_key": self._settings.openai_compat_api_key,
+                "temperature": 0,
+                # ``max_tokens`` here is the OpenAI-style equivalent of
+                # Ollama's ``num_predict``. Reuse the same budget — both are
+                # caps on completion length.
+                "max_tokens": self._settings.ollama_num_predict,
+            }
+            model = ChatOpenAI(**kwargs)
+            logger.info(
+                "llm.initialized",
+                provider="openai_compat",
+                base_url=self._settings.openai_compat_base_url,
+                model=self._settings.openai_compat_model,
+            )
+            self._provider_kind = "openai_compat"
+            return model
+        except ImportError:
+            logger.debug(
+                "llm.openai_compat_not_installed",
+                msg="langchain-openai not installed (pip install 'memgentic[intelligence]')",
+            )
+        except Exception as e:
+            logger.warning("llm.openai_compat_init_failed", error=str(e))
         return None
 
     def _try_ollama_llm(self) -> BaseChatModel | None:
@@ -99,6 +151,7 @@ class LLMClient:
                 provider="ollama",
                 model=self._settings.local_llm_model,
             )
+            self._provider_kind = "ollama"
             return model
         except ImportError:
             logger.debug("llm.ollama_not_installed", msg="langchain-ollama not installed")
@@ -126,16 +179,17 @@ class LLMClient:
     async def generate_structured(self, prompt: str, schema: type[BaseModel]) -> BaseModel | None:
         """Generate structured output matching the Pydantic schema.
 
-        Routing:
-        - Ollama models: use ``method="json_schema"`` so the request goes through
-          Ollama's native JSON-schema format. The default (``"function_calling"``)
-          assumes the model declares tool-calling support; small open models
-          (gemma3:1b, gemma4:e2b/e4b, qwen2.5 < 7B) don't, and the langchain
-          path falls into a 60-120 sec retry / shape-error loop that we observed
-          on this machine. ``json_schema`` maps directly to Ollama's
-          ``options.format`` JSON-schema and produces valid output in ~1 sec.
-        - Cloud models (Gemini, Anthropic, etc.): keep the langchain default
-          since their providers expose proper tool-calling.
+        Routing by ``_provider_kind``:
+        - ``ollama`` and ``openai_compat``: use ``method="json_schema"``. Ollama
+          maps it to ``options.format``; OpenAI-compatible servers (LM Studio,
+          vLLM, llama.cpp llama-server) map it to ``response_format`` — both
+          produce schema-validated JSON without requiring tool-calling. The
+          langchain default (``function_calling``) assumes the model declares
+          tool support; small open models (gemma3:1b, gemma4:e2b/e4b, qwen2.5
+          < 7B) don't, and the langchain path falls into a 60-120 sec
+          retry / shape-error loop that we observed on this machine.
+        - ``google`` (Gemini): keep langchain default — Gemini exposes proper
+          function calling and tool-call structured output is well-tested.
 
         Returns None if LLM unavailable or generation fails.
         """
@@ -143,8 +197,7 @@ class LLMClient:
             return None
         try:
             method_kwargs: dict = {}
-            # ChatOllama lives under langchain_ollama; detect by class module.
-            if type(self._model).__module__.startswith("langchain_ollama"):
+            if self._provider_kind in ("ollama", "openai_compat"):
                 method_kwargs["method"] = "json_schema"
             structured = self._model.with_structured_output(schema, **method_kwargs)
             result = await structured.ainvoke(prompt)

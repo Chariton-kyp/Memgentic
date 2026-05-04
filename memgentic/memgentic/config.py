@@ -129,6 +129,32 @@ class MemgenticSettings(BaseSettings):
         ),
     )
 
+    # --- OpenAI-compatible endpoint (LM Studio / vLLM / llama.cpp llama-server) ---
+    # Use when you need a model architecture Ollama doesn't support yet (e.g. an
+    # Unsloth gemma4 GGUF through llama.cpp tip-of-tree). When base_url is set,
+    # this provider takes priority over the local Ollama tier.
+    openai_compat_base_url: str | None = Field(
+        default=None,
+        description=(
+            "OpenAI-compatible chat-completions endpoint (e.g. http://localhost:8080/v1 "
+            "for llama.cpp llama-server). Leave unset to disable this tier."
+        ),
+    )
+    openai_compat_model: str = Field(
+        default="local-model",
+        description=(
+            "Model name to send in the chat-completions request. Most local servers "
+            "ignore this and use whatever they loaded; cloud-compat services need the real id."
+        ),
+    )
+    openai_compat_api_key: str = Field(
+        default="not-needed",
+        description=(
+            "API key for the OpenAI-compatible endpoint. Local servers don't validate "
+            "it — any non-empty string works. Use a real key for hosted services."
+        ),
+    )
+
     # --- Security ---
     enable_credential_scrubbing: bool = Field(
         default=True,
