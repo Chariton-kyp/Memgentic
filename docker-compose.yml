@@ -33,11 +33,11 @@ services:
       retries: 5
       start_period: 30s
 
-  # Memgentic REST API (HTTP, :8100)
+  # Memgentic REST API (HTTP, :3691)
   memgentic-api:
     build: .
     ports:
-      - "8100:8100"
+      - "3691:3691"
     env_file: .env
     environment:
       - TZ=UTC
@@ -49,7 +49,7 @@ services:
     volumes:
       - .:/app
       - memgentic_data:/root/.memgentic
-    command: uv run uvicorn memgentic_api.main:app --host 0.0.0.0 --port 8100
+    command: uv run uvicorn memgentic_api.main:app --host 0.0.0.0 --port 3691
     depends_on:
       qdrant:
         condition: service_healthy
@@ -59,7 +59,7 @@ services:
       - memgentic
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:8100/api/v1/health\")' 2>/dev/null || exit 1"]
+      test: ["CMD-SHELL", "python -c 'import urllib.request; urllib.request.urlopen(\"http://localhost:3691/api/v1/health\")' 2>/dev/null || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 5

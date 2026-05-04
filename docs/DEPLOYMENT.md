@@ -46,7 +46,7 @@ MEMGENTIC_QDRANT_URL=http://localhost:6333
 
 # API
 MEMGENTIC_API_HOST=0.0.0.0
-MEMGENTIC_API_PORT=8100
+MEMGENTIC_API_PORT=3691
 MEMGENTIC_API_KEY=        # Optional, leave empty for local dev
 
 # LLM (optional, for intelligence layer)
@@ -71,7 +71,7 @@ This starts:
 - **Ollama** (port 11434) — Embedding model
 - **Qdrant** (port 6333) — Vector database
 - **Memgentic MCP** (port 8200) — MCP server over HTTP
-- **Memgentic API** (port 8100) — REST API
+- **Memgentic API** (port 3691) — REST API
 
 ### GPU Support
 
@@ -96,7 +96,7 @@ All services have health checks. Monitor with:
 
 ```bash
 docker compose ps     # Service status
-curl localhost:8100/api/v1/health   # API health
+curl localhost:3691/api/v1/health   # API health
 memgentic doctor          # Full diagnostic
 ```
 
@@ -111,8 +111,8 @@ exposing it on a network.
 
 ```
 [Reverse Proxy (nginx/Caddy)]
-    ├── :443 → Dashboard (Next.js, port 3000)
-    ├── :443/api → REST API (FastAPI, port 8100)
+    ├── :443 → Dashboard (Next.js, port 3690)
+    ├── :443/api → REST API (FastAPI, port 3691)
     └── :443/mcp → MCP Server (port 8200)
 
 [Backend Services]

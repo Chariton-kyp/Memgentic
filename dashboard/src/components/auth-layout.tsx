@@ -9,7 +9,7 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { AppShell } from "@/components/app-shell";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100/api/v1";
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3691/api/v1";
 
 export function AuthLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();

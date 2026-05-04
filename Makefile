@@ -13,7 +13,7 @@ dev:  ## Start full stack (auto-detects NVIDIA GPU)
 	@echo ""
 	@echo "Memgentic stack starting..."
 	@echo "  MCP Server:  http://localhost:8200"
-	@echo "  REST API:    http://localhost:8100"
+	@echo "  REST API:    http://localhost:3691"
 	@echo "  Qdrant:      http://localhost:6333/dashboard"
 	@echo "  Ollama:      http://localhost:11434"
 	@echo ""
@@ -93,10 +93,10 @@ pull-models-local:  ## Pull embedding model (local Ollama)
 # --- REST API (local) ---
 
 api:  ## Start REST API locally (dev with reload)
-	uv run uvicorn memgentic_api.main:app --reload --port 8100
+	uv run uvicorn memgentic_api.main:app --reload --port 3691
 
 api-prod:  ## Start REST API (production)
-	uv run uvicorn memgentic_api.main:app --host 0.0.0.0 --port 8100
+	uv run uvicorn memgentic_api.main:app --host 0.0.0.0 --port 3691
 
 # --- Dashboard ---
 

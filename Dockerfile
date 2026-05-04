@@ -59,7 +59,7 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv
 ENV UV_LINK_MODE=copy
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8100/api/v1/health')" || exit 1
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:3691/api/v1/health')" || exit 1
 
 # Run MCP server by default (override in docker-compose per service)
 CMD ["uv", "run", "memgentic", "serve"]

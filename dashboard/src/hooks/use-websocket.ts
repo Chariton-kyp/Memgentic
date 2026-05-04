@@ -14,7 +14,7 @@ interface WebSocketMessage {
 }
 
 const WS_URL =
-  process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:8100/api/v1/ws";
+  process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3691/api/v1/ws";
 const MAX_BACKOFF = 30_000;
 
 export function useWebSocket() {
