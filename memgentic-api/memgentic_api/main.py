@@ -250,7 +250,12 @@ app.add_middleware(SecurityHeadersMiddleware)
 # 2. CORS — allow dashboard and local dev
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3690", "http://localhost:3000", "http://localhost:3001", "https://app.memgentic.dev"],
+    allow_origins=[
+        "http://localhost:3690",
+        "http://localhost:3000",
+        "http://localhost:3001",
+        "https://app.memgentic.dev",
+    ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "If-None-Match"],
