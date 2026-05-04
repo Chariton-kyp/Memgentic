@@ -111,6 +111,23 @@ class MemgenticSettings(BaseSettings):
         default=0,
         description="CPU threads for Ollama inference (0=auto, set to vCPU count - 2 for servers)",
     )
+    ollama_num_ctx: int = Field(
+        default=2048,
+        description=(
+            "Context window for the Ollama LLM (KV cache size, in tokens). "
+            "Larger windows allow longer prompts but quadratically increase VRAM. "
+            "Default 2048 keeps a 4-7B model running on a 6-8 GiB GPU; raise to "
+            "4096 if your VRAM allows and your prompts run long."
+        ),
+    )
+    ollama_num_predict: int = Field(
+        default=512,
+        description=(
+            "Maximum tokens an Ollama generation can produce. Memgentic's structured "
+            "outputs (classification / extraction JSON) need ≤ 200 tokens; 512 is a "
+            "safe ceiling. Lower if you see runaway outputs; raise for free-form summaries."
+        ),
+    )
 
     # --- Security ---
     enable_credential_scrubbing: bool = Field(
