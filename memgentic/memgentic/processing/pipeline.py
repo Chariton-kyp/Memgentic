@@ -68,6 +68,46 @@ def _resolve_capture_profile(
     return candidate
 
 
+# Hard cap on a single chunk's content length. Beyond this we truncate
+# rather than refuse — but truncation should be rare in practice because
+# adapters filter tool-output dumps before reaching the pipeline. Set high
+# enough to keep meaningful long-form turns intact (~50 KB ≈ 12 K tokens),
+# low enough that one bad turn cannot blow up an SQLite row or the
+# embedder context window.
+_MAX_CHUNK_CONTENT_CHARS: int = 50_000
+_TRUNCATION_MARKER: str = "\n\n…[truncated by Memgentic — original length {orig} chars]"
+
+
+def _enforce_chunk_size_cap(
+    chunks: list[ConversationChunk], platform: Platform
+) -> list[ConversationChunk]:
+    """Truncate any chunk whose content exceeds ``_MAX_CHUNK_CONTENT_CHARS``.
+
+    Returns a new list of chunks (does not mutate the originals). Logs
+    one ``pipeline.chunk_truncated`` warning per oversized chunk so the
+    operator can find which adapter / file produced it and tighten the
+    upstream filter.
+    """
+    capped: list[ConversationChunk] = []
+    for chunk in chunks:
+        content = chunk.content
+        if len(content) <= _MAX_CHUNK_CONTENT_CHARS:
+            capped.append(chunk)
+            continue
+        truncated = content[:_MAX_CHUNK_CONTENT_CHARS] + _TRUNCATION_MARKER.format(
+            orig=len(content)
+        )
+        logger.warning(
+            "pipeline.chunk_truncated",
+            platform=platform.value,
+            original_length=len(content),
+            truncated_length=len(truncated),
+            content_type=str(chunk.content_type),
+        )
+        capped.append(chunk.model_copy(update={"content": truncated}))
+    return capped
+
+
 class IngestionPipeline:
     """Processes raw conversations into stored, searchable memories.
 
@@ -171,6 +211,15 @@ class IngestionPipeline:
         user_id: str = "",
         capture_profile: CaptureProfile = "enriched",
     ) -> list[Memory]:
+        # Step 0: Defensive cap on absurd chunk sizes. A single Gemini CLI
+        # turn that wraps a ``[Function Response: read_many_files]`` dump
+        # was observed at 765 KB on Chariton's machine on 2026-05-04 —
+        # adapter-level filters now drop these, but anything that slips
+        # through (e.g. very long Claude Code thinking blocks, future
+        # adapter regressions) gets truncated here so it never bloats
+        # the embedder, the SQLite row, or the vector store.
+        chunks = _enforce_chunk_size_cap(chunks, platform)
+
         # Step 1: Deduplication check — compute hash ONCE and reuse
         file_hash: str | None = None
         if file_path:
