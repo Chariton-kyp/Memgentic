@@ -1,9 +1,22 @@
-"""Copilot CLI adapter — parses JSON session files from ~/.copilot/session-state/."""
+"""Copilot CLI adapter — captures user prompts from ``~/.copilot/``.
+
+GitHub's Copilot CLI deliberately does **not** persist assistant responses
+locally. The only conversation data on disk is
+``~/.copilot/command-history-state.json``, which contains the list of user
+prompts in a ``commandHistory`` array. This adapter captures each prompt
+as a (user-side-only) memory chunk so search and recall pick up "what I
+asked Copilot" even though the answer side is unrecoverable from disk.
+
+If GitHub later starts persisting full transcripts on disk, extend this
+adapter to also walk those files; the user-prompts capture below stays
+useful as a baseline.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import structlog
@@ -13,15 +26,28 @@ from memgentic.models import ContentType, ConversationChunk, Platform
 
 logger = structlog.get_logger()
 
-# Copilot CLI stores sessions at ~/.copilot/session-state/
-COPILOT_CLI_BASE = Path.home() / ".copilot" / "session-state"
+# GitHub Copilot CLI keeps user prompts at this single file. Sessions /
+# assistant responses are NOT stored on disk.
+COPILOT_CLI_BASE = Path.home() / ".copilot"
+COPILOT_CLI_HISTORY_FILE = COPILOT_CLI_BASE / "command-history-state.json"
+
+# Skip prompts shorter than this — typically slash-commands (/usage, /resume).
+_MIN_PROMPT_LENGTH = 20
 
 
 class CopilotCliAdapter(BaseAdapter):
-    """Parse Copilot CLI session history.
+    """Parse GitHub Copilot CLI's user-prompt history.
 
-    Copilot CLI stores each session as a JSON file containing a session_id
-    and a messages array with role/content pairs.
+    Storage layout on Windows / macOS / Linux is the same:
+    ``~/.copilot/command-history-state.json`` — a JSON file with a top-level
+    ``commandHistory`` array. Each entry is a single user prompt string.
+    There is no companion file with assistant responses; GitHub
+    intentionally streams those without persisting.
+
+    Treats the whole history file as one "session" (id =
+    ``copilot-history``); each individual prompt above the minimum length
+    becomes one ``ConversationChunk`` with ``Human:`` framing and an
+    explicit note that the assistant side is unavailable.
     """
 
     @property
@@ -34,107 +60,66 @@ class CopilotCliAdapter(BaseAdapter):
 
     @property
     def file_patterns(self) -> list[str]:
-        return ["*.json"]
+        # The history file has a fixed name; we still register a glob so
+        # the daemon's file watcher fires when it's rewritten.
+        return ["command-history-state.json"]
 
     async def get_session_id(self, file_path: Path) -> str | None:
-        """Extract session_id from JSON content, falling back to file stem."""
-        data = await asyncio.to_thread(self._read_json, file_path)
-        if data and isinstance(data, dict):
-            sid = data.get("session_id")
-            if sid:
-                return str(sid)
-        return file_path.stem
+        """All prompts share one logical session per history file."""
+        return "copilot-history"
 
     async def get_session_title(self, file_path: Path) -> str | None:
-        """Extract title from the first user message."""
-        return await asyncio.to_thread(self._read_session_title, file_path)
-
-    def _read_session_title(self, file_path: Path) -> str | None:
-        """Synchronous helper — reads the first user message as title."""
-        data = self._read_json(file_path)
-        if not data or not isinstance(data, dict):
-            return None
-
-        messages = data.get("messages", [])
-        for msg in messages:
-            role = msg.get("role", "")
-            if role == "user":
-                text = self._extract_text(msg)
-                if text:
-                    return text[:100].strip()
+        """First prompt in the file works as a title."""
+        prompts = await asyncio.to_thread(self._read_prompts, file_path)
+        for prompt in prompts:
+            if len(prompt) >= _MIN_PROMPT_LENGTH:
+                return prompt[:100].strip()
         return None
 
     async def parse_file(self, file_path: Path) -> list[ConversationChunk]:
-        """Parse a Copilot CLI JSON session into chunks.
+        """Build one chunk per substantive user prompt.
 
-        Strategy: Group user-assistant exchanges into logical chunks.
-        Each exchange becomes a memory unit preserving the dialogue context.
+        We deliberately do NOT batch prompts into "exchanges" because there
+        are no assistant responses to pair them with — each prompt is its
+        own atomic memory.
         """
-        data = await asyncio.to_thread(self._read_json, file_path)
+        prompts = await asyncio.to_thread(self._read_prompts, file_path)
 
-        if not data or not isinstance(data, dict):
-            return []
-
-        messages = data.get("messages", [])
-        if not messages:
+        if not prompts:
             return []
 
         chunks: list[ConversationChunk] = []
 
-        # Group into user-assistant pairs
-        current_exchange: list[str] = []
-
-        for msg in messages:
-            role = msg.get("role", "")
-
-            # Skip system messages
-            if role == "system":
+        for prompt in prompts:
+            text = prompt.strip()
+            if len(text) < _MIN_PROMPT_LENGTH:
                 continue
 
-            text = self._extract_text(msg)
-            if not text:
-                continue
+            chunk_text = (
+                f"Human: {text}\n\n"
+                "Assistant: [GitHub Copilot CLI does not persist assistant "
+                "responses on disk; only the user prompt is captured.]"
+            )
 
-            if role == "user":
-                # If we have a pending exchange, flush it
-                if current_exchange:
-                    chunk_text = "\n\n".join(current_exchange)
-                    if len(chunk_text) > 50:  # Skip trivially short exchanges
-                        chunks.append(
-                            ConversationChunk(
-                                content=chunk_text,
-                                content_type=self._classify_content(chunk_text),
-                                topics=self._extract_topics(chunk_text),
-                                entities=[],
-                                confidence=0.9,
-                            )
-                        )
-                current_exchange = [f"Human: {text}"]
-            elif role == "assistant":
-                current_exchange.append(f"Assistant: {text}")
-
-        # Flush last exchange
-        if current_exchange:
-            chunk_text = "\n\n".join(current_exchange)
-            if len(chunk_text) > 50:
-                chunks.append(
-                    ConversationChunk(
-                        content=chunk_text,
-                        content_type=self._classify_content(chunk_text),
-                        topics=self._extract_topics(chunk_text),
-                        entities=[],
-                        confidence=0.9,
-                    )
+            chunks.append(
+                ConversationChunk(
+                    content=chunk_text,
+                    content_type=self._classify_content(text),
+                    topics=self._extract_topics(text),
+                    entities=[],
+                    confidence=0.6,  # User-side only: lower confidence.
                 )
+            )
 
-        # Create a summary chunk for longer conversations
         if len(chunks) > 2:
-            summary_parts = []
-            for i, chunk in enumerate(chunks[:5], 1):
-                preview = chunk.content[:200]
-                summary_parts.append(f"Exchange {i}: {preview}")
-
-            summary = f"Conversation with {len(chunks)} exchanges.\n\n" + "\n\n".join(summary_parts)
+            summary_parts = [
+                f"Prompt {i}: {c.content.split(chr(10))[0][7:207]}"
+                for i, c in enumerate(chunks[:5], 1)
+            ]
+            summary = (
+                f"Copilot CLI history with {len(chunks)} user prompts (assistant "
+                f"responses not persisted by GitHub).\n\n" + "\n\n".join(summary_parts)
+            )
             chunks.insert(
                 0,
                 ConversationChunk(
@@ -142,14 +127,14 @@ class CopilotCliAdapter(BaseAdapter):
                     content_type=ContentType.CONVERSATION_SUMMARY,
                     topics=self._merge_topics(chunks),
                     entities=[],
-                    confidence=0.85,
+                    confidence=0.55,
                 ),
             )
 
         logger.info(
             "copilot_cli.parsed",
             file=str(file_path),
-            messages=len(messages),
+            prompts=len(prompts),
             chunks=len(chunks),
         )
         return chunks
@@ -157,33 +142,28 @@ class CopilotCliAdapter(BaseAdapter):
     # --- Private helpers ---
 
     @staticmethod
-    def _read_json(file_path: Path) -> dict | None:
-        """Synchronous helper — read and parse JSON from *file_path*."""
+    def _read_prompts(file_path: Path) -> list[str]:
+        """Read the ``commandHistory`` array from the history JSON file."""
         try:
             with open(file_path, encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
             logger.warning("copilot_cli.parse_error", file=str(file_path), error=str(e))
-            return None
+            return []
+
+        if not isinstance(data, dict):
+            return []
+
+        history = data.get("commandHistory", [])
+        if not isinstance(history, list):
+            return []
+
+        return [str(p) for p in history if isinstance(p, str)]
 
     @staticmethod
-    def _extract_text(msg: dict) -> str:
-        """Extract readable text from a message.
-
-        Content can be a string or a list of parts.
-        """
-        content = msg.get("content", "")
-
-        if isinstance(content, str):
-            return content.strip()
-
-        if isinstance(content, list):
-            parts: list[str] = []
-            for block in content:
-                if isinstance(block, str):
-                    parts.append(block)
-                elif isinstance(block, dict) and block.get("type") == "text":
-                    parts.append(block.get("text", ""))
-            return "\n".join(parts).strip()
-
-        return str(content).strip() if content else ""
+    def _file_modified(file_path: Path) -> datetime:
+        """Return file mtime as UTC datetime — used as 'session timestamp'."""
+        try:
+            return datetime.fromtimestamp(file_path.stat().st_mtime, tz=UTC)
+        except OSError:
+            return datetime.now(UTC)

@@ -116,10 +116,18 @@ def _extract_strings_from_protobuf(data: bytes, min_length: int = 10) -> list[st
         elif wire_type == 5:
             # 32-bit fixed — skip 4 bytes
             pos += 4
+        elif wire_type in (3, 4):
+            # Group start/end markers (deprecated protobuf wire types). Used
+            # by some older / niche encoders — including the current
+            # Antigravity ``wireformat.v1-2026-04`` payloads. Treat as
+            # zero-byte separators: pos is already past the tag, so just
+            # continue scanning for the next field tag instead of bailing
+            # out of the whole file (the previous behaviour caused 0/65
+            # imports because the very first tag in each file was a group).
+            continue
         else:
-            # Unknown wire type (3/4 group markers or anything else).
-            # Likely a schema drift — bail out on this frame but keep any
-            # strings we already accumulated from prior fields.
+            # Anything else genuinely unknown — log once and stop on this
+            # frame. We keep what we've already accumulated.
             logger.warning(
                 "antigravity.unknown_wire_type",
                 wire_type=wire_type,
@@ -365,13 +373,18 @@ class AntigravityAdapter(BaseAdapter):
                 return []
 
         if not strings:
-            # Non-empty file that yielded nothing — most likely a schema
-            # drift upstream.  Log once per file and skip the record.
-            logger.warning(
-                "antigravity.decode_failed",
+            # Non-empty file that yielded nothing — Antigravity's recent
+            # builds appear to write an opaque (encrypted or custom-encoded)
+            # binary that does NOT contain extractable UTF-8 runs. Tested
+            # 2026-05-04: 0/65 conversation .pb files yielded any text via
+            # both the protobuf wire walker and the printable-runs fallback.
+            # Log at DEBUG (not WARN) so this doesn't spam the daemon log
+            # for every Antigravity file once the new format is in use.
+            logger.debug(
+                "antigravity.decode_skipped",
                 file=str(file_path),
                 bytes=len(data),
-                reason="no_strings_extracted",
+                reason="opaque_binary_format",
                 schema_version=ANTIGRAVITY_WIRE_FORMAT_VERSION,
             )
             return []

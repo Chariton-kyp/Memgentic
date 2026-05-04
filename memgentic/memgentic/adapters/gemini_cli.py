@@ -81,7 +81,8 @@ class GeminiCliAdapter(BaseAdapter):
         current_exchange: list[str] = []
 
         for turn in turns:
-            role = turn.get("role", "")
+            # Newer Gemini CLI sessions use "type"; older ones used "role".
+            role = turn.get("role") or turn.get("type") or ""
             text = self._extract_text(turn)
 
             if not text:
@@ -102,7 +103,9 @@ class GeminiCliAdapter(BaseAdapter):
                             )
                         )
                 current_exchange = [f"Human: {text}"]
-            elif role == "model":
+            elif role in ("model", "gemini", "assistant"):
+                # Newer Gemini CLI emits type="gemini" for assistant turns;
+                # older sessions used role="model"; some forks use "assistant".
                 current_exchange.append(f"Assistant: {text}")
 
         # Flush last exchange
@@ -183,25 +186,37 @@ class GeminiCliAdapter(BaseAdapter):
         """Extract readable text from a Gemini CLI turn.
 
         Content can be:
-        - "parts": [{"text": "..."}, ...] (Gemini format)
-        - "content": "..." (flat format)
+        - "content": [{"text": "..."}, ...] (newer Gemini CLI: list of part dicts)
+        - "parts": [{"text": "..."}, ...] (older Gemini "parts" key)
+        - "content": "..." (flat fallback)
         """
-        # Try "parts" format first (Gemini native)
+        # Newer format: content is a list of {"text": ...} dicts
+        content = turn.get("content")
+        if isinstance(content, list):
+            text_parts: list[str] = []
+            for part in content:
+                if isinstance(part, dict):
+                    text = part.get("text")
+                    if isinstance(text, str):
+                        text_parts.append(text)
+                elif isinstance(part, str):
+                    text_parts.append(part)
+            return "\n".join(text_parts).strip()
+
+        # Older "parts" format
         parts = turn.get("parts")
         if isinstance(parts, list):
-            text_parts: list[str] = []
+            text_parts = []
             for part in parts:
                 if isinstance(part, dict):
                     text = part.get("text")
                     if isinstance(text, str):
                         text_parts.append(text)
-                    # Skip non-text parts (images, etc.)
                 elif isinstance(part, str):
                     text_parts.append(part)
             return "\n".join(text_parts).strip()
 
-        # Try "content" format (flat)
-        content = turn.get("content", "")
+        # Flat string fallback
         if isinstance(content, str):
             return content.strip()
 

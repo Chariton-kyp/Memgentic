@@ -383,15 +383,19 @@ async def test_parse_file_malformed_logs_decode_failed(adapter, tmp_path):
 
     assert chunks == []
     events = [entry.get("event") for entry in logs]
-    assert "antigravity.decode_failed" in events, (
-        f"expected antigravity.decode_failed in logs, got {events}"
+    # New behaviour (2026-05-04): silently skip files that yield no
+    # extractable text — Antigravity's recent build writes opaque /
+    # encrypted .pb payloads that produce zero strings on every record.
+    # Logging a warning per file would spam the daemon log, so we
+    # downgraded the event to ``antigravity.decode_skipped`` at debug.
+    assert "antigravity.decode_skipped" in events, (
+        f"expected antigravity.decode_skipped in logs, got {events}"
     )
-    decode_failed = next(
-        entry for entry in logs if entry.get("event") == "antigravity.decode_failed"
+    decode_skipped = next(
+        entry for entry in logs if entry.get("event") == "antigravity.decode_skipped"
     )
-    # The warning must carry the schema pin for operator visibility.
-    assert decode_failed.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
-    assert decode_failed.get("log_level") == "warning"
+    assert decode_skipped.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
+    assert decode_skipped.get("log_level") == "debug"
 
 
 @pytest.mark.asyncio
@@ -406,20 +410,31 @@ async def test_parse_file_malformed_does_not_raise(adapter, tmp_path):
     assert isinstance(chunks, list)
 
 
-def test_extract_strings_logs_unknown_wire_type():
-    """Encountering an unknown wire type is a schema-drift signal — log it."""
-    # Field 1 with wire type 3 (deprecated group-start) — our extractor
-    # does not support groups and must warn rather than silently stop.
-    # Trailing bytes are required so pos < size when the wire-type branch
-    # is evaluated (the extractor short-circuits at EOF without logging).
-    data = _encode_varint((1 << 3) | 3) + b"\x00\x00"
+def test_extract_strings_passes_through_group_markers():
+    """Wire types 3 and 4 (deprecated group start/end) are now treated as
+    zero-byte separators rather than parse failures.
+
+    Antigravity's current ``wireformat.v1-2026-04`` writes group-style
+    field tags as the very first byte of every conversation file. The
+    previous behaviour aborted on the first 3/4, leaving 0/65 imports
+    on Chariton's machine. The new behaviour continues scanning for
+    real length-delimited fields after the marker without emitting a
+    schema-drift warning."""
+    # Field 1 with wire type 3 (deprecated group-start) followed by a
+    # genuine length-delimited UTF-8 string field, so the extractor has
+    # something to recover after the marker.
+    payload = b"this is recoverable text after the group marker"
+    data = (
+        _encode_varint((1 << 3) | 3)  # group-start tag — should pass through
+        + _encode_varint((2 << 3) | 2)  # field 2, wire-type 2 (length-delimited)
+        + _encode_varint(len(payload))
+        + payload
+    )
 
     with capture_logs() as logs:
         result = _extract_strings_from_protobuf(data)
 
-    assert result == []
+    assert payload.decode("utf-8") in result
     events = [entry.get("event") for entry in logs]
-    assert "antigravity.unknown_wire_type" in events
-    unknown = next(entry for entry in logs if entry.get("event") == "antigravity.unknown_wire_type")
-    assert unknown.get("wire_type") == 3
-    assert unknown.get("schema_version") == ANTIGRAVITY_WIRE_FORMAT_VERSION
+    # Group markers are no longer warnings — they should be silent.
+    assert "antigravity.unknown_wire_type" not in events

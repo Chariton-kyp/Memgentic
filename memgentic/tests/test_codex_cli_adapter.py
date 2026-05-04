@@ -1,61 +1,12 @@
-"""Tests for Codex CLI adapter."""
+"""Tests for Codex CLI adapter — reads SQLite ``threads`` + JSONL rollouts."""
+
+import json
+import sqlite3
 
 import pytest
 
 from memgentic.adapters.codex_cli import CodexCliAdapter
 from memgentic.models import ContentType, Platform
-
-SAMPLE_SINGLE_HASH = """\
-# User
-What does this function do?
-
-# Assistant
-This function calculates the fibonacci sequence recursively.
-It takes an integer n and returns the nth fibonacci number.
-
-# User
-Can you optimize it?
-
-# Assistant
-Here's an optimized version using memoization:
-```python
-from functools import lru_cache
-
-@lru_cache(maxsize=None)
-def fibonacci(n: int) -> int:
-    if n < 2:
-        return n
-    return fibonacci(n - 1) + fibonacci(n - 2)
-```
-
-# User
-What about an iterative approach?
-
-# Assistant
-An iterative approach avoids recursion depth limits entirely:
-```python
-def fibonacci_iter(n: int) -> int:
-    a, b = 0, 1
-    for _ in range(n):
-        a, b = b, a + b
-    return a
-```
-"""
-
-SAMPLE_DOUBLE_HASH = """\
-## User
-How do I set up Docker for this project?
-
-## Assistant
-You'll need a Dockerfile and docker-compose.yml.
-Here's a basic setup for a Python FastAPI app.
-
-## User
-Let's go with that approach.
-
-## Assistant
-Great decision. I'll create the files for you.
-"""
 
 
 @pytest.fixture
@@ -63,24 +14,67 @@ def adapter():
     return CodexCliAdapter()
 
 
-@pytest.fixture
-def single_hash_conversation(tmp_path):
-    """Create a sample conversation.md with # headers."""
-    session_dir = tmp_path / "session-abc123"
-    session_dir.mkdir()
-    file_path = session_dir / "conversation.md"
-    file_path.write_text(SAMPLE_SINGLE_HASH, encoding="utf-8")
-    return file_path
+def _create_state_db(tmp_path, threads):
+    """Build a minimal ``state_5.sqlite`` populated with the supplied threads."""
+    db_path = tmp_path / "state_5.sqlite"
+    conn = sqlite3.connect(db_path)
+    cur = conn.cursor()
+    cur.execute(
+        """
+        CREATE TABLE threads (
+            id TEXT,
+            rollout_path TEXT,
+            created_at INTEGER,
+            updated_at INTEGER,
+            source TEXT,
+            model_provider TEXT,
+            cwd TEXT,
+            title TEXT,
+            sandbox_policy TEXT,
+            approval_mode TEXT,
+            tokens_used INTEGER,
+            has_user_event INTEGER,
+            archived INTEGER,
+            archived_at INTEGER,
+            git_sha TEXT,
+            git_branch TEXT,
+            git_origin_url TEXT,
+            cli_version TEXT,
+            first_user_message TEXT,
+            agent_nickname TEXT,
+            agent_role TEXT,
+            memory_mode TEXT,
+            model TEXT,
+            reasoning_effort TEXT,
+            agent_path TEXT,
+            created_at_ms INTEGER,
+            updated_at_ms INTEGER
+        )
+        """
+    )
+    for t in threads:
+        cur.execute(
+            "INSERT INTO threads (id, rollout_path, title, first_user_message, "
+            "cwd, created_at_ms, archived) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (
+                t["id"],
+                t["rollout_path"],
+                t.get("title", ""),
+                t.get("first_user_message", ""),
+                t.get("cwd", ""),
+                t.get("created_at_ms", 0),
+                int(t.get("archived", 0)),
+            ),
+        )
+    conn.commit()
+    conn.close()
+    return db_path
 
 
-@pytest.fixture
-def double_hash_conversation(tmp_path):
-    """Create a sample conversation.md with ## headers."""
-    session_dir = tmp_path / "session-def456"
-    session_dir.mkdir()
-    file_path = session_dir / "conversation.md"
-    file_path.write_text(SAMPLE_DOUBLE_HASH, encoding="utf-8")
-    return file_path
+def _write_rollout(path, events):
+    with open(path, "w", encoding="utf-8") as f:
+        for event in events:
+            f.write(json.dumps(event) + "\n")
 
 
 def test_adapter_platform(adapter):
@@ -88,85 +82,229 @@ def test_adapter_platform(adapter):
 
 
 def test_adapter_file_patterns(adapter):
-    assert "conversation.md" in adapter.file_patterns
-    assert "*.md" in adapter.file_patterns
+    assert "state_5.sqlite" in adapter.file_patterns
+
+
+def test_adapter_watch_paths(adapter):
+    assert len(adapter.watch_paths) == 1
+    assert "codex" in str(adapter.watch_paths[0])
 
 
 @pytest.mark.asyncio
-async def test_parse_file_single_hash(adapter, single_hash_conversation):
-    chunks = await adapter.parse_file(single_hash_conversation)
-    assert len(chunks) > 0
-    for chunk in chunks:
-        assert chunk.content
-        assert chunk.content_type in ContentType
-
-
-@pytest.mark.asyncio
-async def test_parse_file_double_hash(adapter, double_hash_conversation):
-    chunks = await adapter.parse_file(double_hash_conversation)
-    assert len(chunks) > 0
-    for chunk in chunks:
-        assert chunk.content
-        assert chunk.content_type in ContentType
-
-
-@pytest.mark.asyncio
-async def test_parse_extracts_correct_exchange_count(adapter, single_hash_conversation):
-    chunks = await adapter.parse_file(single_hash_conversation)
-    # 3 user messages = 3 exchange chunks + 1 summary (since > 2)
-    exchange_chunks = [c for c in chunks if c.content_type != ContentType.CONVERSATION_SUMMARY]
-    assert len(exchange_chunks) == 3
-
-
-@pytest.mark.asyncio
-async def test_get_session_id(adapter, single_hash_conversation):
-    session_id = await adapter.get_session_id(single_hash_conversation)
-    assert session_id == "session-abc123"
-
-
-@pytest.mark.asyncio
-async def test_get_session_id_double_hash(adapter, double_hash_conversation):
-    session_id = await adapter.get_session_id(double_hash_conversation)
-    assert session_id == "session-def456"
-
-
-@pytest.mark.asyncio
-async def test_get_session_title(adapter, single_hash_conversation):
-    title = await adapter.get_session_title(single_hash_conversation)
-    assert title is not None
-    assert "function" in title.lower()
-
-
-@pytest.mark.asyncio
-async def test_parse_empty_file(adapter, tmp_path):
-    session_dir = tmp_path / "session-empty"
-    session_dir.mkdir()
-    empty_file = session_dir / "conversation.md"
-    empty_file.write_text("", encoding="utf-8")
-    chunks = await adapter.parse_file(empty_file)
+async def test_parse_no_threads_returns_empty(adapter, tmp_path):
+    db_path = _create_state_db(tmp_path, [])
+    chunks = await adapter.parse_file(db_path)
     assert chunks == []
 
 
 @pytest.mark.asyncio
-async def test_content_classification_code(adapter, single_hash_conversation):
-    chunks = await adapter.parse_file(single_hash_conversation)
-    content_types = [c.content_type for c in chunks]
-    # Should detect code snippets due to ``` markers
-    assert ContentType.CODE_SNIPPET in content_types
-
-
-@pytest.mark.asyncio
-async def test_content_classification_decision(adapter, double_hash_conversation):
-    chunks = await adapter.parse_file(double_hash_conversation)
-    content_types = [c.content_type for c in chunks]
-    # "let's go with" should trigger decision classification
-    assert ContentType.DECISION in content_types
-
-
-@pytest.mark.asyncio
-async def test_topic_extraction(adapter, single_hash_conversation):
-    chunks = await adapter.parse_file(single_hash_conversation)
-    all_topics: set[str] = set()
+async def test_parse_thread_with_top_level_envelope(adapter, tmp_path):
+    """Codex rollout events with top-level ``role``/``content`` keys."""
+    rollout_path = tmp_path / "rollout-thread-1.jsonl"
+    _write_rollout(
+        rollout_path,
+        [
+            {"role": "user", "content": "How do I deploy a FastAPI app behind Caddy?"},
+            {
+                "role": "assistant",
+                "content": "Add a Caddyfile that reverse-proxies to localhost:3691 and run caddy run.",
+            },
+            {"role": "user", "content": "And how do I add HTTPS?"},
+            {
+                "role": "assistant",
+                "content": "Caddy auto-provisions Let's Encrypt certs once your domain points at the server.",
+            },
+        ],
+    )
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "t1",
+                "rollout_path": str(rollout_path),
+                "title": "FastAPI deploy",
+                "first_user_message": "How do I deploy a FastAPI app behind Caddy?",
+                "cwd": "/repo/api",
+                "created_at_ms": 1,
+                "archived": 0,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    # 2 user/assistant exchanges + 0 summary (need >2 to add summary)
+    assert len(chunks) == 2
+    assert "Caddyfile" in chunks[0].content
+    assert "Let's Encrypt" in chunks[1].content
     for chunk in chunks:
-        all_topics.update(chunk.topics)
-    assert "python" in all_topics
+        assert "Human:" in chunk.content
+        assert "Assistant:" in chunk.content
+
+
+@pytest.mark.asyncio
+async def test_parse_thread_with_payload_envelope(adapter, tmp_path):
+    """Codex rollout events with ``payload.role``/``payload.content`` envelope."""
+    rollout_path = tmp_path / "rollout-thread-2.jsonl"
+    _write_rollout(
+        rollout_path,
+        [
+            {"payload": {"role": "user", "content": "Explain Python decorators with an example"}},
+            {
+                "payload": {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "A decorator is a function that wraps another function.",
+                        },
+                        {
+                            "type": "text",
+                            "text": "Example:\n```python\n@functools.wraps\ndef my_decorator(...): ...\n```",
+                        },
+                    ],
+                }
+            },
+        ],
+    )
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "t2",
+                "rollout_path": str(rollout_path),
+                "title": "Decorators",
+                "created_at_ms": 2,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    assert len(chunks) == 1
+    assert "decorator" in chunks[0].content.lower()
+    assert "functools.wraps" in chunks[0].content
+
+
+@pytest.mark.asyncio
+async def test_parse_thread_with_record_type_envelope(adapter, tmp_path):
+    """Codex rollout events using legacy ``record_type``/``text`` envelope."""
+    rollout_path = tmp_path / "rollout-thread-3.jsonl"
+    _write_rollout(
+        rollout_path,
+        [
+            {"record_type": "user_message", "text": "Generate a SQL schema for a memory store"},
+            {
+                "record_type": "assistant_response",
+                "text": "CREATE TABLE memories (id TEXT PRIMARY KEY, content TEXT NOT NULL);",
+            },
+        ],
+    )
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "t3",
+                "rollout_path": str(rollout_path),
+                "title": "SQL schema",
+                "created_at_ms": 3,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    assert len(chunks) == 1
+    assert "CREATE TABLE memories" in chunks[0].content
+
+
+@pytest.mark.asyncio
+async def test_archived_threads_skipped(adapter, tmp_path):
+    rollout_path = tmp_path / "rollout-archived.jsonl"
+    _write_rollout(rollout_path, [{"role": "user", "content": "x" * 80}])
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "archived",
+                "rollout_path": str(rollout_path),
+                "title": "Old session",
+                "created_at_ms": 4,
+                "archived": 1,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_missing_rollout_file_logged_and_skipped(adapter, tmp_path):
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "ghost",
+                "rollout_path": str(tmp_path / "does-not-exist.jsonl"),
+                "title": "Ghost thread",
+                "created_at_ms": 5,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    assert chunks == []
+
+
+@pytest.mark.asyncio
+async def test_summary_chunk_for_long_thread(adapter, tmp_path):
+    """Threads with >2 exchanges get a leading summary chunk."""
+    rollout_path = tmp_path / "rollout-long.jsonl"
+    events = []
+    for i in range(4):
+        events.append({"role": "user", "content": f"Question number {i + 1} about a long topic"})
+        events.append(
+            {
+                "role": "assistant",
+                "content": f"Detailed answer to question {i + 1} explaining the topic",
+            }
+        )
+    _write_rollout(rollout_path, events)
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "long",
+                "rollout_path": str(rollout_path),
+                "title": "Long thread",
+                "first_user_message": "Question number 1 about a long topic",
+                "cwd": "/projects/foo",
+                "created_at_ms": 6,
+            }
+        ],
+    )
+    chunks = await adapter.parse_file(db_path)
+    # 4 exchanges + 1 summary = 5
+    assert len(chunks) == 5
+    assert chunks[0].content_type == ContentType.CONVERSATION_SUMMARY
+    assert "Long thread" in chunks[0].content
+    assert "/projects/foo" in chunks[0].content
+
+
+@pytest.mark.asyncio
+async def test_get_session_title_falls_back_to_first_user_message(adapter, tmp_path):
+    db_path = _create_state_db(
+        tmp_path,
+        [
+            {
+                "id": "untitled",
+                "rollout_path": str(tmp_path / "x.jsonl"),
+                "title": "",
+                "first_user_message": "Help me debug this Python function",
+                "created_at_ms": 7,
+            }
+        ],
+    )
+    title = await adapter.get_session_title(db_path)
+    assert title is not None
+    assert "Python" in title
+
+
+@pytest.mark.asyncio
+async def test_missing_database_returns_empty(adapter, tmp_path):
+    nonexistent = tmp_path / "no-such-db.sqlite"
+    chunks = await adapter.parse_file(nonexistent)
+    assert chunks == []
