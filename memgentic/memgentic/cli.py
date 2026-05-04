@@ -21,6 +21,39 @@ _CAPTURE_PROFILE_SETTING_KEY = "default_capture_profile"
 _VALID_CAPTURE_PROFILES = ("raw", "enriched", "dual")
 
 
+async def _build_intelligence_components(
+    settings_obj,
+) -> tuple[object | None, object | None]:
+    """Build (LLMClient, KnowledgeGraph) when [intelligence] extras are installed.
+
+    Without these, the IngestionPipeline silently runs heuristic-only —
+    a months-long footgun where ``daemon``/``import-existing``/``remember``
+    skipped LLM classification even with a valid GOOGLE_API_KEY or local
+    Ollama setup. The MCP server already wired this correctly; the CLI did
+    not. Returning (None, None) on ImportError preserves the graceful
+    fallback for slim installs.
+    """
+    llm_client: object | None = None
+    graph: object | None = None
+    try:
+        from memgentic.processing.llm import LLMClient
+
+        llm_client = LLMClient(settings_obj)
+    except ImportError:
+        pass
+    try:
+        from memgentic.graph.knowledge import create_knowledge_graph
+
+        graph = create_knowledge_graph(settings_obj.graph_path)
+        await graph.load()  # type: ignore[attr-defined]
+    except ImportError:
+        pass
+    except Exception as exc:
+        logger.warning("cli.graph_load_failed", error=str(exc))
+        graph = None
+    return llm_client, graph
+
+
 async def _apply_persisted_capture_profile(metadata_store) -> None:
     """Load the persisted default capture profile (if any) into ``settings``.
 
@@ -216,10 +249,19 @@ def daemon(scan: bool):
         metadata_store = MetadataStore(settings.sqlite_path)
         vector_store = VectorStore(settings)
         embedder = Embedder(settings)
-        pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
+        llm_client, graph = await _build_intelligence_components(settings)
+        pipeline = IngestionPipeline(
+            settings,
+            metadata_store,
+            vector_store,
+            embedder,
+            llm_client=llm_client,
+            graph=graph,
+        )
 
         await metadata_store.initialize()
         await vector_store.initialize(metadata_store)
+        await _apply_persisted_capture_profile(metadata_store)
 
         try:
             # Register all daemon-capable adapters
@@ -512,7 +554,15 @@ def remember(
         metadata_store = MetadataStore(settings.sqlite_path)
         vector_store = VectorStore(settings)
         embedder = Embedder(settings)
-        pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
+        llm_client, graph = await _build_intelligence_components(settings)
+        pipeline = IngestionPipeline(
+            settings,
+            metadata_store,
+            vector_store,
+            embedder,
+            llm_client=llm_client,
+            graph=graph,
+        )
 
         await metadata_store.initialize()
         await vector_store.initialize(metadata_store)
@@ -596,7 +646,15 @@ def import_existing(source: str | None, capture_profile: str | None):
         metadata_store = MetadataStore(settings.sqlite_path)
         vector_store = VectorStore(settings)
         embedder = Embedder(settings)
-        pipeline = IngestionPipeline(settings, metadata_store, vector_store, embedder)
+        llm_client, graph = await _build_intelligence_components(settings)
+        pipeline = IngestionPipeline(
+            settings,
+            metadata_store,
+            vector_store,
+            embedder,
+            llm_client=llm_client,
+            graph=graph,
+        )
 
         await metadata_store.initialize()
         await vector_store.initialize(metadata_store)
