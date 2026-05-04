@@ -16,6 +16,28 @@ logger = structlog.get_logger()
 # Gemini CLI stores conversations at ~/.gemini/tmp/<project_hash>/chats/*.json
 GEMINI_CLI_BASE = Path.home() / ".gemini" / "tmp"
 
+# Tool-response markers Gemini emits when a turn is a function-call output
+# (``[Function Response: read_many_files]`` and friends). These outputs are
+# often hundreds of KB of file dumps and add zero conversational signal —
+# we skip them at the parser layer.
+_TOOL_RESPONSE_MARKERS: tuple[str, ...] = (
+    "[Function Response:",
+    "[Tool Output:",
+    "[Tool Response:",
+    "[Function Call:",
+)
+
+
+def _is_tool_response_dump(text: str) -> bool:
+    """Return True if ``text`` is dominated by a tool-response payload.
+
+    Triggers on either an explicit marker prefix at the start of the text
+    or, defensively, when a marker appears within the first 200 chars
+    (Gemini sometimes prepends a one-line "Calling tool ..." preamble).
+    """
+    head = text.lstrip()[:300]
+    return any(marker in head for marker in _TOOL_RESPONSE_MARKERS)
+
 
 class GeminiCliAdapter(BaseAdapter):
     """Parse Gemini CLI conversation history.
@@ -89,6 +111,15 @@ class GeminiCliAdapter(BaseAdapter):
             text = self._extract_text(turn)
 
             if not text:
+                continue
+
+            # Drop Function-Response / Tool-Output turn dumps. Gemini CLI
+            # surfaces large tool outputs (e.g. ``read_many_files`` reading
+            # dozens of files at once) as a single user turn whose text
+            # starts with ``[Function Response: ...]`` and grows to 100s
+            # of KB. Indexing these as memories is pure noise — they
+            # bloat the vector store and dominate semantic recall.
+            if _is_tool_response_dump(text):
                 continue
 
             if role == "user":
