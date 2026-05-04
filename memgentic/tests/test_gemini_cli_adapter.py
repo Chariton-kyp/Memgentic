@@ -77,10 +77,13 @@ def test_adapter_file_patterns(adapter):
 
 
 def test_adapter_watch_paths(adapter):
+    # First entry is always the native ``~/.gemini/tmp/``; on Windows,
+    # extra entries may appear for WSL distros where the user runs
+    # ``gemini`` from a Linux shell.
     paths = adapter.watch_paths
-    assert len(paths) == 1
+    assert len(paths) >= 1
     assert paths[0].name == "tmp"
-    assert ".gemini" in str(paths[0])
+    assert all(".gemini" in str(p) for p in paths)
 
 
 @pytest.mark.asyncio

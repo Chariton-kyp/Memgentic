@@ -233,7 +233,10 @@ class AntigravityAdapter(BaseAdapter):
 
     @property
     def watch_paths(self) -> list[Path]:
-        return [ANTIGRAVITY_BASE]
+        # Native + WSL home dirs (Windows users may run gemini from a WSL shell).
+        from memgentic.adapters._wsl import wsl_user_paths
+
+        return [ANTIGRAVITY_BASE, *wsl_user_paths(".gemini/antigravity/conversations")]
 
     @property
     def file_patterns(self) -> list[str]:
