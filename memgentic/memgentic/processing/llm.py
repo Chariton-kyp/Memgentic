@@ -80,7 +80,15 @@ class LLMClient:
                 "model": self._settings.local_llm_model,
                 "base_url": self._settings.ollama_url,
                 "temperature": 0,
-                "num_predict": 2048,
+                # KV cache size — keep VRAM bounded. The default 4096 from Ollama
+                # blows past 6 GiB of VRAM for a 5-8B Q8 model + activations and
+                # triggers cudaMalloc OOM on consumer GPUs. Memgentic prompts
+                # cap at ~1500 tokens so 2048 is plenty.
+                "num_ctx": self._settings.ollama_num_ctx,
+                # Max tokens to generate — structured outputs need ≤ 200; the old
+                # 2048 default kept the runner alive for the entire pad even when
+                # the JSON closed in 50 tokens.
+                "num_predict": self._settings.ollama_num_predict,
             }
             if self._settings.ollama_num_threads > 0:
                 kwargs["num_thread"] = self._settings.ollama_num_threads
@@ -118,12 +126,27 @@ class LLMClient:
     async def generate_structured(self, prompt: str, schema: type[BaseModel]) -> BaseModel | None:
         """Generate structured output matching the Pydantic schema.
 
+        Routing:
+        - Ollama models: use ``method="json_schema"`` so the request goes through
+          Ollama's native JSON-schema format. The default (``"function_calling"``)
+          assumes the model declares tool-calling support; small open models
+          (gemma3:1b, gemma4:e2b/e4b, qwen2.5 < 7B) don't, and the langchain
+          path falls into a 60-120 sec retry / shape-error loop that we observed
+          on this machine. ``json_schema`` maps directly to Ollama's
+          ``options.format`` JSON-schema and produces valid output in ~1 sec.
+        - Cloud models (Gemini, Anthropic, etc.): keep the langchain default
+          since their providers expose proper tool-calling.
+
         Returns None if LLM unavailable or generation fails.
         """
         if not self._model:
             return None
         try:
-            structured = self._model.with_structured_output(schema)
+            method_kwargs: dict = {}
+            # ChatOllama lives under langchain_ollama; detect by class module.
+            if type(self._model).__module__.startswith("langchain_ollama"):
+                method_kwargs["method"] = "json_schema"
+            structured = self._model.with_structured_output(schema, **method_kwargs)
             result = await structured.ainvoke(prompt)
             if isinstance(result, BaseModel):
                 return result
