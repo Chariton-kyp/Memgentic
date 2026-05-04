@@ -34,6 +34,7 @@ from pathlib import Path
 
 import structlog
 
+from memgentic.adapters._wsl import wsl_user_paths
 from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
 
@@ -65,7 +66,11 @@ class CodexCliAdapter(BaseAdapter):
 
     @property
     def watch_paths(self) -> list[Path]:
-        return [CODEX_SESSIONS_DIR]
+        # Native ``~/.codex/sessions/`` plus any Codex sessions directories
+        # found inside WSL distros (Windows-only; many users run ``codex``
+        # from a WSL shell, not PowerShell, and the rollouts land in WSL's
+        # filesystem — invisible to a Windows-side watcher otherwise).
+        return [CODEX_SESSIONS_DIR, *wsl_user_paths(".codex/sessions")]
 
     @property
     def file_patterns(self) -> list[str]:

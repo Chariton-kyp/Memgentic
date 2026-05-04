@@ -56,7 +56,10 @@ class CopilotCliAdapter(BaseAdapter):
 
     @property
     def watch_paths(self) -> list[Path]:
-        return [COPILOT_CLI_BASE]
+        # Native + WSL home dirs (Windows users may run gh copilot from a WSL shell).
+        from memgentic.adapters._wsl import wsl_user_paths
+
+        return [COPILOT_CLI_BASE, *wsl_user_paths(".copilot")]
 
     @property
     def file_patterns(self) -> list[str]:

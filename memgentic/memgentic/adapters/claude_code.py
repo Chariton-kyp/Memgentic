@@ -39,7 +39,10 @@ class ClaudeCodeAdapter(BaseAdapter):
 
     @property
     def watch_paths(self) -> list[Path]:
-        return [CLAUDE_CODE_BASE]
+        # Native ``~/.claude/projects/`` plus WSL equivalents on Windows.
+        from memgentic.adapters._wsl import wsl_user_paths
+
+        return [CLAUDE_CODE_BASE, *wsl_user_paths(".claude/projects")]
 
     @property
     def file_patterns(self) -> list[str]:

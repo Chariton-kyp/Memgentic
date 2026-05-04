@@ -56,9 +56,14 @@ def test_adapter_file_patterns(adapter):
 
 
 def test_adapter_watch_paths(adapter):
-    assert len(adapter.watch_paths) == 1
-    assert "codex" in str(adapter.watch_paths[0]).lower()
-    assert "sessions" in str(adapter.watch_paths[0]).lower()
+    # First entry is always the native ``~/.codex/sessions/`` directory; on
+    # Windows additional entries may appear for WSL distros that have a
+    # Codex sessions tree. Test only the invariant: native path is first
+    # and every entry mentions codex/sessions.
+    paths = adapter.watch_paths
+    assert len(paths) >= 1
+    assert all("codex" in str(p).lower() for p in paths)
+    assert all("sessions" in str(p).lower() for p in paths)
 
 
 @pytest.mark.asyncio

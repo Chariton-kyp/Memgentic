@@ -34,7 +34,10 @@ class GeminiCliAdapter(BaseAdapter):
 
     @property
     def watch_paths(self) -> list[Path]:
-        return [GEMINI_CLI_BASE]
+        # Native ``~/.gemini/tmp/`` plus WSL equivalents on Windows.
+        from memgentic.adapters._wsl import wsl_user_paths
+
+        return [GEMINI_CLI_BASE, *wsl_user_paths(".gemini/tmp")]
 
     @property
     def file_patterns(self) -> list[str]:
