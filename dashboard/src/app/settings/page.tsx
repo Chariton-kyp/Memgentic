@@ -72,7 +72,7 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false);
 
   const apiUrl =
-    process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100/api/v1";
+    process.env.NEXT_PUBLIC_API_URL || "http://localhost:3691/api/v1";
 
   const checkHealth = useCallback(async () => {
     setHealthLoading(true);

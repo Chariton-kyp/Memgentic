@@ -4,7 +4,7 @@
 
 ```bash
 pip install memgentic-api
-memgentic-api serve            # http://localhost:8100
+memgentic-api serve            # http://localhost:3691
 ```
 
 ## What it exposes

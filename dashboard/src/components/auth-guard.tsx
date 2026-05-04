@@ -5,7 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { hasApiKey } from "@/lib/api";
 
 const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:8100/api/v1";
+  process.env.NEXT_PUBLIC_API_URL || "http://localhost:3691/api/v1";
 
 export function AuthGuard({ children }: { children: ReactNode }) {
   const pathname = usePathname();

@@ -3,7 +3,7 @@
 ## Base URL
 
 ```
-http://localhost:8100/api/v1
+http://localhost:3691/api/v1
 ```
 
 ## Authentication
@@ -142,7 +142,7 @@ GET /export?format=markdown&platform=claude_code  # Filtered markdown export
 ### WebSocket (Real-time Events)
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8100/api/v1/ws');
+const ws = new WebSocket('ws://localhost:3691/api/v1/ws');
 ws.onmessage = (event) => {
   const data = JSON.parse(event.data);
   // data.type: "memory_created" | "memory_updated" | "memory_deleted"
