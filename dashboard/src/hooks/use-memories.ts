@@ -10,10 +10,18 @@ export function useMemories(params: {
   page_size?: number;
   source?: string;
   content_type?: string;
+  project?: string;
 }) {
   return useQuery({
     queryKey: ["memories", params],
     queryFn: () => api.listMemories(params),
+  });
+}
+
+export function useProjects() {
+  return useQuery({
+    queryKey: ["projects"],
+    queryFn: api.listProjects,
   });
 }
 

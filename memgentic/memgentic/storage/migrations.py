@@ -188,6 +188,70 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             )""",
         ],
     ),
+    (
+        9,
+        "project — friendly key for cross-tool project filtering",
+        [
+            # Friendly project name derived from the originating working
+            # directory (Path(cwd).name.lower()), or decoded from a Claude
+            # Code parent-directory slug as a fallback. Empty string when
+            # unknown. Backfilled in Python below for legacy rows.
+            "ALTER TABLE memories ADD COLUMN project TEXT NOT NULL DEFAULT ''",
+            "CREATE INDEX IF NOT EXISTS idx_memories_project ON memories(project)",
+        ],
+    ),
+    (
+        10,
+        "dreams — auto-dream consolidation runs and proposed patches",
+        [
+            # A dream is a single LLM-driven consolidation pass over the live
+            # memory store. It produces patch proposals that the user reviews
+            # and explicitly applies; the live memories table is untouched
+            # until ``apply_dream`` runs.
+            """CREATE TABLE IF NOT EXISTS dream_runs (
+                id TEXT PRIMARY KEY,
+                project TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'pending'
+                    CHECK (status IN
+                        ('pending','running','completed','failed','canceled')),
+                model TEXT NOT NULL DEFAULT '',
+                instructions TEXT NOT NULL DEFAULT '',
+                input_session_ids TEXT NOT NULL DEFAULT '[]',
+                input_memory_count INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                usage_input_tokens INTEGER NOT NULL DEFAULT 0,
+                usage_output_tokens INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                ended_at TEXT,
+                applied_at TEXT,
+                user_id TEXT NOT NULL DEFAULT ''
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_dream_runs_project ON dream_runs(project)",
+            "CREATE INDEX IF NOT EXISTS idx_dream_runs_status ON dream_runs(status)",
+            "CREATE INDEX IF NOT EXISTS idx_dream_runs_created_at ON dream_runs(created_at)",
+            # Individual patch operations belonging to a dream. ``status`` drives
+            # the apply/reject lifecycle. ``target_memory_ids`` and
+            # ``new_metadata`` are JSON-encoded.
+            """CREATE TABLE IF NOT EXISTS dream_patches (
+                id TEXT PRIMARY KEY,
+                dream_id TEXT NOT NULL REFERENCES dream_runs(id) ON DELETE CASCADE,
+                action TEXT NOT NULL CHECK (action IN
+                    ('merge','supersede','archive_stale',
+                     'normalize_date','insert_insight','update_field')),
+                target_memory_ids TEXT NOT NULL DEFAULT '[]',
+                new_content TEXT,
+                new_metadata TEXT,
+                evidence TEXT,
+                status TEXT NOT NULL DEFAULT 'proposed'
+                    CHECK (status IN
+                        ('proposed','applied','rejected','superseded_by_apply')),
+                created_at TEXT NOT NULL,
+                applied_at TEXT
+            )""",
+            "CREATE INDEX IF NOT EXISTS idx_dream_patches_dream_id ON dream_patches(dream_id)",
+            "CREATE INDEX IF NOT EXISTS idx_dream_patches_status ON dream_patches(status)",
+        ],
+    ),
 ]
 
 SCHEMA_VERSION_TABLE = """
@@ -226,6 +290,11 @@ async def migrate(db: aiosqlite.Connection) -> int:
         for sql in statements:
             await db.execute(sql)
 
+        # Post-DDL backfills that need Python-side derivation. SQLite has no
+        # built-in REGEXP and the slug→project mapping is non-trivial.
+        if version == 9:
+            await _backfill_project_column(db)
+
         now = datetime.now(UTC).isoformat()
         await db.execute(
             "INSERT INTO schema_version (version, description, applied_at) VALUES (?, ?, ?)",
@@ -242,3 +311,42 @@ async def migrate(db: aiosqlite.Connection) -> int:
         logger.debug("migration.up_to_date", version=current)
 
     return applied
+
+
+async def _backfill_project_column(db: aiosqlite.Connection) -> None:
+    """Populate ``memories.project`` for legacy rows from their ``file_path``.
+
+    Imported here to avoid a top-level cycle (``processing.project`` is a
+    stand-alone helper but ``processing/__init__`` historically pulls in heavy
+    pipeline imports).
+    """
+    from memgentic.processing.project import derive_project
+
+    cursor = await db.execute(
+        "SELECT id, file_path FROM memories WHERE project = '' AND file_path IS NOT NULL"
+    )
+    rows = await cursor.fetchall()
+    if not rows:
+        return
+
+    updates: list[tuple[str, str]] = []
+    for row in rows:
+        memory_id = row[0]
+        file_path = row[1]
+        project = derive_project(file_path=file_path)
+        if project:
+            updates.append((project, memory_id))
+
+    if not updates:
+        logger.info("migration.project_backfill_empty", scanned=len(rows))
+        return
+
+    await db.executemany(
+        "UPDATE memories SET project = ? WHERE id = ?",
+        updates,
+    )
+    logger.info(
+        "migration.project_backfill_complete",
+        scanned=len(rows),
+        updated=len(updates),
+    )

@@ -3,12 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import sys
 from pathlib import Path
 
 import click
 import structlog
 from rich.console import Console
 from rich.table import Table
+
+# Windows defaults to a legacy ANSI codepage (cp1253 on Greek locales) that
+# can't render UTF-8 content stored in the DB (Greek/Turkish/Chinese/etc.
+# memories, evidence strings produced by remote LLMs). Reconfigure stdout/
+# stderr to UTF-8 so commands like ``memgentic dream show`` render correctly.
+# ``errors="replace"`` ensures that a single un-mappable codepoint never
+# crashes the CLI mid-output. Safe no-op on POSIX (already UTF-8).
+if sys.platform == "win32":
+    for _stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):
+            _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from memgentic.__version__ import __version__
 from memgentic.config import StorageBackend, settings
@@ -312,6 +325,15 @@ def daemon(scan: bool):
     default=None,
     help="Filter by content type (e.g., decision, learning, preference, bug_fix)",
 )
+@click.option(
+    "--project",
+    "-p",
+    default=None,
+    help=(
+        "Filter by project key (e.g., memgentic-public-export, vetervo). "
+        "Pass 'auto' to use the current working directory."
+    ),
+)
 @click.option("--limit", "-n", default=10, help="Maximum number of results to return")
 @click.option(
     "--format",
@@ -324,6 +346,7 @@ def search(
     query: str,
     source: str | None,
     content_type: str | None,
+    project: str | None,
     limit: int,
     output_format: str,
 ):
@@ -340,12 +363,15 @@ def search(
       memgentic search "auth pattern" --format compact
       memgentic search "database" --format json
       memgentic search "bug fixes" -t bug_fix
+      memgentic search "auth flow" --project auto
+      memgentic search "deployment" -p memgentic-public-export
     """
 
     async def _run():
         from memgentic.exceptions import EmbeddingError
         from memgentic.models import ContentType, Platform, SessionConfig
         from memgentic.processing.embedder import Embedder
+        from memgentic.processing.project import project_from_cwd
         from memgentic.storage.metadata import MetadataStore
         from memgentic.storage.vectors import VectorStore
 
@@ -362,6 +388,22 @@ def search(
                 config.include_sources = [Platform(source)]
             if content_type:
                 config.include_content_types = [ContentType(content_type)]
+            if project:
+                resolved = project
+                if project.strip().lower() == "auto":
+                    from pathlib import Path as _Path
+
+                    resolved = project_from_cwd(str(_Path.cwd()))
+                    if not resolved:
+                        console.print(
+                            "[yellow]project=auto could not derive a name "
+                            "from the current cwd; ignoring filter.[/]"
+                        )
+                        resolved = None
+                if resolved:
+                    config.include_projects = [resolved.lower()]
+                    if output_format == "full":
+                        console.print(f"[dim]Filtering by project: {resolved.lower()}[/]")
 
             try:
                 # Probe embedder so we surface a clear error before search.
@@ -417,8 +459,9 @@ def search(
                     content = payload.get("content", "")[:100].replace("\n", " ")
                     ctype = payload.get("content_type", "?")
                     platform = payload.get("platform", "?")
+                    project_label = payload.get("project") or "—"
                     created = payload.get("created_at", "")[:10]
-                    print(f"[{ctype}] {content} | {platform} | {created}")
+                    print(f"[{ctype}] {content} | {platform} | {project_label} | {created}")
                 return
 
             if output_format == "json":
@@ -433,6 +476,7 @@ def search(
                             "content": payload.get("content", ""),
                             "content_type": payload.get("content_type", ""),
                             "platform": payload.get("platform", ""),
+                            "project": payload.get("project", ""),
                             "created_at": payload.get("created_at", ""),
                             "topics": payload.get("topics", []),
                         }
@@ -497,6 +541,64 @@ def sources():
                 table.add_row(platform, str(count), f"{pct:.0f}%")
 
             console.print(table)
+        finally:
+            await store.close()
+
+    asyncio.run(_run())
+
+
+@main.command()
+@click.option(
+    "--limit",
+    "-n",
+    default=20,
+    help="How many projects to show (default: 20).",
+)
+def projects(limit: int):
+    """Show a breakdown of stored memories by project.
+
+    \b
+    A "project" is the friendly key derived from the originating working
+    directory (Path(cwd).name lowercased). Memories without a derivable
+    project — manual remember calls, ChatGPT imports, Antigravity sessions
+    — show under "(unknown)".
+
+    \b
+    Examples:
+      memgentic projects
+      memgentic projects -n 50
+    """
+
+    async def _run():
+        from memgentic.storage.metadata import MetadataStore
+
+        store = MetadataStore(settings.sqlite_path)
+        await store.initialize()
+
+        try:
+            stats = await store.get_project_stats()
+            total = sum(stats.values())
+
+            if not stats:
+                console.print("[yellow]No memories stored yet.[/]")
+                return
+
+            table = Table(title=f"Memory Projects (Total: {total})")
+            table.add_column("Project", style="green")
+            table.add_column("Memories", style="cyan", justify="right")
+            table.add_column("%", style="dim", justify="right")
+
+            ordered = sorted(stats.items(), key=lambda x: x[1], reverse=True)
+            for project, count in ordered[:limit]:
+                pct = (count / total * 100) if total > 0 else 0
+                label = project if project else "[dim](unknown)[/]"
+                table.add_row(label, str(count), f"{pct:.0f}%")
+
+            console.print(table)
+            if len(ordered) > limit:
+                console.print(
+                    f"[dim]... {len(ordered) - limit} more projects (use --limit to see them).[/]"
+                )
         finally:
             await store.close()
 
@@ -673,6 +775,7 @@ def import_existing(source: str | None, capture_profile: str | None):
                 async with sem:
                     try:
                         session_id = await adapter.get_session_id(file_path)
+                        project = await adapter.get_project(file_path)
                         chunks = await adapter.parse_file(file_path)
                         if not chunks:
                             total_skipped += 1
@@ -684,6 +787,7 @@ def import_existing(source: str | None, capture_profile: str | None):
                             session_id=session_id,
                             file_path=str(file_path),
                             capture_profile=capture_profile,  # type: ignore[arg-type]
+                            project=project,
                         )
                         count = len(memories)
                         if count > 0:
@@ -1047,6 +1151,485 @@ def guard_rules(ctx, repo, rules_path):
     except Exception as exc:
         click.echo(f"guard rules error: {exc}", err=True)
         ctx.exit(2)
+
+
+# ---------------------------------------------------------------------------
+# memgentic dream ...
+# ---------------------------------------------------------------------------
+
+
+def _resolve_dream_project(explicit: str | None) -> str:
+    """Pick the project key for a dream invocation.
+
+    Falls back to ``derive_project(cwd=os.getcwd())`` when no explicit
+    project is given. An empty string means "no project filter".
+    """
+    if explicit is not None:
+        return explicit
+    try:
+        import os
+
+        from memgentic.processing.project import derive_project
+
+        return derive_project(cwd=os.getcwd())
+    except Exception:
+        return ""
+
+
+@main.group("dream")
+def dream():
+    """LLM-driven memory consolidation (auto-dream).
+
+    \b
+    A dream reads recent session transcripts and the live memory store,
+    proposes patches (merge/supersede/archive/normalize_date/insert_insight),
+    and saves them as 'proposed'. Live memories are NEVER mutated by the
+    pipeline — apply patches explicitly with `dream apply <id>`.
+
+    \b
+    Examples:
+      memgentic dream run --project memgentic
+      memgentic dream show drm_01H...
+      memgentic dream apply drm_01H... --yes
+      memgentic dream reject drm_01H...
+      memgentic dream list
+    """
+
+
+@dream.command("run")
+@click.option(
+    "--project",
+    default=None,
+    help="Project scope (defaults to cwd-derived). Pass empty string for all projects.",
+)
+@click.option(
+    "--signal-model",
+    default=None,
+    help=(
+        "Override Phase 2 (Gather Signal) model for this run only. Examples: "
+        "'claude-haiku-4-5', 'gemini-3.1-flash-lite', 'gemma4:e4b', "
+        "'qwen3.6:35b-a3b'. Empty string forces the default LLMClient chain."
+    ),
+)
+@click.option(
+    "--consolidate-model",
+    default=None,
+    help=(
+        "Override Phase 3 (Consolidate) model for this run only. Same routing "
+        "rules as --signal-model. Recommended local: qwen3.6:35b-a3b "
+        "(MoE, 5/5 schema reliability)."
+    ),
+)
+@click.option(
+    "--instructions",
+    default="",
+    help="Optional LLM guidance (max 4096 chars).",
+)
+@click.option(
+    "--limit-sessions",
+    default=None,
+    type=int,
+    help="Max recent sessions to ingest (default: settings.dream_default_session_limit).",
+)
+@click.option(
+    "--auto-apply",
+    is_flag=True,
+    help=(
+        "Auto-apply NON-destructive patches (normalize_date, insert_insight, "
+        "update_field). Destructive patches (merge, supersede, archive_stale) "
+        "always require explicit `dream apply`."
+    ),
+)
+def dream_run_cmd(
+    project: str | None,
+    signal_model: str | None,
+    consolidate_model: str | None,
+    instructions: str,
+    limit_sessions: int | None,
+    auto_apply: bool,
+):
+    """Run a dream consolidation cycle."""
+
+    async def _run():
+        try:
+            from memgentic.processing.dream import (
+                apply_dream,
+                run_dream,
+            )
+        except ImportError:
+            console.print(
+                "[red]Intelligence extras required for dream.[/]\n"
+                "Install with: [cyan]pip install memgentic[intelligence][/]"
+            )
+            return
+
+        from memgentic.processing.embedder import Embedder
+        from memgentic.storage.metadata import MetadataStore
+
+        scope = _resolve_dream_project(project)
+        metadata_store = MetadataStore(settings.sqlite_path)
+        embedder = Embedder(settings)
+        await metadata_store.initialize()
+
+        try:
+            phase_models = []
+            if signal_model is not None:
+                phase_models.append(f"P2={signal_model or '(default)'}")
+            if consolidate_model is not None:
+                phase_models.append(f"P3={consolidate_model or '(default)'}")
+            override_str = f" [{' '.join(phase_models)}]" if phase_models else ""
+            console.print(
+                f"[cyan]Running dream...[/] project=[bold]{scope or '(all)'}[/]{override_str}"
+            )
+            run = await run_dream(
+                project=scope,
+                metadata_store=metadata_store,
+                embedder=embedder,
+                settings=settings,
+                signal_model=signal_model,
+                consolidate_model=consolidate_model,
+                instructions=instructions,
+                limit_sessions=limit_sessions,
+            )
+
+            patches = await metadata_store.get_dream_patches(run.id)
+            counts: dict[str, int] = {}
+            for p in patches:
+                counts[p.action.value] = counts.get(p.action.value, 0) + 1
+
+            table = Table(title=f"Dream {run.id[:12]} — {run.status.value}")
+            table.add_column("Action", style="bold")
+            table.add_column("Proposed", style="cyan", justify="right")
+            for action, count in sorted(counts.items()):
+                table.add_row(action, str(count))
+            if not counts:
+                table.add_row("(no patches)", "0")
+            console.print(table)
+
+            if run.error:
+                console.print(f"[red]Error:[/] {run.error}")
+
+            if auto_apply and patches:
+                console.print("[cyan]Auto-applying non-destructive patches...[/]")
+                report = await apply_dream(
+                    run.id, metadata_store=metadata_store, only_non_destructive=True
+                )
+                console.print(
+                    f"[green]Applied[/] {report.applied} | "
+                    f"[yellow]Skipped destructive[/] {report.skipped_destructive} | "
+                    f"[red]Errors[/] {len(report.errors)}"
+                )
+
+            console.print(
+                f"\n[dim]Review with:[/] memgentic dream show {run.id}\n"
+                f"[dim]Apply with: [/] memgentic dream apply {run.id} --yes\n"
+                f"[dim]Reject with:[/] memgentic dream reject {run.id}"
+            )
+        finally:
+            await embedder.close()
+            await metadata_store.close()
+
+    asyncio.run(_run())
+
+
+@dream.command("show")
+@click.argument("dream_id")
+def dream_show_cmd(dream_id: str):
+    """Print a diff-style view of a dream's proposed patches."""
+
+    async def _run():
+        from memgentic.storage.metadata import MetadataStore
+
+        store = MetadataStore(settings.sqlite_path)
+        await store.initialize()
+        try:
+            run = await store.get_dream_run(dream_id)
+            if not run:
+                console.print(f"[red]Dream {dream_id} not found[/]")
+                return
+            console.print(
+                f"[bold]Dream[/] {run.id} | project=[cyan]{run.project or '(all)'}[/] | "
+                f"status=[yellow]{run.status.value}[/] | model={run.model}"
+            )
+            console.print(
+                f"[dim]created={run.created_at} ended={run.ended_at} "
+                f"applied={run.applied_at} memories_in_scope={run.input_memory_count}[/]"
+            )
+            if run.error:
+                console.print(f"[red]Error:[/] {run.error}")
+
+            patches = await store.get_dream_patches(dream_id)
+            if not patches:
+                console.print("[dim]No patches.[/]")
+                return
+
+            for patch in patches:
+                marker = {
+                    "proposed": "[yellow][P][/]",
+                    "applied": "[green][A][/]",
+                    "rejected": "[red][R][/]",
+                    "superseded_by_apply": "[dim][S][/]",
+                }.get(patch.status.value, "?")
+                console.print(
+                    f"\n{marker} [bold]{patch.action.value}[/] "
+                    f"id={patch.id[:8]} status={patch.status.value}"
+                )
+                if patch.target_memory_ids:
+                    console.print(
+                        "  targets: "
+                        + ", ".join(t[:8] for t in patch.target_memory_ids[:5])
+                        + (" ..." if len(patch.target_memory_ids) > 5 else "")
+                    )
+                if patch.evidence:
+                    console.print(f"  [dim]why:[/] {patch.evidence}")
+                if patch.new_content:
+                    preview = patch.new_content[:160].replace("\n", " ")
+                    console.print(f"  [dim]new:[/] {preview}")
+                if patch.new_metadata:
+                    console.print(f"  [dim]meta:[/] {patch.new_metadata}")
+        finally:
+            await store.close()
+
+    asyncio.run(_run())
+
+
+@dream.command("apply")
+@click.argument("dream_id")
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt.")
+@click.option(
+    "--non-destructive-only",
+    is_flag=True,
+    help="Apply only normalize_date / insert_insight / update_field.",
+)
+def dream_apply_cmd(dream_id: str, yes: bool, non_destructive_only: bool):
+    """Apply a dream's proposed patches."""
+
+    async def _run():
+        from memgentic.processing.dream import apply_dream
+        from memgentic.storage.metadata import MetadataStore
+
+        store = MetadataStore(settings.sqlite_path)
+        await store.initialize()
+        try:
+            patches = await store.get_dream_patches(dream_id, status="proposed")
+            if not patches:
+                console.print("[yellow]No proposed patches to apply.[/]")
+                return
+            console.print(
+                f"[cyan]About to apply[/] {len(patches)} patch(es) for dream {dream_id[:12]}..."
+            )
+            if not yes and not click.confirm("Continue?"):
+                return
+
+            report = await apply_dream(
+                dream_id,
+                metadata_store=store,
+                only_non_destructive=non_destructive_only,
+            )
+            table = Table(title=f"Apply Report — {dream_id[:12]}")
+            table.add_column("Metric", style="bold")
+            table.add_column("Value")
+            table.add_row("Applied", str(report.applied))
+            table.add_row("Skipped (destructive)", str(report.skipped_destructive))
+            table.add_row("Inserted memories", str(len(report.inserted_memories)))
+            table.add_row("Superseded memories", str(len(report.superseded_memories)))
+            table.add_row("Archived memories", str(len(report.archived_memories)))
+            table.add_row("Chronograph triples", str(report.chronograph_triples))
+            table.add_row("Errors", str(len(report.errors)))
+            console.print(table)
+            for err in report.errors:
+                console.print(f"  [red]{err}[/]")
+        finally:
+            await store.close()
+
+    asyncio.run(_run())
+
+
+@dream.command("reject")
+@click.argument("dream_id")
+def dream_reject_cmd(dream_id: str):
+    """Mark every proposed patch in a dream as rejected (no mutation)."""
+
+    async def _run():
+        from memgentic.processing.dream import reject_dream
+        from memgentic.storage.metadata import MetadataStore
+
+        store = MetadataStore(settings.sqlite_path)
+        await store.initialize()
+        try:
+            count = await reject_dream(dream_id, metadata_store=store)
+            console.print(f"[green]Rejected[/] {count} proposed patch(es)")
+        finally:
+            await store.close()
+
+    asyncio.run(_run())
+
+
+@dream.command("models")
+def dream_models_cmd():
+    """Show configured + available LLM providers for the dream pipeline.
+
+    \b
+    Routing rules:
+      claude-*       -> Anthropic (needs MEMGENTIC_ANTHROPIC_API_KEY)
+      gemini-*       -> Google API (needs MEMGENTIC_GOOGLE_API_KEY)
+      gpt-* / o1-*   -> OpenAI-compat (needs MEMGENTIC_OPENAI_COMPAT_BASE_URL)
+      anything else  -> Ollama tag (needs Ollama running)
+
+    \b
+    Examples:
+      memgentic dream models
+      memgentic dream run --signal-model gemma4:e4b --consolidate-model qwen3.6:35b-a3b
+    """
+    import urllib.error
+    import urllib.request
+
+    async def _run():
+        from memgentic.processing.dream import _detect_provider
+
+        # --- Configured models ---
+        signal = settings.dream_signal_model or "(unset → default LLMClient)"
+        consolidate = settings.dream_consolidate_model or "(unset → default LLMClient)"
+
+        sig_prov = _detect_provider(settings.dream_signal_model or "")
+        con_prov = _detect_provider(settings.dream_consolidate_model or "")
+
+        cfg_table = Table(title="Dream pipeline — configured models")
+        cfg_table.add_column("Phase", style="bold")
+        cfg_table.add_column("Model")
+        cfg_table.add_column("Provider", style="cyan")
+        cfg_table.add_row("Phase 2 (Gather Signal)", signal, sig_prov or "default")
+        cfg_table.add_row("Phase 3 (Consolidate)", consolidate, con_prov or "default")
+        console.print(cfg_table)
+
+        # --- Provider availability ---
+        avail = Table(title="Provider availability")
+        avail.add_column("Provider", style="bold")
+        avail.add_column("Status", justify="center")
+        avail.add_column("Detail")
+
+        avail.add_row(
+            "Anthropic",
+            "[green]ok[/]" if settings.anthropic_api_key else "[red]no key[/]",
+            (
+                "MEMGENTIC_ANTHROPIC_API_KEY set"
+                if settings.anthropic_api_key
+                else "set MEMGENTIC_ANTHROPIC_API_KEY in .env"
+            ),
+        )
+        avail.add_row(
+            "Google (Gemini)",
+            "[green]ok[/]" if settings.google_api_key else "[red]no key[/]",
+            (
+                "MEMGENTIC_GOOGLE_API_KEY set"
+                if settings.google_api_key
+                else "set MEMGENTIC_GOOGLE_API_KEY in .env"
+            ),
+        )
+        avail.add_row(
+            "OpenAI-compat",
+            "[green]ok[/]" if settings.openai_compat_base_url else "[dim]inactive[/]",
+            settings.openai_compat_base_url or "set MEMGENTIC_OPENAI_COMPAT_BASE_URL",
+        )
+
+        # Ollama: try to list installed models (informational, non-fatal)
+        ollama_models: list[str] = []
+        ollama_status = "[red]unreachable[/]"
+        ollama_detail = f"{settings.ollama_url} — start with `ollama serve`"
+        try:
+            req = urllib.request.Request(f"{settings.ollama_url}/api/tags")
+            with urllib.request.urlopen(req, timeout=2) as r:  # nosec B310
+                import json as _json
+
+                data = _json.loads(r.read().decode())
+                ollama_models = sorted(m["name"] for m in data.get("models", []))
+                ollama_status = "[green]ok[/]"
+                ollama_detail = f"{len(ollama_models)} model(s) installed"
+        except (urllib.error.URLError, TimeoutError, OSError):
+            pass
+        except Exception as exc:
+            ollama_detail = f"error: {exc}"
+
+        avail.add_row("Ollama (local)", ollama_status, ollama_detail)
+        console.print(avail)
+
+        if ollama_models:
+            mtable = Table(title="Ollama — installed models")
+            mtable.add_column("Tag")
+            for tag in ollama_models:
+                mtable.add_row(tag)
+            console.print(mtable)
+
+        # --- Recommended configurations ---
+        console.print()
+        console.print("[bold]Recommended configurations[/]")
+        console.print(
+            "  [cyan]Cheapest cloud[/]    "
+            "Phase 2=[bold]claude-haiku-4-5[/]  Phase 3=[bold]claude-haiku-4-5[/]  "
+            "[dim](~$0.10/run)[/]"
+        )
+        console.print(
+            "  [cyan]Best balanced[/]     "
+            "Phase 2=[bold]claude-haiku-4-5[/]  Phase 3=[bold]qwen3.6:35b-a3b[/]  "
+            "[dim](~$0.005/run + local)[/]"
+        )
+        console.print(
+            "  [cyan]Fully local[/]       "
+            "Phase 2=[bold]gemma4:e4b[/]        Phase 3=[bold]qwen3.6:35b-a3b[/]  "
+            "[dim]($0)[/]"
+        )
+        console.print(
+            "  [cyan]Portable (16 GB)[/]  "
+            "Phase 2=[bold]gemma4:e4b[/]        Phase 3=[bold]gemma4:26b-a4b[/]  "
+            "[dim](mmap streams from NVMe)[/]"
+        )
+        console.print()
+        console.print(
+            "[dim]Configure via .env (MEMGENTIC_DREAM_SIGNAL_MODEL / "
+            "MEMGENTIC_DREAM_CONSOLIDATE_MODEL) or per-run via "
+            "`memgentic dream run --signal-model X --consolidate-model Y`.[/]"
+        )
+
+    asyncio.run(_run())
+
+
+@dream.command("list")
+@click.option("--project", default=None, help="Filter by project.")
+@click.option("--status", default=None, help="Filter by status.")
+@click.option("--limit", default=20, type=int)
+def dream_list_cmd(project: str | None, status: str | None, limit: int):
+    """List recent dream runs."""
+
+    async def _run():
+        from memgentic.storage.metadata import MetadataStore
+
+        store = MetadataStore(settings.sqlite_path)
+        await store.initialize()
+        try:
+            runs = await store.list_dream_runs(project=project, status=status, limit=limit)
+            if not runs:
+                console.print("[yellow]No dreams.[/]")
+                return
+            table = Table(title="Dream Runs")
+            table.add_column("ID", style="cyan")
+            table.add_column("Project", style="green")
+            table.add_column("Status", style="yellow")
+            table.add_column("Patches", justify="right")
+            table.add_column("Created")
+            for run in runs:
+                patches = await store.get_dream_patches(run.id)
+                table.add_row(
+                    run.id[:12],
+                    run.project or "(all)",
+                    run.status.value,
+                    str(len(patches)),
+                    run.created_at.strftime("%Y-%m-%d %H:%M"),
+                )
+            console.print(table)
+        finally:
+            await store.close()
+
+    asyncio.run(_run())
 
 
 @main.command()
@@ -1591,6 +2174,48 @@ LLM_PRESETS = {
         "name": "gemma3:4b",
         "label": "Gemma 3 4B (older, proven, ~4GB RAM)",
         "size": "2.5GB",
+    },
+}
+
+# --- Dream pipeline preset bundles ---
+# Each preset configures BOTH dream phases at once. The default LLMClient is
+# used implicitly when ``signal_model`` / ``consolidate_model`` is empty.
+DREAM_PRESETS = {
+    "1": {
+        "label": "Cheapest cloud — Haiku x2 (~$0.10/run, no GPU/RAM needed)",
+        "signal": "claude-haiku-4-5",
+        "consolidate": "claude-haiku-4-5",
+        "needs": "MEMGENTIC_ANTHROPIC_API_KEY",
+    },
+    "2": {
+        "label": "Best balanced — Haiku P2 + local Qwen 3.6 P3 (~$0.005/run)",
+        "signal": "claude-haiku-4-5",
+        "consolidate": "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_S",
+        "needs": "MEMGENTIC_ANTHROPIC_API_KEY + Ollama running",
+    },
+    "3": {
+        "label": "Fully local — Gemma 4 P2 + Qwen 3.6 35B-A3B P3 ($0)",
+        "signal": "gemma4:e4b",
+        "consolidate": "hf.co/unsloth/Qwen3.6-35B-A3B-GGUF:UD-Q4_K_S",
+        "needs": "Ollama running (~25 GB disk)",
+    },
+    "4": {
+        "label": "Portable local — Gemma 4 E4B + 26B-A4B (works on 16 GB via NVMe mmap)",
+        "signal": "gemma4:e4b",
+        "consolidate": "gemma4:26b-a4b",
+        "needs": "Ollama running (~22 GB disk)",
+    },
+    "5": {
+        "label": "Quality cloud — Sonnet P3 (~$0.90/run, top quality)",
+        "signal": "claude-haiku-4-5",
+        "consolidate": "claude-sonnet-4-6",
+        "needs": "MEMGENTIC_ANTHROPIC_API_KEY",
+    },
+    "6": {
+        "label": "Skip — keep my current dream config",
+        "signal": None,
+        "consolidate": None,
+        "needs": "",
     },
 }
 
@@ -2205,6 +2830,31 @@ def _run_setup_steps() -> bool:
         console.print("[red]Invalid choice.[/]")
         return False
 
+    # --- Step 3b: Dream pipeline models (auto-consolidation) ---
+    console.print("\n[bold]Step 3b: Dream pipeline (auto-memory-consolidation)[/]\n")
+    console.print("  `memgentic dream` periodically reviews recent sessions and proposes")
+    console.print(
+        "  patches to the live memory store (merge / supersede / archive / insert insights)."
+    )
+    console.print("  Phase 2 = bulk transcript scan (cheap), Phase 3 = patch generation (quality).")
+    console.print()
+    for key, preset in DREAM_PRESETS.items():
+        marker = ""
+        cur_sig = settings.dream_signal_model or ""
+        cur_con = settings.dream_consolidate_model or ""
+        if preset["signal"] == cur_sig and preset["consolidate"] == cur_con:
+            marker = " [green](current)[/]"
+        console.print(f"  [bold]{key})[/] {preset['label']}{marker}")
+        if preset["needs"]:
+            console.print(f"     [dim]needs: {preset['needs']}[/]")
+    console.print()
+
+    dream_choice = click.prompt("Select dream pipeline preset", type=str, default="6")
+    dream_preset = DREAM_PRESETS.get(dream_choice)
+    if dream_preset is None:
+        console.print("[yellow]Invalid choice — keeping current config.[/]")
+        dream_preset = DREAM_PRESETS["6"]
+
     # --- Write to .env ---
     env_path = Path.cwd() / ".env"
     env_lines: list[str] = []
@@ -2221,6 +2871,11 @@ def _run_setup_steps() -> bool:
     else:
         _update_env("MEMGENTIC_ENABLE_LOCAL_LLM", str(enable_local_llm).lower(), env_lines)
 
+    if dream_preset["signal"] is not None:
+        _update_env("MEMGENTIC_DREAM_SIGNAL_MODEL", dream_preset["signal"], env_lines)
+    if dream_preset["consolidate"] is not None:
+        _update_env("MEMGENTIC_DREAM_CONSOLIDATE_MODEL", dream_preset["consolidate"], env_lines)
+
     env_path.write_text("\n".join(env_lines) + "\n")
 
     console.print("\n[green]Saved to .env:[/]")
@@ -2232,6 +2887,11 @@ def _run_setup_steps() -> bool:
         console.print("  Intelligence: Gemini API")
     else:
         console.print("  Intelligence: heuristics only")
+    if dream_preset["signal"] is not None:
+        console.print(f"  Dream Phase 2 (signal): {dream_preset['signal']}")
+        console.print(f"  Dream Phase 3 (consolidate): {dream_preset['consolidate']}")
+    else:
+        console.print("  Dream pipeline: kept existing config")
 
     # --- Step 4: Install sqlite-vec extra if needed ---
     if needs_sqlite_vec:

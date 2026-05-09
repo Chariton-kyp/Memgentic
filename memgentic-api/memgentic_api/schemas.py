@@ -33,6 +33,7 @@ class MemoryResponse(BaseModel):
     content: str
     content_type: str
     platform: str
+    project: str = ""
     topics: list[str]
     entities: list[str]
     confidence: float
@@ -479,3 +480,134 @@ class IngestionJobListResponse(BaseModel):
 
     jobs: list[IngestionJobResponse]
     total: int
+
+
+# --- Dream Schemas ---
+
+
+class DreamPatchResponse(BaseModel):
+    """A single proposed/applied patch belonging to a dream run."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str
+    dream_id: str
+    action: str
+    target_memory_ids: list[str]
+    new_content: str | None = None
+    new_metadata: dict | None = None
+    evidence: str | None = None
+    status: str
+    created_at: datetime
+    applied_at: datetime | None = None
+
+
+class DreamRunResponse(BaseModel):
+    """A single auto-dream consolidation run (without patches)."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str
+    project: str
+    status: str
+    model: str
+    instructions: str
+    input_session_ids: list[str]
+    input_memory_count: int
+    error: str | None = None
+    usage_input_tokens: int
+    usage_output_tokens: int
+    created_at: datetime
+    ended_at: datetime | None = None
+    applied_at: datetime | None = None
+    patches_count: int = 0
+
+
+class DreamDetailResponse(BaseModel):
+    """A dream run with its full patch list — used by GET /dreams/{id}."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    run: DreamRunResponse
+    patches: list[DreamPatchResponse]
+
+
+class DreamListResponse(BaseModel):
+    """Paginated list of dream runs."""
+
+    dreams: list[DreamRunResponse]
+    total: int
+
+
+class CreateDreamRequest(BaseModel):
+    """Trigger a new dream run.
+
+    The pipeline runs synchronously; for long-running scopes call from a
+    worker rather than the request handler.
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Project scope. None defaults to all projects (NOT recommended for "
+            "real stores). Pass a derived project key to bound the scope."
+        ),
+    )
+    signal_model: str | None = Field(
+        default=None,
+        description=(
+            "Override Phase 2 (Gather Signal) model for this run only. Routing: "
+            "'claude-*' -> Anthropic, 'gemini-*' -> Google, 'gpt-*' / 'openai/*' -> "
+            "OpenAI-compat, anything else -> Ollama tag (e.g. 'gemma4:e4b')."
+        ),
+    )
+    consolidate_model: str | None = Field(
+        default=None,
+        description=(
+            "Override Phase 3 (Consolidate) model for this run only. Same routing "
+            "rules as signal_model. Recommended local: 'qwen3.6:35b-a3b'."
+        ),
+    )
+    instructions: str = Field(default="", max_length=4096)
+    limit_sessions: int | None = Field(default=None, ge=1, le=100)
+
+
+class ApplyDreamRequest(BaseModel):
+    """Apply patches that are still in ``proposed`` status."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    only_non_destructive: bool = Field(
+        default=False,
+        description=(
+            "When true, only normalize_date / insert_insight / update_field "
+            "patches are applied; destructive patches (merge / supersede / "
+            "archive_stale) remain proposed."
+        ),
+    )
+
+
+class ApplyDreamResponse(BaseModel):
+    """Result of an apply_dream call."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    dream_id: str
+    applied: int
+    skipped_destructive: int
+    inserted_memories: list[str]
+    superseded_memories: list[str]
+    archived_memories: list[str]
+    chronograph_triples: int
+    errors: list[str]
+
+
+class RejectDreamResponse(BaseModel):
+    """Result of a reject_dream call."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    dream_id: str
+    rejected: int

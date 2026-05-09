@@ -197,6 +197,7 @@ class BaseFileWatcher(abc.ABC):
                     f"dedup skipped {skipped}/{len(decisions)} chunks in session {session_id}",
                 )
             if kept:
+                project = await self._adapter.get_project(file_path)
                 memories = await self._ctx.pipeline.ingest_conversation(
                     chunks=kept,
                     platform=self.platform,
@@ -205,6 +206,7 @@ class BaseFileWatcher(abc.ABC):
                     capture_method=CaptureMethod.AUTO_DAEMON,
                     file_path=file_key,
                     capture_profile=self._ctx.capture_profile,
+                    project=project,
                 )
                 memories_created = len(memories)
                 if memories_created:

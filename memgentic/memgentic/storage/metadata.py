@@ -13,6 +13,11 @@ from memgentic.exceptions import StorageError
 from memgentic.models import (
     Collection,
     ContentType,
+    DreamPatch,
+    DreamPatchAction,
+    DreamPatchStatus,
+    DreamRun,
+    DreamStatus,
     IngestionJob,
     IngestionJobStatus,
     Memory,
@@ -60,6 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_memories_content_type ON memories(content_type);
 CREATE INDEX IF NOT EXISTS idx_memories_status ON memories(status);
 CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);
 CREATE INDEX IF NOT EXISTS idx_memories_session_id ON memories(session_id);
+-- The ``project`` column is added via migration 9 for upgraded databases. The
+-- index here costs nothing on fresh installs (created in the same migration)
+-- but lets the metadata store query plans stay consistent across paths.
 
 -- Full-text search on content
 CREATE VIRTUAL TABLE IF NOT EXISTS memories_fts USING fts5(
@@ -223,8 +231,9 @@ class MetadataStore:
              session_title, capture_method, original_timestamp, file_path,
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
-             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
+             project)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory.id,
@@ -254,6 +263,7 @@ class MetadataStore:
                 memory.pinned_at.isoformat() if memory.pinned_at else None,
                 memory.capture_profile,
                 memory.dual_sibling_id,
+                memory.project or "",
             ),
         )
         await self._db.commit()
@@ -289,6 +299,7 @@ class MetadataStore:
                 m.pinned_at.isoformat() if m.pinned_at else None,
                 m.capture_profile,
                 m.dual_sibling_id,
+                m.project or "",
             )
             for m in memories
         ]
@@ -299,8 +310,9 @@ class MetadataStore:
              session_title, capture_method, original_timestamp, file_path,
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
-             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
+             project)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -426,6 +438,29 @@ class MetadataStore:
             )
         rows = await cursor.fetchall()
         return {row["platform"]: row["cnt"] for row in rows}
+
+    async def get_project_stats(self, user_id: str = "") -> dict[str, int]:
+        """Get memory count per project key.
+
+        Memories with an empty ``project`` are reported under the literal key
+        ``""`` so the dashboard can render a "No project" bucket explicitly.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        if user_id:
+            cursor = await self._db.execute(
+                "SELECT project, COUNT(*) as cnt FROM memories "
+                "WHERE status = 'active' AND user_id = ? GROUP BY project "
+                "ORDER BY cnt DESC",
+                (user_id,),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT project, COUNT(*) as cnt FROM memories "
+                "WHERE status = 'active' GROUP BY project ORDER BY cnt DESC"
+            )
+        rows = await cursor.fetchall()
+        return {(row["project"] or ""): row["cnt"] for row in rows}
 
     async def get_filtered_count(
         self,
@@ -789,6 +824,16 @@ class MetadataStore:
             conditions.append("confidence >= ?")
             params.append(config.min_confidence)
 
+        if config.include_projects:
+            placeholders = ",".join("?" for _ in config.include_projects)
+            conditions.append(f"project IN ({placeholders})")
+            params.extend(p.lower() for p in config.include_projects)
+
+        if config.exclude_projects:
+            placeholders = ",".join("?" for _ in config.exclude_projects)
+            conditions.append(f"project NOT IN ({placeholders})")
+            params.extend(p.lower() for p in config.exclude_projects)
+
         return conditions, params
 
     @staticmethod
@@ -829,6 +874,13 @@ class MetadataStore:
         except (IndexError, KeyError):
             dual_sibling_id = None
 
+        # project added in migration 9; default to empty string when absent so
+        # legacy fixtures and pre-migration databases keep deserialising.
+        try:
+            project = row["project"] or ""
+        except (IndexError, KeyError):
+            project = ""
+
         return Memory(
             id=row["id"],
             user_id=user_id or "",
@@ -861,6 +913,7 @@ class MetadataStore:
             pinned_at=pinned_at,
             capture_profile=capture_profile,
             dual_sibling_id=dual_sibling_id,
+            project=project,
         )
 
     # ── Collection methods ──────────────────────────────────────────────
@@ -1629,4 +1682,250 @@ class MetadataStore:
             content=row["content"],
             created_at=datetime.fromisoformat(row["created_at"]),
             updated_at=datetime.fromisoformat(row["updated_at"]),
+        )
+
+    # ------------------------------------------------------------------
+    # Dream runs + patches (auto-dream consolidation)
+    # ------------------------------------------------------------------
+
+    async def create_dream_run(self, run: DreamRun) -> None:
+        """Insert a new dream run row."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        await self._db.execute(
+            """
+            INSERT INTO dream_runs
+            (id, project, status, model, instructions, input_session_ids,
+             input_memory_count, error, usage_input_tokens, usage_output_tokens,
+             created_at, ended_at, applied_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run.id,
+                run.project,
+                run.status.value,
+                run.model,
+                run.instructions,
+                json.dumps(run.input_session_ids),
+                run.input_memory_count,
+                run.error,
+                run.usage_input_tokens,
+                run.usage_output_tokens,
+                run.created_at.isoformat(),
+                run.ended_at.isoformat() if run.ended_at else None,
+                run.applied_at.isoformat() if run.applied_at else None,
+                run.user_id,
+            ),
+        )
+        await self._db.commit()
+
+    async def update_dream_run(self, run_id: str, **kwargs) -> None:
+        """Partially update a dream run.
+
+        Supported fields: status, model, error, usage_input_tokens,
+        usage_output_tokens, ended_at, applied_at, input_memory_count,
+        input_session_ids.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+
+        allowed = {
+            "status",
+            "model",
+            "error",
+            "usage_input_tokens",
+            "usage_output_tokens",
+            "ended_at",
+            "applied_at",
+            "input_memory_count",
+            "input_session_ids",
+        }
+        updates: dict = {}
+        for key, value in kwargs.items():
+            if key not in allowed:
+                continue
+            if value is None and key in ("ended_at", "applied_at", "error"):
+                updates[key] = None
+                continue
+            if value is None:
+                continue
+            if key == "status":
+                updates[key] = value.value if isinstance(value, DreamStatus) else str(value)
+            elif key in ("ended_at", "applied_at"):
+                updates[key] = value.isoformat() if isinstance(value, datetime) else str(value)
+            elif key == "input_session_ids":
+                updates[key] = json.dumps(list(value))
+            else:
+                updates[key] = value
+
+        if not updates:
+            return
+
+        set_clause = ", ".join(f"{k} = ?" for k in updates)
+        values = list(updates.values())
+        values.append(run_id)
+        await self._db.execute(
+            f"UPDATE dream_runs SET {set_clause} WHERE id = ?",  # noqa: S608
+            values,
+        )
+        await self._db.commit()
+
+    async def get_dream_run(self, dream_id: str) -> DreamRun | None:
+        """Fetch a single dream run by id."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        cursor = await self._db.execute(
+            "SELECT * FROM dream_runs WHERE id = ?",
+            (dream_id,),
+        )
+        row = await cursor.fetchone()
+        if not row:
+            return None
+        return self._row_to_dream_run(row)
+
+    async def list_dream_runs(
+        self,
+        *,
+        project: str | None = None,
+        status: str | None = None,
+        user_id: str = "",
+        limit: int = 20,
+    ) -> list[DreamRun]:
+        """List dream runs (most recent first), optionally filtered by project/status."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+
+        safe_limit = max(1, min(int(limit), 500))
+        conditions: list[str] = []
+        params: list = []
+        if project is not None:
+            conditions.append("project = ?")
+            params.append(project)
+        if status is not None:
+            conditions.append("status = ?")
+            params.append(status)
+        if user_id:
+            conditions.append("user_id = ?")
+            params.append(user_id)
+
+        where_clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+        params.append(safe_limit)
+
+        cursor = await self._db.execute(
+            f"SELECT * FROM dream_runs{where_clause} "  # noqa: S608
+            f"ORDER BY created_at DESC LIMIT ?",
+            params,
+        )
+        rows = await cursor.fetchall()
+        return [self._row_to_dream_run(row) for row in rows]
+
+    async def create_dream_patches(self, patches: list[DreamPatch]) -> None:
+        """Batch-insert dream patches belonging to a single run."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        if not patches:
+            return
+        rows = [
+            (
+                p.id,
+                p.dream_id,
+                p.action.value,
+                json.dumps(p.target_memory_ids),
+                p.new_content,
+                json.dumps(p.new_metadata, default=str) if p.new_metadata is not None else None,
+                p.evidence,
+                p.status.value,
+                p.created_at.isoformat(),
+                p.applied_at.isoformat() if p.applied_at else None,
+            )
+            for p in patches
+        ]
+        await self._db.executemany(
+            """
+            INSERT INTO dream_patches
+            (id, dream_id, action, target_memory_ids, new_content, new_metadata,
+             evidence, status, created_at, applied_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        await self._db.commit()
+
+    async def get_dream_patches(
+        self,
+        dream_id: str,
+        *,
+        status: str | None = None,
+    ) -> list[DreamPatch]:
+        """Return patches for a dream, optionally filtered by status."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        if status is not None:
+            cursor = await self._db.execute(
+                "SELECT * FROM dream_patches WHERE dream_id = ? AND status = ? ORDER BY created_at",
+                (dream_id, status),
+            )
+        else:
+            cursor = await self._db.execute(
+                "SELECT * FROM dream_patches WHERE dream_id = ? ORDER BY created_at",
+                (dream_id,),
+            )
+        rows = await cursor.fetchall()
+        return [self._row_to_dream_patch(row) for row in rows]
+
+    async def update_dream_patch_status(
+        self,
+        patch_id: str,
+        status: DreamPatchStatus,
+        *,
+        applied_at: datetime | None = None,
+    ) -> None:
+        """Mark a single dream patch with a new lifecycle status."""
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        applied_iso = applied_at.isoformat() if applied_at else None
+        await self._db.execute(
+            "UPDATE dream_patches SET status = ?, applied_at = ? WHERE id = ?",
+            (status.value, applied_iso, patch_id),
+        )
+        await self._db.commit()
+
+    @staticmethod
+    def _row_to_dream_run(row: aiosqlite.Row) -> DreamRun:
+        """Convert a database row to a DreamRun model."""
+        return DreamRun(
+            id=row["id"],
+            project=row["project"],
+            status=DreamStatus(row["status"]),
+            model=row["model"],
+            instructions=row["instructions"],
+            input_session_ids=(
+                json.loads(row["input_session_ids"]) if row["input_session_ids"] else []
+            ),
+            input_memory_count=row["input_memory_count"],
+            error=row["error"],
+            usage_input_tokens=row["usage_input_tokens"],
+            usage_output_tokens=row["usage_output_tokens"],
+            created_at=datetime.fromisoformat(row["created_at"]),
+            ended_at=datetime.fromisoformat(row["ended_at"]) if row["ended_at"] else None,
+            applied_at=(datetime.fromisoformat(row["applied_at"]) if row["applied_at"] else None),
+            user_id=row["user_id"],
+        )
+
+    @staticmethod
+    def _row_to_dream_patch(row: aiosqlite.Row) -> DreamPatch:
+        """Convert a database row to a DreamPatch model."""
+        return DreamPatch(
+            id=row["id"],
+            dream_id=row["dream_id"],
+            action=DreamPatchAction(row["action"]),
+            target_memory_ids=(
+                json.loads(row["target_memory_ids"]) if row["target_memory_ids"] else []
+            ),
+            new_content=row["new_content"],
+            new_metadata=json.loads(row["new_metadata"]) if row["new_metadata"] else None,
+            evidence=row["evidence"],
+            status=DreamPatchStatus(row["status"]),
+            created_at=datetime.fromisoformat(row["created_at"]),
+            applied_at=(datetime.fromisoformat(row["applied_at"]) if row["applied_at"] else None),
         )

@@ -87,13 +87,30 @@ export async function listMemories(params: {
   page_size?: number;
   source?: string;
   content_type?: string;
+  project?: string;
 }): Promise<MemoryListResponse> {
   const qs = new URLSearchParams();
   if (params.page) qs.set("page", String(params.page));
   if (params.page_size) qs.set("page_size", String(params.page_size));
   if (params.source) qs.set("source", params.source);
   if (params.content_type) qs.set("content_type", params.content_type);
+  if (params.project !== undefined) qs.set("project", params.project);
   return fetchJson(`${API_BASE}/memories?${qs}`);
+}
+
+export interface ProjectStat {
+  project: string;
+  label: string;
+  count: number;
+}
+
+export interface ProjectListResponse {
+  projects: ProjectStat[];
+  total: number;
+}
+
+export async function listProjects(): Promise<ProjectListResponse> {
+  return fetchJson(`${API_BASE}/projects`);
 }
 
 export async function getMemory(id: string): Promise<Memory> {
@@ -870,4 +887,121 @@ export async function getWatcherLogs(
   limit = 50,
 ): Promise<{ logs: WatcherLog[] }> {
   return fetchJson(`${API_BASE}/watchers/${tool}/logs?limit=${limit}`);
+}
+
+// --- Auto-Dream ---
+
+export type DreamPatchAction =
+  | "merge"
+  | "supersede"
+  | "archive_stale"
+  | "normalize_date"
+  | "insert_insight"
+  | "update_field";
+
+export type DreamPatchStatus =
+  | "proposed"
+  | "applied"
+  | "rejected"
+  | "superseded_by_apply";
+
+export type DreamStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled";
+
+export type DreamPatch = {
+  id: string;
+  dream_id: string;
+  action: DreamPatchAction;
+  target_memory_ids: string[];
+  new_content: string | null;
+  new_metadata: Record<string, unknown> | null;
+  evidence: string | null;
+  status: DreamPatchStatus;
+  created_at: string;
+  applied_at: string | null;
+};
+
+export type DreamRun = {
+  id: string;
+  project: string;
+  status: DreamStatus;
+  model: string;
+  instructions: string;
+  input_session_ids: string[];
+  input_memory_count: number;
+  error: string | null;
+  usage_input_tokens: number;
+  usage_output_tokens: number;
+  created_at: string;
+  ended_at: string | null;
+  applied_at: string | null;
+  patches_count: number;
+};
+
+export type DreamDetail = {
+  run: DreamRun;
+  patches: DreamPatch[];
+};
+
+export type DreamApplyReport = {
+  dream_id: string;
+  applied: number;
+  skipped_destructive: number;
+  inserted_memories: string[];
+  superseded_memories: string[];
+  archived_memories: string[];
+  chronograph_triples: number;
+  errors: string[];
+};
+
+export async function listDreams(params: {
+  project?: string;
+  status?: DreamStatus;
+  limit?: number;
+} = {}): Promise<{ dreams: DreamRun[]; total: number }> {
+  const qs = new URLSearchParams();
+  if (params.project) qs.set("project", params.project);
+  if (params.status) qs.set("status", params.status);
+  if (params.limit) qs.set("limit", String(params.limit));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return fetchJson(`${API_BASE}/dreams${suffix}`);
+}
+
+export async function getDream(dreamId: string): Promise<DreamDetail> {
+  return fetchJson(`${API_BASE}/dreams/${dreamId}`);
+}
+
+export async function createDream(body: {
+  project?: string;
+  signal_model?: string | null;
+  consolidate_model?: string | null;
+  instructions?: string;
+  limit_sessions?: number;
+}): Promise<DreamRun> {
+  return fetchJson(`${API_BASE}/dreams`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function applyDream(
+  dreamId: string,
+  body: { only_non_destructive: boolean },
+): Promise<DreamApplyReport> {
+  return fetchJson(`${API_BASE}/dreams/${dreamId}/apply`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function rejectDream(
+  dreamId: string,
+): Promise<{ dream_id: string; rejected: number }> {
+  return fetchJson(`${API_BASE}/dreams/${dreamId}/reject`, {
+    method: "POST",
+  });
 }

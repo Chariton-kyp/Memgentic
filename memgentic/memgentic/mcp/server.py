@@ -31,6 +31,7 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Literal
 
 import structlog
@@ -286,6 +287,25 @@ class RecallInput(BaseModel):
         default=None,
         description="Exclude memories from these platforms (e.g., ['codex_cli'])",
     )
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Friendly project key (e.g. 'memgentic-public-export'). Pass "
+            "'auto' to use the current working directory of the MCP "
+            "subprocess. None = use session defaults."
+        ),
+    )
+    projects: list[str] | None = Field(
+        default=None,
+        description=(
+            "Multiple project keys. Pass alongside or instead of `project` "
+            "to recall across several projects at once."
+        ),
+    )
+    exclude_projects: list[str] | None = Field(
+        default=None,
+        description="Exclude memories from these projects.",
+    )
     content_types: list[str] | None = Field(
         default=None,
         description=(
@@ -396,6 +416,17 @@ class ConfigureSessionInput(BaseModel):
         le=1.0,
         description="Minimum confidence threshold (0.0-1.0)",
     )
+    include_projects: list[str] | None = Field(
+        default=None,
+        description=(
+            "Only include memories from these project keys (lowercase). "
+            "Pass ['auto'] to resolve from the MCP subprocess cwd."
+        ),
+    )
+    exclude_projects: list[str] | None = Field(
+        default=None,
+        description="Exclude memories from these project keys.",
+    )
 
 
 class SearchInput(BaseModel):
@@ -415,6 +446,10 @@ class RecentInput(BaseModel):
     limit: int = Field(default=10, ge=1, le=50, description="Number of recent memories")
     source: str | None = Field(default=None, description="Filter by platform")
     content_type: str | None = Field(default=None, description="Filter by content type")
+    project: str | None = Field(
+        default=None,
+        description=("Filter by project key. Pass 'auto' to use the MCP subprocess cwd."),
+    )
 
 
 class HandoffInput(BaseModel):
@@ -452,6 +487,13 @@ class HandoffInput(BaseModel):
         default=True,
         description="Whether to include sessions from the current source tool.",
     )
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Filter handoff bundles to a single project. Pass 'auto' to "
+            "scope to the MCP subprocess cwd."
+        ),
+    )
 
 
 class ContextInput(BaseModel):
@@ -475,6 +517,10 @@ class InventoryInput(BaseModel):
     offset: int = Field(default=0, ge=0)
     source: str | None = Field(default=None, description="Filter by platform.")
     content_type: str | None = Field(default=None, description="Filter by memory content type.")
+    project: str | None = Field(
+        default=None,
+        description="Filter inventory by project key. Pass 'auto' for current cwd.",
+    )
     detail: Literal["summary", "manifest"] = Field(
         default="summary",
         description="'summary' returns counts and samples; 'manifest' returns exact memory IDs.",
@@ -484,11 +530,42 @@ class InventoryInput(BaseModel):
 # --- Helper Functions ---
 
 
+def _resolve_project_keys(values: list[str] | None) -> list[str] | None:
+    """Resolve user-supplied project filters into normalised keys.
+
+    The literal ``"auto"`` is replaced with ``Path.cwd().name.lower()`` so a
+    caller running inside a project directory can ask for "this project" with
+    one shorthand. Empty inputs collapse to ``None`` so callers can roundtrip
+    the value through ``SessionConfig`` without spurious empty filters.
+    """
+    if not values:
+        return None
+
+    from memgentic.processing.project import normalize_project, project_from_cwd
+
+    resolved: list[str] = []
+    for raw in values:
+        if not raw:
+            continue
+        if raw.strip().lower() == "auto":
+            auto = project_from_cwd(str(Path.cwd()))
+            if auto:
+                resolved.append(auto)
+            continue
+        normalized = normalize_project(raw)
+        if normalized:
+            resolved.append(normalized)
+    return resolved or None
+
+
 def _get_effective_config(
     ctx: Context,
     sources: list[str] | None = None,
     exclude_sources: list[str] | None = None,
     content_types: list[str] | None = None,
+    project: str | None = None,
+    projects: list[str] | None = None,
+    exclude_projects: list[str] | None = None,
 ) -> SessionConfig:
     """Merge per-call filters with session-level defaults."""
     session_config = _get_session_config(ctx)
@@ -497,6 +574,8 @@ def _get_effective_config(
         exclude_sources=session_config.exclude_sources,
         include_content_types=session_config.include_content_types,
         min_confidence=session_config.min_confidence,
+        include_projects=session_config.include_projects,
+        exclude_projects=session_config.exclude_projects,
     )
 
     # Per-call overrides take precedence
@@ -506,6 +585,21 @@ def _get_effective_config(
         config.exclude_sources = [Platform(s) for s in exclude_sources]
     if content_types is not None:
         config.include_content_types = [ContentType(ct) for ct in content_types]
+
+    # Project filters: ``project`` and ``projects`` merge into the include list.
+    project_includes: list[str] = []
+    if project is not None:
+        project_includes.append(project)
+    if projects is not None:
+        project_includes.extend(projects)
+    resolved_includes = _resolve_project_keys(project_includes) if project_includes else None
+    if resolved_includes is not None:
+        config.include_projects = resolved_includes
+
+    if exclude_projects is not None:
+        resolved_excludes = _resolve_project_keys(exclude_projects)
+        if resolved_excludes is not None:
+            config.exclude_projects = resolved_excludes
 
     return config
 
@@ -617,6 +711,9 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
             sources=params.sources,
             exclude_sources=params.exclude_sources,
             content_types=params.content_types,
+            project=params.project,
+            projects=params.projects,
+            exclude_projects=params.exclude_projects,
         )
 
         # Use hybrid search if intelligence installed, otherwise basic vector search
@@ -868,6 +965,53 @@ async def memgentic_sources(ctx: Context) -> str:
 
 
 @mcp.tool(
+    name="memgentic_projects",
+    annotations={
+        "title": "List Memory Projects",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_projects(ctx: Context) -> str:
+    """List the projects that contributed memories and how many from each.
+
+    A "project" is the friendly key derived from the originating working
+    directory of each AI tool (Claude Code's ``cwd``, Codex's
+    ``session_meta``, etc.). Memories captured outside any known project —
+    for instance manual ``memgentic_remember`` calls — are reported under
+    the ``"(unknown)"`` bucket.
+    """
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+
+        stats = await metadata_store.get_project_stats()
+        if not stats:
+            return "No memories stored yet."
+
+        total = sum(stats.values())
+        lines = ["# Memory Projects", ""]
+        lines.append(f"**Total memories:** {total}")
+        lines.append("")
+        lines.append("| Project | Memories |")
+        lines.append("|---------|----------|")
+        for project, count in sorted(stats.items(), key=lambda x: x[1], reverse=True):
+            label = project if project else "(unknown)"
+            lines.append(f"| {label} | {count} |")
+        lines.append("")
+        lines.append(
+            "Use `memgentic_recall(project='<name>')` or "
+            "`memgentic_configure_session(include_projects=[...])` to filter."
+        )
+        return "\n".join(lines)
+    except Exception as exc:
+        logger.error("memgentic_projects.error", error=str(exc))
+        return f"Error listing projects: {exc}"
+
+
+@mcp.tool(
     name="memgentic_configure_session",
     annotations={
         "title": "Configure Session Filters",
@@ -912,6 +1056,8 @@ async def memgentic_configure_session(params: ConfigureSessionInput, ctx: Contex
             if params.content_types
             else None,
             min_confidence=params.min_confidence,
+            include_projects=_resolve_project_keys(params.include_projects),
+            exclude_projects=_resolve_project_keys(params.exclude_projects),
         )
         _set_session_config(session_id, session_config)
 
@@ -930,6 +1076,10 @@ async def memgentic_configure_session(params: ConfigureSessionInput, ctx: Contex
             )
         if session_config.min_confidence > 0:
             lines.append(f"- **Min confidence:** {session_config.min_confidence}")
+        if session_config.include_projects:
+            lines.append(f"- **Projects:** {', '.join(session_config.include_projects)}")
+        if session_config.exclude_projects:
+            lines.append(f"- **Exclude projects:** {', '.join(session_config.exclude_projects)}")
         lines.append("")
         lines.append("All subsequent `memgentic_recall` calls will use these defaults.")
 
@@ -1024,14 +1174,11 @@ async def memgentic_recent(params: RecentInput, ctx: Context) -> str:
         state = ctx.request_context.lifespan_context
         metadata_store: MetadataStore = state["metadata_store"]
 
-        config = _get_session_config(ctx)
-        if params.source:
-            config = SessionConfig(
-                include_sources=[Platform(params.source)],
-                exclude_sources=config.exclude_sources,
-                include_content_types=config.include_content_types,
-                min_confidence=config.min_confidence,
-            )
+        config = _get_effective_config(
+            ctx,
+            sources=[params.source] if params.source else None,
+            project=params.project,
+        )
 
         ct = ContentType(params.content_type) if params.content_type else None
 
@@ -1105,11 +1252,20 @@ async def memgentic_handoff(params: HandoffInput, ctx: Context) -> str:
             if current is not None and current not in exclude_sources:
                 exclude_sources.append(current)
 
+        # Resolve the per-call project filter (with the 'auto' sentinel) and
+        # merge with whatever is already on the session config so the cwd of
+        # the MCP subprocess can scope a handoff request to the current project.
+        project_includes = _resolve_project_keys([params.project]) if params.project else None
+        if project_includes is None:
+            project_includes = session_config.include_projects
+
         config = SessionConfig(
             include_sources=include_sources,
             exclude_sources=exclude_sources or None,
             include_content_types=session_config.include_content_types,
             min_confidence=session_config.min_confidence,
+            include_projects=project_includes,
+            exclude_projects=session_config.exclude_projects,
         )
 
         since = datetime.now(UTC) - timedelta(hours=params.since_hours)
@@ -1278,6 +1434,16 @@ async def memgentic_inventory(params: InventoryInput, ctx: Context) -> dict:
                     f"Unknown source '{params.source}'; returning unfiltered. Valid: {valid}."
                 )
 
+        if params.project:
+            project_keys = _resolve_project_keys([params.project])
+            if project_keys:
+                config.include_projects = project_keys
+            elif params.project.strip().lower() == "auto":
+                warnings.append(
+                    "project='auto' could not derive a project from the current cwd; "
+                    "returning unfiltered."
+                )
+
         content_type: ContentType | None = None
         if params.content_type:
             try:
@@ -1303,6 +1469,7 @@ async def memgentic_inventory(params: InventoryInput, ctx: Context) -> dict:
                 "id": memory.id,
                 "content_type": memory.content_type.value,
                 "platform": memory.source.platform.value,
+                "project": memory.project or "",
                 "session_id": memory.source.session_id,
                 "session_title": memory.source.session_title,
                 "capture_method": memory.source.capture_method.value,
@@ -1321,6 +1488,7 @@ async def memgentic_inventory(params: InventoryInput, ctx: Context) -> dict:
                 "filters": {
                     "source": params.source,
                     "content_type": params.content_type,
+                    "project": params.project,
                 },
                 "memories": [manifest(memory) for memory in page],
             }
@@ -1335,12 +1503,14 @@ async def memgentic_inventory(params: InventoryInput, ctx: Context) -> dict:
             "total_matching_active_memories": total,
             "total_active_memories": await metadata_store.get_total_count(),
             "sources": await metadata_store.get_source_stats(),
+            "projects": await metadata_store.get_project_stats(),
             "content_types": content_type_counts,
             "capture_profiles": capture_profile_counts,
             "top_topics": await _aggregate_top_topics(metadata_store, 20),
             "filters": {
                 "source": params.source,
                 "content_type": params.content_type,
+                "project": params.project,
             },
             "sample": [manifest(memory) for memory in page[: min(len(page), 10)]],
         }
@@ -2554,6 +2724,295 @@ async def memgentic_watchers_status(params: WatchersStatusInput, ctx: Context) -
     except Exception as exc:
         logger.error("memgentic_watchers_status.error", error=str(exc))
         return {"watchers": [], "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Auto-Dream MCP tools
+# ---------------------------------------------------------------------------
+
+
+class DreamRunInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    project: str | None = Field(
+        default=None,
+        description=(
+            "Project scope. Defaults to the cwd-derived project key. "
+            "Pass an empty string to dream over ALL projects (not recommended)."
+        ),
+    )
+    signal_model: str | None = Field(
+        default=None,
+        description=(
+            "Override Phase 2 (Gather Signal) model for this run only. "
+            "Routing follows the same prefix table as the env var: "
+            "'claude-*' -> Anthropic, 'gemini-*' -> Google, 'gpt-*' -> "
+            "OpenAI-compat, anything else -> Ollama tag (e.g. "
+            "'qwen3.6:35b-a3b', 'gemma4:e4b')."
+        ),
+    )
+    consolidate_model: str | None = Field(
+        default=None,
+        description=(
+            "Override Phase 3 (Consolidate) model for this run only. Same "
+            "routing rules as signal_model. Recommended local choice: "
+            "'qwen3.6:35b-a3b' (MoE, 5/5 JSON-schema reliability)."
+        ),
+    )
+    instructions: str = Field(
+        default="",
+        max_length=4096,
+        description="Optional LLM guidance — supplies extra context to the Consolidate phase.",
+    )
+    limit_sessions: int | None = Field(
+        default=None,
+        ge=1,
+        le=100,
+        description="Max recent sessions to ingest (default: dream_default_session_limit setting).",
+    )
+    auto_apply: bool = Field(
+        default=False,
+        description=(
+            "Auto-apply NON-destructive patches (normalize_date, insert_insight, "
+            "update_field). Destructive patches always require explicit "
+            "memgentic_dream_apply."
+        ),
+    )
+
+
+class DreamStatusInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    dream_id: str = Field(description="The id returned by memgentic_dream_run.")
+
+
+class DreamApplyInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    dream_id: str = Field(description="The id of a completed dream.")
+    only_non_destructive: bool = Field(
+        default=False,
+        description="Apply only normalize_date / insert_insight / update_field.",
+    )
+
+
+class DreamListInput(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    project: str | None = Field(default=None, description="Filter by project.")
+    status: str | None = Field(default=None, description="Filter by lifecycle status.")
+    limit: int = Field(default=20, ge=1, le=200)
+
+
+@mcp.tool(
+    name="memgentic_dream_run",
+    annotations={
+        "title": "Run Auto-Dream",
+        "readOnlyHint": False,
+        "destructiveHint": False,
+        "idempotentHint": False,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_dream_run(params: DreamRunInput, ctx: Context) -> dict:
+    """Run an auto-dream consolidation cycle.
+
+    Reads recent session transcripts plus the live memory store, and proposes
+    a list of patches (merge/supersede/archive_stale/normalize_date/
+    insert_insight/update_field). Live memories are NOT mutated — patches are
+    persisted with status ``proposed`` and reviewable via
+    ``memgentic_dream_status``.
+
+    When ``auto_apply=True``, non-destructive patches are applied immediately;
+    destructive patches always require explicit ``memgentic_dream_apply``.
+    """
+    try:
+        from memgentic.processing.dream import apply_dream, run_dream
+
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+        embedder: Embedder = state["embedder"]
+
+        scope = params.project
+        if scope is None:
+            try:
+                import os as _os
+
+                from memgentic.processing.project import derive_project
+
+                scope = derive_project(cwd=_os.getcwd())
+            except Exception:
+                scope = ""
+
+        run = await run_dream(
+            project=scope or "",
+            metadata_store=metadata_store,
+            embedder=embedder,
+            settings=settings,
+            signal_model=params.signal_model,
+            consolidate_model=params.consolidate_model,
+            instructions=params.instructions,
+            limit_sessions=params.limit_sessions,
+        )
+
+        patches = await metadata_store.get_dream_patches(run.id)
+        action_counts: dict[str, int] = {}
+        for patch in patches:
+            action_counts[patch.action.value] = action_counts.get(patch.action.value, 0) + 1
+
+        applied_summary: dict | None = None
+        if params.auto_apply and patches:
+            report = await apply_dream(
+                run.id, metadata_store=metadata_store, only_non_destructive=True
+            )
+            applied_summary = {
+                "applied": report.applied,
+                "skipped_destructive": report.skipped_destructive,
+                "errors": report.errors,
+            }
+
+        return {
+            "dream_id": run.id,
+            "project": run.project,
+            "status": run.status.value,
+            "model": run.model,
+            "patches_proposed": len(patches),
+            "patches_by_action": action_counts,
+            "input_memory_count": run.input_memory_count,
+            "input_session_count": len(run.input_session_ids),
+            "auto_apply": applied_summary,
+            "error": run.error,
+        }
+    except Exception as exc:
+        logger.error("memgentic_dream_run.error", error=str(exc))
+        return {"error": str(exc)}
+
+
+@mcp.tool(
+    name="memgentic_dream_status",
+    annotations={
+        "title": "Dream Status",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_dream_status(params: DreamStatusInput, ctx: Context) -> dict:
+    """Inspect a dream run and its proposed patches."""
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+        run = await metadata_store.get_dream_run(params.dream_id)
+        if not run:
+            return {"error": f"dream {params.dream_id} not found"}
+
+        patches = await metadata_store.get_dream_patches(params.dream_id)
+        return {
+            "dream_id": run.id,
+            "project": run.project,
+            "status": run.status.value,
+            "model": run.model,
+            "instructions": run.instructions,
+            "input_memory_count": run.input_memory_count,
+            "input_session_count": len(run.input_session_ids),
+            "created_at": run.created_at.isoformat(),
+            "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+            "applied_at": run.applied_at.isoformat() if run.applied_at else None,
+            "error": run.error,
+            "patches": [
+                {
+                    "id": p.id,
+                    "action": p.action.value,
+                    "status": p.status.value,
+                    "target_memory_ids": p.target_memory_ids,
+                    "evidence": p.evidence,
+                    "new_content": p.new_content,
+                    "new_metadata": p.new_metadata,
+                }
+                for p in patches
+            ],
+        }
+    except Exception as exc:
+        logger.error("memgentic_dream_status.error", error=str(exc))
+        return {"error": str(exc)}
+
+
+@mcp.tool(
+    name="memgentic_dream_apply",
+    annotations={
+        "title": "Apply Dream Patches",
+        "readOnlyHint": False,
+        "destructiveHint": True,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_dream_apply(params: DreamApplyInput, ctx: Context) -> dict:
+    """Execute a dream's proposed patches against the live memory store."""
+    try:
+        from memgentic.processing.dream import apply_dream
+
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+        report = await apply_dream(
+            params.dream_id,
+            metadata_store=metadata_store,
+            only_non_destructive=params.only_non_destructive,
+        )
+        return {
+            "dream_id": report.dream_id,
+            "applied": report.applied,
+            "skipped_destructive": report.skipped_destructive,
+            "inserted_memories": report.inserted_memories,
+            "superseded_memories": report.superseded_memories,
+            "archived_memories": report.archived_memories,
+            "chronograph_triples": report.chronograph_triples,
+            "errors": report.errors,
+        }
+    except Exception as exc:
+        logger.error("memgentic_dream_apply.error", error=str(exc))
+        return {"error": str(exc)}
+
+
+@mcp.tool(
+    name="memgentic_dream_list",
+    annotations={
+        "title": "List Dream Runs",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_dream_list(params: DreamListInput, ctx: Context) -> dict:
+    """List recent dream runs, optionally filtered by project or status."""
+    try:
+        state = ctx.request_context.lifespan_context
+        metadata_store: MetadataStore = state["metadata_store"]
+        runs = await metadata_store.list_dream_runs(
+            project=params.project,
+            status=params.status,
+            limit=params.limit,
+        )
+        out = []
+        for run in runs:
+            patches = await metadata_store.get_dream_patches(run.id)
+            out.append(
+                {
+                    "id": run.id,
+                    "project": run.project,
+                    "status": run.status.value,
+                    "model": run.model,
+                    "patches": len(patches),
+                    "created_at": run.created_at.isoformat(),
+                    "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+                }
+            )
+        return {"dreams": out, "total": len(out)}
+    except Exception as exc:
+        logger.error("memgentic_dream_list.error", error=str(exc))
+        return {"error": str(exc)}
 
 
 async def _aggregate_top_topics(

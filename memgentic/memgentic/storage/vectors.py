@@ -142,7 +142,7 @@ class VectorStore:
                 ),
             )
             # Create payload indices for filtering (no-op in local mode)
-            for field_name in ["platform", "content_type", "status", "user_id"]:
+            for field_name in ["platform", "content_type", "status", "user_id", "project"]:
                 await self._client.create_payload_index(
                     collection_name=self._settings.collection_name,
                     field_name=field_name,
@@ -490,6 +490,7 @@ class VectorStore:
             "status": memory.status.value,
             "created_at": memory.created_at.isoformat(),
             "user_id": memory.user_id,
+            "project": memory.project or "",
         }
 
     @staticmethod
@@ -549,5 +550,22 @@ class VectorStore:
                     range=models.Range(gte=config.min_confidence),
                 )
             )
+
+        if config.include_projects:
+            conditions.append(
+                models.FieldCondition(
+                    key="project",
+                    match=models.MatchAny(any=[p.lower() for p in config.include_projects]),
+                )
+            )
+
+        if config.exclude_projects:
+            for project in config.exclude_projects:
+                conditions.append(
+                    models.FieldCondition(
+                        key="project",
+                        match=models.MatchExcept(**{"except": [project.lower()]}),
+                    )
+                )
 
         return models.Filter(must=conditions) if conditions else None

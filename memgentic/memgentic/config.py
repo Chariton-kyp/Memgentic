@@ -210,6 +210,48 @@ class MemgenticSettings(BaseSettings):
         description="Confidence boost when a fact is corroborated (+0.1, capped at 1.0)",
     )
 
+    # --- Dream (auto-consolidation) ---
+    # Two-tier model routing: cheap default LLMClient for the Gather Signal
+    # phase, stronger Anthropic-hosted Sonnet for the Consolidate phase that
+    # actually proposes patches. Falls back to the default LLMClient when
+    # ``anthropic_api_key`` is unset.
+    dream_consolidate_model: str = Field(
+        default="claude-sonnet-4-6",
+        description=(
+            "Model used by the dream Consolidate phase (proposes patches). "
+            "Names starting with 'claude-' route through Anthropic when "
+            "ANTHROPIC_API_KEY is set — typical choices: claude-sonnet-4-6 "
+            "(default, balanced), claude-opus-4-7 (best quality), "
+            "claude-haiku-4-5 (cheapest). Set to an empty string or any "
+            "non-claude name to fall back to the default LLMClient "
+            "(Gemini → OpenAI-compat → Ollama → heuristics)."
+        ),
+    )
+    dream_signal_model: str = Field(
+        default="claude-haiku-4-5",
+        description=(
+            "Model used by the dream Gather Signal phase (bulk-scan over "
+            "session transcripts). Defaults to claude-haiku-4-5 — cheap and "
+            "fast, suited to high-volume passes. Same routing rules as "
+            "dream_consolidate_model: claude-* via Anthropic, anything else "
+            "(empty string, 'local', etc.) falls back to the default "
+            "LLMClient."
+        ),
+    )
+    anthropic_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Anthropic API key (used by the dream Consolidate phase only — "
+            "core ingestion uses Gemini/local LLMs)."
+        ),
+    )
+    dream_default_session_limit: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Default sessions per dream when --limit-sessions is not given.",
+    )
+
     # --- Daemon ---
     watch_interval: int = Field(
         default=30,

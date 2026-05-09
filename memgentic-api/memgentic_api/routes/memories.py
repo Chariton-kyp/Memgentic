@@ -44,6 +44,7 @@ def _memory_to_response(memory) -> MemoryResponse:
         content=memory.content,
         content_type=memory.content_type.value,
         platform=memory.source.platform.value,
+        project=memory.project or "",
         topics=memory.topics,
         entities=memory.entities,
         confidence=memory.confidence,
@@ -135,6 +136,13 @@ async def list_memories(
     page_size: int = Query(default=20, ge=1, le=100),
     source: str | None = None,
     content_type: str | None = None,
+    project: str | None = Query(
+        default=None,
+        description=(
+            "Filter by project key (lowercase, normalised). Use the empty "
+            "string to fetch only memories with no project assignment."
+        ),
+    ),
 ) -> MemoryListResponse:
     """List memories with pagination and optional filtering."""
     config = SessionConfig()
@@ -145,6 +153,11 @@ async def list_memories(
             raise HTTPException(
                 status_code=422, detail=f"Invalid source platform: {source}"
             ) from None
+
+    if project is not None:
+        # Pass through verbatim — the empty string is a meaningful value
+        # ("memories with no project") and we don't want to coerce it to None.
+        config.include_projects = [project.strip().lower()]
 
     try:
         ct = ContentType(content_type) if content_type else None
@@ -169,6 +182,26 @@ async def list_memories(
         page=page,
         page_size=page_size,
     )
+
+
+@router.get("/projects")
+@limiter.limit(lambda: f"{settings.rate_limit_default}/minute")
+async def list_projects(
+    request: Request,
+    metadata_store: MetadataStoreDep,
+) -> dict:
+    """Return memory counts grouped by project key.
+
+    Memories with no project (empty string) are reported under the
+    ``"(unknown)"`` label so the dashboard can render an explicit bucket.
+    """
+    stats = await metadata_store.get_project_stats()
+    items = [
+        {"project": name or "", "label": name if name else "(unknown)", "count": count}
+        for name, count in stats.items()
+    ]
+    items.sort(key=lambda i: i["count"], reverse=True)
+    return {"projects": items, "total": sum(stats.values())}
 
 
 # --- Pin routes MUST be before /memories/{memory_id} to avoid route shadowing ---

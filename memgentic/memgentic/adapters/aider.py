@@ -10,6 +10,7 @@ import structlog
 
 from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
+from memgentic.processing.project import derive_project
 
 logger = structlog.get_logger()
 
@@ -46,6 +47,12 @@ class AiderAdapter(BaseAdapter):
     async def get_session_id(self, file_path: Path) -> str | None:
         """Session ID is the parent directory name (the project)."""
         return file_path.parent.name
+
+    async def get_project(self, file_path: Path) -> str | None:
+        """Aider keeps history *inside* the project directory, so the file's
+        parent is the cwd. ``derive_project`` lower-cases and normalises it.
+        """
+        return derive_project(cwd=str(file_path.parent)) or None
 
     async def get_session_title(self, file_path: Path) -> str | None:
         """Extract the first user message as the session title."""

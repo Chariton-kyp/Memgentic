@@ -8,7 +8,7 @@ in ``memgentic/memgentic/mcp/`` and rerun the generator.
 Every tool is namespaced ``memgentic_*`` and exposed over the ``mcp[cli]``
 transport configured by ``memgentic serve``.
 
-Total tools: **30**
+Total tools: **35**
 
 ## `memgentic_briefing`
 
@@ -286,6 +286,22 @@ Examples:
           "description": "Only include these content types",
           "title": "Content Types"
         },
+        "exclude_projects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exclude memories from these project keys.",
+          "title": "Exclude Projects"
+        },
         "exclude_sources": {
           "anyOf": [
             {
@@ -301,6 +317,22 @@ Examples:
           "default": null,
           "description": "Exclude these platforms from all recall calls",
           "title": "Exclude Sources"
+        },
+        "include_projects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Only include memories from these project keys (lowercase). Pass ['auto'] to resolve from the MCP subprocess cwd.",
+          "title": "Include Projects"
         },
         "include_sources": {
           "anyOf": [
@@ -474,6 +506,261 @@ Returns:
     "params"
   ],
   "title": "memgentic_dedupe_checkArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_dream_apply`
+
+**Apply Dream Patches** — `readOnlyHint=False` — `destructiveHint=True` — `idempotentHint=True` — `openWorldHint=False`
+
+Execute a dream's proposed patches against the live memory store.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "DreamApplyInput": {
+      "properties": {
+        "dream_id": {
+          "description": "The id of a completed dream.",
+          "title": "Dream Id",
+          "type": "string"
+        },
+        "only_non_destructive": {
+          "default": false,
+          "description": "Apply only normalize_date / insert_insight / update_field.",
+          "title": "Only Non Destructive",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "dream_id"
+      ],
+      "title": "DreamApplyInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/DreamApplyInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_dream_applyArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_dream_list`
+
+**List Dream Runs** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+List recent dream runs, optionally filtered by project or status.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "DreamListInput": {
+      "properties": {
+        "limit": {
+          "default": 20,
+          "maximum": 200,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter by project.",
+          "title": "Project"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter by lifecycle status.",
+          "title": "Status"
+        }
+      },
+      "title": "DreamListInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/DreamListInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_dream_listArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_dream_run`
+
+**Run Auto-Dream** — `readOnlyHint=False` — `destructiveHint=False` — `idempotentHint=False` — `openWorldHint=False`
+
+Run an auto-dream consolidation cycle.
+
+Reads recent session transcripts plus the live memory store, and proposes
+a list of patches (merge/supersede/archive_stale/normalize_date/
+insert_insight/update_field). Live memories are NOT mutated — patches are
+persisted with status ``proposed`` and reviewable via
+``memgentic_dream_status``.
+
+When ``auto_apply=True``, non-destructive patches are applied immediately;
+destructive patches always require explicit ``memgentic_dream_apply``.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "DreamRunInput": {
+      "properties": {
+        "auto_apply": {
+          "default": false,
+          "description": "Auto-apply NON-destructive patches (normalize_date, insert_insight, update_field). Destructive patches always require explicit memgentic_dream_apply.",
+          "title": "Auto Apply",
+          "type": "boolean"
+        },
+        "consolidate_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override Phase 3 (Consolidate) model for this run only. Same routing rules as signal_model. Recommended local choice: 'qwen3.6:35b-a3b' (MoE, 5/5 JSON-schema reliability).",
+          "title": "Consolidate Model"
+        },
+        "instructions": {
+          "default": "",
+          "description": "Optional LLM guidance \u2014 supplies extra context to the Consolidate phase.",
+          "maxLength": 4096,
+          "title": "Instructions",
+          "type": "string"
+        },
+        "limit_sessions": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Max recent sessions to ingest (default: dream_default_session_limit setting).",
+          "title": "Limit Sessions"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Project scope. Defaults to the cwd-derived project key. Pass an empty string to dream over ALL projects (not recommended).",
+          "title": "Project"
+        },
+        "signal_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override Phase 2 (Gather Signal) model for this run only. Routing follows the same prefix table as the env var: 'claude-*' -> Anthropic, 'gemini-*' -> Google, 'gpt-*' -> OpenAI-compat, anything else -> Ollama tag (e.g. 'qwen3.6:35b-a3b', 'gemma4:e4b').",
+          "title": "Signal Model"
+        }
+      },
+      "title": "DreamRunInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/DreamRunInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_dream_runArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_dream_status`
+
+**Dream Status** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+Inspect a dream run and its proposed patches.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "DreamStatusInput": {
+      "properties": {
+        "dream_id": {
+          "description": "The id returned by memgentic_dream_run.",
+          "title": "Dream Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "dream_id"
+      ],
+      "title": "DreamStatusInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/DreamStatusInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_dream_statusArguments",
   "type": "object"
 }
 ```
@@ -972,6 +1259,19 @@ project state.
           "title": "Memories Per Session",
           "type": "integer"
         },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter handoff bundles to a single project. Pass 'auto' to scope to the MCP subprocess cwd.",
+          "title": "Project"
+        },
         "since_hours": {
           "default": 72,
           "description": "Lookback window for candidate source sessions.",
@@ -1065,6 +1365,19 @@ metadata. This is designed to make memory transparent and auditable.
           "minimum": 0,
           "title": "Offset",
           "type": "integer"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter inventory by project key. Pass 'auto' for current cwd.",
+          "title": "Project"
         },
         "source": {
           "anyOf": [
@@ -1299,6 +1612,20 @@ Returns:
 }
 ```
 
+## `memgentic_projects`
+
+**List Memory Projects** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+List the projects that contributed memories and how many from each.
+
+A "project" is the friendly key derived from the originating working
+directory of each AI tool (Claude Code's ``cwd``, Codex's
+``session_meta``, etc.). Memories captured outside any known project —
+for instance manual ``memgentic_remember`` calls — are reported under
+the ``"(unknown)"`` bucket.
+
+_No input parameters._
+
 ## `memgentic_recall`
 
 **Recall from Memory** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
@@ -1361,6 +1688,22 @@ Examples:
           "title": "Detail",
           "type": "string"
         },
+        "exclude_projects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exclude memories from these projects.",
+          "title": "Exclude Projects"
+        },
         "exclude_sources": {
           "anyOf": [
             {
@@ -1384,6 +1727,35 @@ Examples:
           "minimum": 1,
           "title": "Limit",
           "type": "integer"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Friendly project key (e.g. 'memgentic-public-export'). Pass 'auto' to use the current working directory of the MCP subprocess. None = use session defaults.",
+          "title": "Project"
+        },
+        "projects": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Multiple project keys. Pass alongside or instead of `project` to recall across several projects at once.",
+          "title": "Projects"
         },
         "query": {
           "description": "What to search for in memory (semantic search)",
@@ -1473,6 +1845,19 @@ Returns:
           "minimum": 1,
           "title": "Limit",
           "type": "integer"
+        },
+        "project": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Filter by project key. Pass 'auto' to use the MCP subprocess cwd.",
+          "title": "Project"
         },
         "source": {
           "anyOf": [

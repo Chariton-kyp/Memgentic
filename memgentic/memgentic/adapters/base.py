@@ -77,6 +77,17 @@ class BaseAdapter(abc.ABC):
     async def get_session_title(self, file_path: Path) -> str | None:
         """Extract or generate a session title."""
 
+    async def get_project(self, file_path: Path) -> str | None:
+        """Return the friendly project key for ``file_path`` if derivable.
+
+        The default implementation returns ``None``. Adapters that can recover
+        the originating working directory (e.g. Claude Code's ``cwd`` turn
+        field, Codex's ``session_meta`` event) should override this and return
+        ``derive_project(cwd=...)``. Returning ``None`` preserves the
+        empty-string default on Memory rows.
+        """
+        return None
+
     # --- File discovery ---
 
     @staticmethod

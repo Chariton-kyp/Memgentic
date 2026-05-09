@@ -382,6 +382,7 @@ async def run_init(
                     for f in files:
                         try:
                             session_id = await adapter.get_session_id(f)
+                            project = await adapter.get_project(f)
                             chunks = await adapter.parse_file(f)
                             if chunks:
                                 memories = await pipeline.ingest_conversation(
@@ -389,6 +390,7 @@ async def run_init(
                                     platform=adapter.platform,
                                     session_id=session_id,
                                     file_path=str(f),
+                                    project=project,
                                 )
                                 total_imported += len(memories)
                         except Exception:
