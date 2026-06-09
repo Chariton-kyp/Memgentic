@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Per-memory capture profile. ``raw`` = verbatim chunk, no LLM enrichment.
 # ``enriched`` = current default (topics/entities/LLM importance).
@@ -446,3 +446,67 @@ class ConversationChunk(BaseModel):
     topics: list[str] = Field(default_factory=list)
     entities: list[str] = Field(default_factory=list)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+
+# ---------------------------------------------------------------------------
+# Guard models — architectural rule enforcement
+# ---------------------------------------------------------------------------
+
+
+class GuardRuleType(StrEnum):
+    """Category of architectural rule enforced by the guard engine."""
+
+    IMPORT_DIRECTION = "import_direction"
+    BANNED_DEPENDENCY = "banned_dependency"
+    BANNED_IMPORT = "banned_import"
+
+
+class GuardRule(BaseModel):
+    """A single architectural rule loaded from a decisions file."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    id: str = Field(description="Unique rule identifier")
+    type: GuardRuleType = Field(description="Category of rule to enforce")
+    scope: str = Field(
+        default="**",
+        description="Glob of files this rule applies to (default: all files)",
+    )
+    targets: list[str] = Field(
+        description="Modules/packages the rule checks against (semantics vary by type)",
+    )
+    message: str = Field(description="Human-readable explanation shown on violation")
+
+    @field_validator("targets")
+    @classmethod
+    def _targets_not_empty(cls, v: list[str]) -> list[str]:
+        if not v:
+            raise ValueError("targets must not be empty — a rule with no targets matches nothing")
+        return v
+    source: str = Field(
+        default="decisions.yaml",
+        description="Where this rule was loaded from",
+    )
+    severity: Literal["error", "warn"] = Field(
+        default="error",
+        description="Whether a match fails the guard (error) or only warns",
+    )
+
+
+class Violation(BaseModel):
+    """A rule violation detected against a diff or file."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    rule_id: str = Field(description="ID of the rule that was violated")
+    message: str = Field(description="Human-readable explanation of the violation")
+    file: str = Field(description="Path of the offending file")
+    line: int | None = Field(
+        default=None,
+        description="1-based line number of the offending code, if known",
+    )
+    snippet: str | None = Field(
+        default=None,
+        description="Offending source snippet, if available",
+    )

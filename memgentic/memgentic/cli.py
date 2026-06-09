@@ -962,6 +962,93 @@ def consolidate():
     asyncio.run(_run())
 
 
+# ---------------------------------------------------------------------------
+# memgentic guard ...  (Agentic CI — check AI-written diffs against repo rules)
+# ---------------------------------------------------------------------------
+
+
+@main.group("guard", invoke_without_command=True)
+@click.option("--repo", default=".", help="Repository path")
+@click.option(
+    "--base", default=None, help="Base ref to diff against (defaults to 'main' when unset)"
+)
+@click.option("--staged", is_flag=True, help="Check staged changes")
+@click.option("--rules", "rules_path", default=None, help="Path to decisions.yaml")
+@click.option("--format", "fmt", type=click.Choice(["text", "json"]), default="text")
+@click.pass_context
+def guard(ctx, repo, base, staged, rules_path, fmt):
+    """Agentic CI: check AI-written diffs against repo rules (decisions.yaml)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    from pathlib import Path
+
+    from rich.console import Console
+    from rich.markup import escape
+
+    from memgentic.guard import engine, formatters
+
+    console = Console(stderr=True)
+    repo_path = Path(repo).resolve()
+    if not (repo_path / ".git").exists():
+        console.print(f"[red]Not a git repository:[/red] {escape(str(repo_path))}")
+        ctx.exit(2)
+    rp = Path(rules_path) if rules_path else repo_path / "decisions.yaml"
+    if not rp.exists():
+        if rules_path is not None:
+            # User explicitly supplied a --rules path that doesn't exist → error
+            console.print(f"[red]Rules file not found:[/red] {escape(str(rp))}")
+            ctx.exit(2)
+        else:
+            # Default path missing → soft advisory, not an error
+            console.print(
+                f"[yellow]No rules at {escape(str(rp))} (run `guard init` — phase 2)[/yellow]"
+            )
+            ctx.exit(0)
+    try:
+        rules = engine.load_rules(rp)
+        violations = engine.run(repo_path, rules, base=base, staged=staged)
+    except (click.exceptions.Exit, click.exceptions.Abort):
+        raise
+    except Exception as exc:
+        console.print(f"[red]guard error:[/red] {escape(str(exc))}")
+        ctx.exit(2)
+    if fmt == "json":
+        output = formatters.format_json(violations)
+    else:
+        output = formatters.format_text(violations)
+    click.echo(output)
+    ctx.exit(1 if violations else 0)
+
+
+@guard.command("rules")
+@click.option("--repo", default=".", help="Repository path")
+@click.option("--rules", "rules_path", default=None, help="Path to decisions.yaml")
+@click.pass_context
+def guard_rules(ctx, repo, rules_path):
+    """Show the loaded rules."""
+    from pathlib import Path
+
+    from memgentic.guard import engine
+
+    rp = Path(rules_path) if rules_path else Path(repo).resolve() / "decisions.yaml"
+    if not rp.exists():
+        if rules_path is not None:
+            # User explicitly supplied a --rules path that doesn't exist → error
+            click.echo(f"Rules file not found: {rp}", err=True)
+            ctx.exit(2)
+        else:
+            click.echo(f"No rules at {rp}", err=True)
+        return
+    try:
+        for r in engine.load_rules(rp):
+            click.echo(f"{r.id} ({r.type.value}) scope={r.scope} targets={r.targets}")
+    except (click.exceptions.Exit, click.exceptions.Abort):
+        raise
+    except Exception as exc:
+        click.echo(f"guard rules error: {exc}", err=True)
+        ctx.exit(2)
+
+
 @main.command()
 def doctor():
     """Check system health and verify all prerequisites are met.
