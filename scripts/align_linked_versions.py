@@ -31,6 +31,7 @@ COMPONENT_FILES: dict[str, list[tuple[Path, str]]] = {
     ],
     "memgentic-api": [
         (ROOT / "memgentic-api/memgentic_api/__init__.py", r'__version__\s*=\s*"([^"]+)"'),
+        (ROOT / "memgentic-api/pyproject.toml", r'^version\s*=\s*"([^"]+)"'),
     ],
     "memgentic-native": [
         (ROOT / "memgentic-native/pyproject.toml", r'^version\s*=\s*"([^"]+)"'),
