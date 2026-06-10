@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.9.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.8.0...v0.9.0) (2026-06-10)
+
+
+### Features
+
+* **adapters:** discover AI-tool sessions inside WSL distros from Windows ([#119](https://github.com/Chariton-kyp/Memgentic/issues/119)) ([ed52542](https://github.com/Chariton-kyp/Memgentic/commit/ed5254225730ca035afd8c376fe884b330e65312))
+* **guard:** deterministic guard walking skeleton (CLI + 3 AST-scoped checks) ([#136](https://github.com/Chariton-kyp/Memgentic/issues/136)) ([71f6472](https://github.com/Chariton-kyp/Memgentic/commit/71f647215dc5d19e45b7798100ca06f63f3b2a06))
+* **llm:** add OpenAI-compatible provider tier (LM Studio / vLLM / llama-server) ([#123](https://github.com/Chariton-kyp/Memgentic/issues/123)) ([ea8f014](https://github.com/Chariton-kyp/Memgentic/commit/ea8f01483bb8eac22ae3cc726f3262ec5db2c497))
+
+
+### Bug Fixes
+
+* **adapters:** codex_cli now reads ``~/.codex/sessions/.../rollout-*.jsonl`` ([98644ee](https://github.com/Chariton-kyp/Memgentic/commit/98644eee8f391f42833c976395c376bc170500ec))
+* **adapters:** codex_cli now reads ~/.codex/sessions/.../rollout-*.jsonl ([#118](https://github.com/Chariton-kyp/Memgentic/issues/118)) ([98644ee](https://github.com/Chariton-kyp/Memgentic/commit/98644eee8f391f42833c976395c376bc170500ec))
+* **adapters:** repair Gemini / Codex / Copilot / Antigravity capture for current on-disk formats ([#116](https://github.com/Chariton-kyp/Memgentic/issues/116)) ([029a899](https://github.com/Chariton-kyp/Memgentic/commit/029a899120f19fcbd4be75cd58f4ab4090ead594))
+* **cli:** wire LLMClient + persisted capture profile into daemon/import/remember ([#121](https://github.com/Chariton-kyp/Memgentic/issues/121)) ([8252598](https://github.com/Chariton-kyp/Memgentic/commit/8252598530bd713267bf4718ed99c49795b235e2))
+* **llm:** use Ollama json_schema + bound num_ctx/num_predict ([#122](https://github.com/Chariton-kyp/Memgentic/issues/122)) ([151c0db](https://github.com/Chariton-kyp/Memgentic/commit/151c0db7bbe92cfad1f87bd27af4956a03b628db))
+* **llm:** use Ollama json_schema + bound num_ctx/num_predict (no more silent retry-loops) ([151c0db](https://github.com/Chariton-kyp/Memgentic/commit/151c0db7bbe92cfad1f87bd27af4956a03b628db))
+* **quality:** filter Gemini tool-response dumps + cap chunk size at 50 KB ([#120](https://github.com/Chariton-kyp/Memgentic/issues/120)) ([dc14731](https://github.com/Chariton-kyp/Memgentic/commit/dc147314d773f93bff40bae6c83313956a5c43f2))
+
 ## [0.8.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.7.0...v0.8.0) (2026-05-03)
 
 
