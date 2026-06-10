@@ -61,9 +61,7 @@ def _is_import_error_type(t: ast.expr | None) -> bool:
 def _under_import_error_guard(node: ast.AST, parents: dict[ast.AST, ast.AST]) -> bool:
     cur = parents.get(node)
     while cur is not None:
-        if isinstance(cur, ast.Try) and any(
-            _is_import_error_type(h.type) for h in cur.handlers
-        ):
+        if isinstance(cur, ast.Try) and any(_is_import_error_type(h.type) for h in cur.handlers):
             return True
         cur = parents.get(cur)
     return False
@@ -88,13 +86,15 @@ def collect_import_records(blob: str) -> list[ImportRecord] | None:
             mods = [node.module.split(".")[0]]
         else:
             continue
-        records.append(ImportRecord(
-            top_modules=mods,
-            lineno=node.lineno,
-            end_lineno=getattr(node, "end_lineno", None) or node.lineno,
-            in_type_checking=node.lineno in tc,
-            under_import_error_guard=_under_import_error_guard(node, parents),
-        ))
+        records.append(
+            ImportRecord(
+                top_modules=mods,
+                lineno=node.lineno,
+                end_lineno=getattr(node, "end_lineno", None) or node.lineno,
+                in_type_checking=node.lineno in tc,
+                under_import_error_guard=_under_import_error_guard(node, parents),
+            )
+        )
     return records
 
 

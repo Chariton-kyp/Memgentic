@@ -448,7 +448,6 @@ class ConversationChunk(BaseModel):
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
 
-
 # ---------------------------------------------------------------------------
 # Guard models — architectural rule enforcement
 # ---------------------------------------------------------------------------
@@ -484,6 +483,7 @@ class GuardRule(BaseModel):
         if not v:
             raise ValueError("targets must not be empty — a rule with no targets matches nothing")
         return v
+
     source: str = Field(
         default="decisions.yaml",
         description="Where this rule was loaded from",

@@ -144,7 +144,7 @@ def _base_dep_names(base_blob_getter: BlobGetter, path: str) -> set[str] | None:
         names = set()
         _sections = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
         for section in _sections:
-            for k in (data.get(section) or {}):
+            for k in data.get(section) or {}:
                 names.add(_canon(k))
         return names  # may be empty set
 
@@ -175,9 +175,7 @@ def check(
     out: list[Violation] = []
     # word-boundary that treats '-' as part of the token, so 'langchain-core'
     # does NOT match inside 'langchain-core-extras'
-    targets = [
-        (t, _build_target_pattern(t)) for t in rule.targets
-    ]
+    targets = [(t, _build_target_pattern(t)) for t in rule.targets]
     for df in diff_files:
         if df.is_binary or not df.path.endswith(_MANIFESTS) or not _in_scope(df.path, rule.scope):
             continue
@@ -202,7 +200,14 @@ def check(
                 # Skip if this target was already present in the base manifest
                 if base_names is not None and _norm_pkg(target) in base_names:
                     continue
-                out.append(Violation(rule_id=rule.id, message=rule.message, file=df.path,
-                                     line=lineno, snippet=text.strip()))
+                out.append(
+                    Violation(
+                        rule_id=rule.id,
+                        message=rule.message,
+                        file=df.path,
+                        line=lineno,
+                        snippet=text.strip(),
+                    )
+                )
                 break  # one violation per line
     return out

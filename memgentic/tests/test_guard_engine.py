@@ -1,4 +1,5 @@
 """Integration tests for the guard engine."""
+
 import subprocess
 from pathlib import Path
 
@@ -10,8 +11,11 @@ FIXTURE = Path(__file__).parent / "fixtures" / "guard" / "decisions.yaml"
 
 
 def _run(repo, *args):
-    subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest.fixture
@@ -26,7 +30,8 @@ def seeded_repo(tmp_path):
     _run(repo, "commit", "-m", "base")
     _run(repo, "checkout", "-b", "feat")
     (repo / "memgentic" / "memgentic" / "x.py").write_text(
-        "import os\nimport memgentic_api\n", encoding="utf-8")
+        "import os\nimport memgentic_api\n", encoding="utf-8"
+    )
     _run(repo, "add", "memgentic/memgentic/x.py")
     _run(repo, "commit", "-m", "violate")
     return repo
@@ -40,8 +45,10 @@ def test_load_rules():
 def test_engine_fires_on_seeded_import_direction(seeded_repo):
     rules = load_rules(FIXTURE)
     violations = run(seeded_repo, rules, base="main", staged=False)
-    assert any(v.rule_id == "core-import-direction" and v.file == "memgentic/memgentic/x.py"
-               for v in violations)
+    assert any(
+        v.rule_id == "core-import-direction" and v.file == "memgentic/memgentic/x.py"
+        for v in violations
+    )
 
 
 def test_engine_clean_branch_no_violations(tmp_path):
@@ -55,7 +62,8 @@ def test_engine_clean_branch_no_violations(tmp_path):
     _run(repo, "commit", "-m", "base")
     _run(repo, "checkout", "-b", "feat")
     (repo / "memgentic" / "memgentic" / "x.py").write_text(
-        "import os\nimport sys\n", encoding="utf-8")
+        "import os\nimport sys\n", encoding="utf-8"
+    )
     _run(repo, "add", "memgentic/memgentic/x.py")
     _run(repo, "commit", "-m", "clean change")
     rules = load_rules(FIXTURE)
@@ -65,6 +73,7 @@ def test_engine_clean_branch_no_violations(tmp_path):
 def test_checks_cover_all_rule_types():
     from memgentic.guard.engine import _CHECKS
     from memgentic.models import GuardRuleType
+
     assert set(_CHECKS) == set(GuardRuleType)
 
 
@@ -89,7 +98,9 @@ def test_engine_fires_on_seeded_banned_dependency(tmp_path):
 
 def test_load_rules_reports_bad_rule_id(tmp_path):
     bad = tmp_path / "bad.yaml"
-    bad.write_text('rules:\n  - id: oops\n    type: not_a_real_type\n    targets: ["x"]\n    message: "m"\n',
-                   encoding="utf-8")
+    bad.write_text(
+        'rules:\n  - id: oops\n    type: not_a_real_type\n    targets: ["x"]\n    message: "m"\n',
+        encoding="utf-8",
+    )
     with pytest.raises(ValueError, match="oops"):
         load_rules(bad)

@@ -32,6 +32,7 @@ def test_violation_optional_fields():
 # HARDENING: empty targets must be rejected at construction time
 # ---------------------------------------------------------------------------
 
+
 def test_empty_targets_rejected():
     """GuardRule with targets=[] must raise a validation error."""
     with pytest.raises(ValidationError):

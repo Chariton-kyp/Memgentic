@@ -75,9 +75,14 @@ def check(
                 # Skip if this forbidden module was already present in the base
                 if m in base_top_modules:
                     continue
-                out.append(Violation(
-                    rule_id=rule.id, message=rule.message, file=df.path,
-                    line=line, snippet=df.added_lines.get(line),
-                ))
+                out.append(
+                    Violation(
+                        rule_id=rule.id,
+                        message=rule.message,
+                        file=df.path,
+                        line=line,
+                        snippet=df.added_lines.get(line),
+                    )
+                )
                 break  # one violation per record
     return out

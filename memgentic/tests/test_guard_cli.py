@@ -1,4 +1,5 @@
 """CLI tests for the guard command."""
+
 import subprocess
 
 import pytest
@@ -8,8 +9,11 @@ from memgentic.cli import main
 
 
 def _run(repo, *args):
-    subprocess.run(["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
-                   check=True, capture_output=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "-c", "commit.gpgsign=false", *args],
+        check=True,
+        capture_output=True,
+    )
 
 
 @pytest.fixture
@@ -22,7 +26,9 @@ def repo_with_rules(tmp_path):
     (repo / "memgentic" / "x.py").write_text("import os\n", encoding="utf-8")
     (repo / "decisions.yaml").write_text(
         'rules:\n  - id: d\n    type: import_direction\n    scope: "memgentic/**"\n'
-        '    targets: ["memgentic_api"]\n    message: "no api"\n', encoding="utf-8")
+        '    targets: ["memgentic_api"]\n    message: "no api"\n',
+        encoding="utf-8",
+    )
     _run(repo, "add", "memgentic/x.py", "decisions.yaml")
     _run(repo, "commit", "-m", "base")
     _run(repo, "checkout", "-b", "feat")
@@ -38,7 +44,9 @@ def test_clean_branch_exit_0(repo_with_rules):
 
 
 def test_violation_exit_1(repo_with_rules):
-    (repo_with_rules / "memgentic" / "x.py").write_text("import os\nimport memgentic_api\n", encoding="utf-8")
+    (repo_with_rules / "memgentic" / "x.py").write_text(
+        "import os\nimport memgentic_api\n", encoding="utf-8"
+    )
     _run(repo_with_rules, "add", "memgentic/x.py")
     _run(repo_with_rules, "commit", "-m", "bad")
     res = CliRunner().invoke(main, ["guard", "--repo", str(repo_with_rules), "--base", "main"])
@@ -47,11 +55,14 @@ def test_violation_exit_1(repo_with_rules):
 
 
 def test_violation_json_format(repo_with_rules):
-    (repo_with_rules / "memgentic" / "x.py").write_text("import os\nimport memgentic_api\n", encoding="utf-8")
+    (repo_with_rules / "memgentic" / "x.py").write_text(
+        "import os\nimport memgentic_api\n", encoding="utf-8"
+    )
     _run(repo_with_rules, "add", "memgentic/x.py")
     _run(repo_with_rules, "commit", "-m", "bad")
-    res = CliRunner().invoke(main, ["guard", "--repo", str(repo_with_rules),
-                                    "--base", "main", "--format", "json"])
+    res = CliRunner().invoke(
+        main, ["guard", "--repo", str(repo_with_rules), "--base", "main", "--format", "json"]
+    )
     assert res.exit_code == 1
     assert '"violation_count": 1' in res.output
 
@@ -89,9 +100,14 @@ def test_invalid_rule_with_markup_id_exits_2(tmp_path):
     _run(repo, "add", "f.txt")
     _run(repo, "commit", "-m", "c2")
     bad = repo / "d.yaml"
-    bad.write_text('rules:\n  - id: "bad[/x]rule"\n    type: not_a_real_type\n'
-                   '    targets: ["x"]\n    message: "m"\n', encoding="utf-8")
-    res = CliRunner().invoke(main, ["guard", "--repo", str(repo), "--base", "main", "--rules", str(bad)])
+    bad.write_text(
+        'rules:\n  - id: "bad[/x]rule"\n    type: not_a_real_type\n'
+        '    targets: ["x"]\n    message: "m"\n',
+        encoding="utf-8",
+    )
+    res = CliRunner().invoke(
+        main, ["guard", "--repo", str(repo), "--base", "main", "--rules", str(bad)]
+    )
     assert res.exit_code == 2
 
 
@@ -99,12 +115,15 @@ def test_invalid_rule_with_markup_id_exits_2(tmp_path):
 # BUG B: explicit --rules <missing path> must exit 2, not 0
 # ---------------------------------------------------------------------------
 
+
 def test_explicit_missing_rules_exits_2(tmp_path):
     """Explicitly-supplied --rules path that doesn't exist must exit 2."""
     repo = tmp_path / "r"
     repo.mkdir()
     subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
-    res = CliRunner().invoke(main, ["guard", "--repo", str(repo), "--rules", str(tmp_path / "nope.yaml")])
+    res = CliRunner().invoke(
+        main, ["guard", "--repo", str(repo), "--rules", str(tmp_path / "nope.yaml")]
+    )
     assert res.exit_code == 2
 
 
@@ -122,14 +141,16 @@ def test_explicit_missing_rules_on_guard_rules_exits_2(tmp_path):
     repo = tmp_path / "r"
     repo.mkdir()
     subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
-    res = CliRunner().invoke(main, ["guard", "rules", "--repo", str(repo),
-                                    "--rules", str(tmp_path / "nope.yaml")])
+    res = CliRunner().invoke(
+        main, ["guard", "rules", "--repo", str(repo), "--rules", str(tmp_path / "nope.yaml")]
+    )
     assert res.exit_code == 2
 
 
 # ---------------------------------------------------------------------------
 # ITEM 1 — missing default base 'main' must hint --base
 # ---------------------------------------------------------------------------
+
 
 def test_master_only_repo_hints_base_flag(tmp_path):
     """When 'main' doesn't exist and --base was not passed, the error must hint --base."""
@@ -141,7 +162,8 @@ def test_master_only_repo_hints_base_flag(tmp_path):
     (repo / "a.txt").write_text("x", encoding="utf-8")
     (repo / "decisions.yaml").write_text(
         'rules:\n  - id: d\n    type: banned_import\n    targets: ["httpx"]\n    message: "m"\n',
-        encoding="utf-8")
+        encoding="utf-8",
+    )
     _run(repo, "add", "a.txt", "decisions.yaml")
     _run(repo, "commit", "-m", "base")
     res = CliRunner().invoke(main, ["guard", "--repo", str(repo)])

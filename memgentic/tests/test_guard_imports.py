@@ -1,4 +1,5 @@
 """Tests for the banned-import guard check."""
+
 from memgentic.guard.checks.imports import check
 from memgentic.guard.diff import DiffFile
 from memgentic.models import GuardRule
@@ -48,15 +49,30 @@ def test_syntactically_invalid_blob_degrades():
 
 def test_respects_scope():
     rule = GuardRule(id="ban", type="banned_import", scope="pkg/**", targets=["httpx"], message="x")
-    assert len(check(rule, [DiffFile(path="pkg/a.py", added_lines={1: "import httpx"})],
-                     _g({"pkg/a.py": "import httpx\n"}))) == 1
-    assert check(rule, [DiffFile(path="other/b.py", added_lines={1: "import httpx"})],
-                 _g({"other/b.py": "import httpx\n"})) == []
+    assert (
+        len(
+            check(
+                rule,
+                [DiffFile(path="pkg/a.py", added_lines={1: "import httpx"})],
+                _g({"pkg/a.py": "import httpx\n"}),
+            )
+        )
+        == 1
+    )
+    assert (
+        check(
+            rule,
+            [DiffFile(path="other/b.py", added_lines={1: "import httpx"})],
+            _g({"other/b.py": "import httpx\n"}),
+        )
+        == []
+    )
 
 
 # ---------------------------------------------------------------------------
 # BUG A: base-side check — pre-existing banned imports must not re-fire
 # ---------------------------------------------------------------------------
+
 
 def test_no_fire_when_banned_import_already_in_base():
     """A banned import that was already in base (just reordered) must NOT fire."""

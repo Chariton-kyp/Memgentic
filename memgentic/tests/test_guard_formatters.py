@@ -1,11 +1,19 @@
 """Tests for guard output formatters."""
+
 import json
 
 from memgentic.guard.formatters import format_json, format_text
 from memgentic.models import Violation
 
-V = [Violation(rule_id="r1", message="bad import", file="memgentic/x.py", line=2,
-               snippet="import memgentic_api")]
+V = [
+    Violation(
+        rule_id="r1",
+        message="bad import",
+        file="memgentic/x.py",
+        line=2,
+        snippet="import memgentic_api",
+    )
+]
 
 
 def test_format_json_roundtrips():

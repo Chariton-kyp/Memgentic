@@ -1,11 +1,15 @@
 """Tests for the import-direction guard check."""
+
 from memgentic.guard.checks.import_direction import check
 from memgentic.guard.diff import DiffFile
 from memgentic.models import GuardRule
 
 RULE = GuardRule(
-    id="core-import-direction", type="import_direction", scope="memgentic/**",
-    targets=["memgentic_api", "dashboard"], message="core must not import api/dashboard",
+    id="core-import-direction",
+    type="import_direction",
+    scope="memgentic/**",
+    targets=["memgentic_api", "dashboard"],
+    message="core must not import api/dashboard",
 )
 
 
@@ -50,8 +54,10 @@ def test_prefix_boundary_not_matched():
 
 
 def test_silent_on_type_checking_import():
-    src = ("from __future__ import annotations\nfrom typing import TYPE_CHECKING\n"
-           "if TYPE_CHECKING:\n    import memgentic_api\n")
+    src = (
+        "from __future__ import annotations\nfrom typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n    import memgentic_api\n"
+    )
     df = DiffFile(path="memgentic/z.py", added_lines={4: "    import memgentic_api"})
     assert check(RULE, [df], _getter({"memgentic/z.py": src})) == []
 
@@ -88,8 +94,10 @@ def test_bom_blob_still_parsed():
 
 
 def test_else_branch_of_type_checking_not_suppressed():
-    src = ("from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import os\n"
-           "else:\n    import memgentic_api\n")
+    src = (
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import os\n"
+        "else:\n    import memgentic_api\n"
+    )
     df = DiffFile(path="memgentic/memgentic/x.py", added_lines={5: "    import memgentic_api"})
     assert len(check(RULE, [df], _getter({"memgentic/memgentic/x.py": src}))) == 1
 
@@ -97,6 +105,7 @@ def test_else_branch_of_type_checking_not_suppressed():
 # ---------------------------------------------------------------------------
 # BUG A: base-side check — pre-existing forbidden imports must not re-fire
 # ---------------------------------------------------------------------------
+
 
 def test_no_fire_when_forbidden_import_already_in_base():
     """An import that was already in base (just reordered) must NOT fire."""
