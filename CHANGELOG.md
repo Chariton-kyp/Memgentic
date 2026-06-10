@@ -4,6 +4,30 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-06-10 — Memgentic Guard (Agentic CI) + Capture Repairs
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
+
+### Added
+
+- **Memgentic Guard — deterministic Agentic CI** (`memgentic guard`): checks AI-written diffs against repo rules declared in `decisions.yaml`, with exit codes 0/1/2 for pre-commit/CI use and Rich or `--format json` output.
+  - Three checks: `import_direction` (scope-gated architectural import bans), `banned_import`, `banned_dependency` (PEP 503-canonical matching; section-aware for `[project.dependencies]` and package.json `dependencies`)
+  - Full-blob AST precision — no false positives from comments, strings, test files, `TYPE_CHECKING` blocks, or `try/except ImportError` optional-import guards
+  - Base-side suppression: only *introduced* violations fire; import reorders and dependency version bumps stay silent
+  - Windows/Greek-hardened git plumbing (UTF-8, CRLF, `core.quotepath`, BOM handling, fail-closed on git errors)
+  - Validated with 78 tests and a 123-commit dogfood run with zero false positives
+- **Tool-session discovery inside WSL distros from Windows** — adapters now find Claude Code / Codex / Gemini sessions living under `\\wsl$` paths
+- **OpenAI-compatible LLM provider tier** — LM Studio, vLLM, and llama-server endpoints via `MEMGENTIC_OPENAI_COMPAT_BASE_URL`
+
+### Fixed
+
+- `codex_cli` adapter reads the current `~/.codex/sessions/.../rollout-*.jsonl` layout
+- Gemini / Codex / Copilot / Antigravity capture repaired for current on-disk formats
+- CLI wires `LLMClient` + persisted capture profile into `daemon` / `import-existing` / `remember`
+- Ollama structured output uses `json_schema` with bounded `num_ctx` / `num_predict` (no more silent retry loops)
+- Quality filter drops Gemini tool-response dumps and caps chunk size at 50 KB
+- Linked-version align workflow also bumps `memgentic-api/pyproject.toml`
+
 ## [0.8.0] — 2026-05-03 — Cross-Tool Continuation + Retrieval Wins
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
