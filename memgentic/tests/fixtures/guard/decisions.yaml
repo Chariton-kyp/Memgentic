@@ -1,0 +1,13 @@
+rules:
+  - id: core-import-direction
+    type: import_direction
+    scope: "memgentic/memgentic/**"
+    targets: ["memgentic_api", "memgentic_native", "dashboard"]
+    message: "Core must never import from api/native/dashboard."
+    source: "CLAUDE.md"
+  - id: no-langchain-in-core
+    type: banned_dependency
+    scope: "memgentic/pyproject.toml"
+    targets: ["langchain-core", "langgraph"]
+    message: "LLM stack belongs in the [intelligence] extra."
+    source: "CLAUDE.md"
