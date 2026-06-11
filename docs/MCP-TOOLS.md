@@ -8,7 +8,7 @@ in ``memgentic/memgentic/mcp/`` and rerun the generator.
 Every tool is namespaced ``memgentic_*`` and exposed over the ``mcp[cli]``
 transport configured by ``memgentic serve``.
 
-Total tools: **35**
+Total tools: **36**
 
 ## `memgentic_briefing`
 
@@ -1200,6 +1200,95 @@ Return triples in chronological order for an entity (or all).
     "params"
   ],
   "title": "memgentic_graph_timeline_toolArguments",
+  "type": "object"
+}
+```
+
+## `memgentic_guard_check`
+
+**Guard Self-Check** — `readOnlyHint=True` — `destructiveHint=False` — `idempotentHint=True` — `openWorldHint=False`
+
+Self-check the current diff against the repo's architectural rules.
+
+Lets a coding agent verify its own changes against ``decisions.yaml``
+BEFORE declaring a task done — the same deterministic checks the
+``memgentic guard`` CLI and the pre-commit hook run. Use it as the final
+step of any code change: a non-empty ``violations`` list means the diff
+breaks a documented rule and must be fixed before completing the task.
+
+The rules are loaded from ``rules_path`` if given, otherwise from
+``<repo>/decisions.yaml``. With ``staged=True`` it inspects the git index
+(what's about to be committed); otherwise it diffs the working branch
+against ``base`` (defaults to 'main').
+
+Returns:
+    ``{passed, violation_count, violations: [{rule_id, message, file,
+    line, snippet}], repo, rules_path}``. When no rules file exists,
+    returns ``{passed: True, violation_count: 0, violations: [],
+    message: "..."}`` rather than an error — a repo without rules simply
+    has nothing to enforce.
+
+**Input schema:**
+
+```json
+{
+  "$defs": {
+    "GuardCheckInput": {
+      "additionalProperties": false,
+      "description": "Input for :func:`memgentic_guard_check`.",
+      "properties": {
+        "base": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Base ref to diff the working branch against (e.g. 'origin/main'). Defaults to 'main' when unset. Ignored when staged=True.",
+          "title": "Base"
+        },
+        "repo": {
+          "default": ".",
+          "description": "Path to the git repository to check (defaults to the cwd).",
+          "title": "Repo",
+          "type": "string"
+        },
+        "rules_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Explicit path to a decisions.yaml. Defaults to <repo>/decisions.yaml.",
+          "title": "Rules Path"
+        },
+        "staged": {
+          "default": false,
+          "description": "Check the staged diff (git index) instead of branch-vs-base.",
+          "title": "Staged",
+          "type": "boolean"
+        }
+      },
+      "title": "GuardCheckInput",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "params": {
+      "$ref": "#/$defs/GuardCheckInput"
+    }
+  },
+  "required": [
+    "params"
+  ],
+  "title": "memgentic_guard_checkArguments",
   "type": "object"
 }
 ```

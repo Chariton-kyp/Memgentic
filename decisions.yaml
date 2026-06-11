@@ -1,0 +1,23 @@
+# Memgentic repo rules — enforced by `memgentic guard` (see docs/guard docs).
+# Deterministic checks only; every rule cites its source.
+#
+# Note on `core-import-direction` targets: `memgentic_native` is deliberately
+# NOT a target. Core imports it under `try/except ImportError` as optional Rust
+# acceleration (CLAUDE.md: "Native acceleration is optional — auto-detected at
+# import; pure Python fallback always works"). The import_direction check does
+# not suppress try/except guards, so keeping it would false-positive on every
+# edit to those intentional optional-import sites. The enforceable golden rule
+# is that core never imports `memgentic_api` or `dashboard`.
+rules:
+  - id: core-import-direction
+    type: import_direction
+    scope: "memgentic/memgentic/**"
+    targets: ["memgentic_api", "dashboard"]
+    message: "Core must never import from api/dashboard (CLAUDE.md golden rule)."
+    source: "CLAUDE.md"
+  - id: no-llm-stack-in-core-deps
+    type: banned_dependency
+    scope: "memgentic/pyproject.toml"
+    targets: ["langchain-core", "langchain-anthropic", "langchain-google-genai", "langchain-ollama", "langchain-openai", "langgraph", "networkx", "google-genai"]
+    message: "LLM/graph stack belongs in the [intelligence] extra, not core dependencies (CLAUDE.md)."
+    source: "CLAUDE.md"

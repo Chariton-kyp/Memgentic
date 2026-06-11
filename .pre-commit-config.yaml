@@ -57,3 +57,17 @@ repos:
       - id: pyright
         files: '^scripts/.*\.py$'
         additional_dependencies: []
+
+  # Memgentic guard — check staged changes against the repo's decisions.yaml.
+  # The shim exits 0 (skips) when the `memgentic` package isn't importable, so
+  # the CI "Run pre-commit on changed files" job (which may not install the
+  # package) is never blocked. Locally, a violation exits 1 and blocks the
+  # commit with the offending rule shown.
+  - repo: local
+    hooks:
+      - id: memgentic-guard
+        name: memgentic guard (staged)
+        entry: python scripts/guard_precommit.py
+        language: system
+        pass_filenames: false
+        always_run: true
