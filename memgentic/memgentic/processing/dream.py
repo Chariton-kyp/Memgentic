@@ -198,8 +198,10 @@ def _build_anthropic_client(
         from langchain_anthropic import ChatAnthropic
 
         client = LLMClient(settings)
+        # ``model_name`` is the constructor alias of the ``model`` field —
+        # pyright only sees the alias in the synthesized signature.
         client._model = ChatAnthropic(  # type: ignore[attr-defined]
-            model=model,
+            model_name=model,
             api_key=settings.anthropic_api_key,
             temperature=0,
         )
@@ -271,13 +273,20 @@ def _build_openai_compat_client(
         from langchain_openai import ChatOpenAI
 
         client = LLMClient(settings)
-        client._model = ChatOpenAI(  # type: ignore[attr-defined]
-            model=model,
-            base_url=settings.openai_compat_base_url,
-            api_key=settings.openai_compat_api_key,
-            temperature=0,
-            max_tokens=settings.ollama_num_predict,
-        )
+        # Build kwargs as a plain dict (mirrors ``LLMClient`` in ``llm.py``):
+        # langchain-openai is an optional extra whose constructor signature
+        # drifts across versions (``max_tokens`` vs the newer
+        # ``max_completion_tokens`` alias), so bypass static signature checks
+        # the same way the default client does.
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "base_url": settings.openai_compat_base_url,
+            "api_key": settings.openai_compat_api_key,
+            "temperature": 0,
+            # OpenAI-style cap on completion length — reuse Ollama's budget.
+            "max_tokens": settings.ollama_num_predict,
+        }
+        client._model = ChatOpenAI(**kwargs)  # type: ignore[attr-defined]
         client._provider_kind = "openai_compat"  # type: ignore[attr-defined]
         logger.info(
             f"dream.{phase_label}_llm.openai_compat",

@@ -95,6 +95,7 @@ vi.mock('@/hooks/use-memories', () => ({
   useMemories: (...args: unknown[]) => mockUseMemories(...args),
   useSearch: (...args: unknown[]) => mockUseSearch(...args),
   useSources: (...args: unknown[]) => mockUseSources(...args),
+  useProjects: () => ({ data: { projects: [], total: 0 }, isLoading: false, error: null }),
   usePinnedMemories: () => ({ data: { memories: [], total: 0 }, isLoading: false, error: null }),
   usePinMemory: () => ({ mutate: vi.fn(), isPending: false }),
   useUnpinMemory: () => ({ mutate: vi.fn(), isPending: false }),

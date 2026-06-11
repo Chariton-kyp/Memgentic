@@ -15,7 +15,6 @@ working directory (Claude Code turn header, Codex ``session_meta``, Gemini
 from __future__ import annotations
 
 import re
-from pathlib import PurePath, PurePosixPath, PureWindowsPath
 
 # Claude Code encodes a Windows or POSIX path by replacing every ``\``, ``/``
 # and ``_`` with a single ``-``. We can't recover the lost characters, so we
@@ -53,26 +52,34 @@ def normalize_project(name: str | None) -> str:
 def project_from_cwd(cwd: str | None) -> str:
     """Derive a project name from a real working-directory path.
 
-    Picks ``Path(cwd).name``. Handles both Windows and POSIX paths regardless
-    of the host OS so adapters that capture a foreign-OS cwd (e.g. Codex
-    sessions imported from a Linux machine on Windows) still work.
+    Picks the last meaningful path segment. Splits on BOTH ``\\`` and ``/``
+    regardless of the host OS — adapters discover foreign-OS sessions (e.g. a
+    Windows-recorded cwd read from WSL/Linux, or a Linux Codex session
+    imported on Windows), and ``pathlib`` on POSIX treats ``\\`` as a regular
+    filename character, which would swallow the whole Windows path as one
+    segment.
     """
     if not cwd:
         return ""
-    raw = cwd.strip().strip("\"'")
+    raw = cwd.strip().strip("\"'").strip()
     if not raw:
         return ""
-    # Try the host-native parser first; fall back to the other variant if the
-    # name comes back empty (typical when a Windows path is parsed on POSIX).
-    candidates: list[PurePath] = [PurePath(raw)]
-    if "\\" in raw:
-        candidates.append(PureWindowsPath(raw))
-    if "/" in raw:
-        candidates.append(PurePosixPath(raw))
-    for candidate in candidates:
-        name = candidate.name
-        if name and name not in (".", ".."):
-            return normalize_project(name)
+    # Separator-agnostic split; runs of separators (UNC prefixes, trailing
+    # slashes, doubled backslashes) collapse, and empty segments are dropped.
+    segments = [s for s in re.split(r"[\\/]+", raw) if s]
+    for segment in reversed(segments):
+        if segment == ".":
+            # Trailing "." is a no-op path component — look further left.
+            continue
+        if segment == "..":
+            # Can't resolve a parent reference without a filesystem — treat
+            # as no signal rather than guessing the wrong directory name.
+            return ""
+        if re.fullmatch(r"[A-Za-z]:", segment):
+            # Bare drive-letter token from an absolute Windows path ("C:") —
+            # never a project name (only meaningful for drive roots).
+            continue
+        return normalize_project(segment)
     return ""
 
 

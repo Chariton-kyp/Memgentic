@@ -325,7 +325,9 @@ async def _backfill_project_column(db: aiosqlite.Connection) -> None:
     cursor = await db.execute(
         "SELECT id, file_path FROM memories WHERE project = '' AND file_path IS NOT NULL"
     )
-    rows = await cursor.fetchall()
+    # Materialize — aiosqlite annotates fetchall() as Iterable[Row], which
+    # isn't Sized, so ``len(rows)`` below needs a concrete list.
+    rows = list(await cursor.fetchall())
     if not rows:
         return
 
