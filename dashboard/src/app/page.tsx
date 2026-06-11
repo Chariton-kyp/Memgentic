@@ -82,6 +82,7 @@ export default function HomePage() {
   const [contentTypeFilter, setContentTypeFilter] = useState<
     string | undefined
   >();
+  const [projectFilter, setProjectFilter] = useState<string | undefined>();
   const [activeView, setActiveView] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
@@ -100,7 +101,7 @@ export default function HomePage() {
   // Reset page when search or filters change
   useEffect(() => {
     setPage(1);
-  }, [debouncedQuery, sourceFilter, contentTypeFilter, activeView]);
+  }, [debouncedQuery, sourceFilter, contentTypeFilter, projectFilter, activeView]);
 
   const isSearching = debouncedQuery.length >= 2;
   const isPinnedView = activeView === "pinned";
@@ -122,6 +123,7 @@ export default function HomePage() {
     page_size: pageSize,
     source: sourceFilter,
     content_type: contentTypeFilter,
+    project: projectFilter,
   });
 
   const {
@@ -252,6 +254,13 @@ export default function HomePage() {
               setSourceFilter(source);
               setContentTypeFilter(undefined);
             }}
+            activeProject={projectFilter}
+            onProjectChange={(project) => {
+              setProjectFilter(project);
+              setSourceFilter(undefined);
+              setContentTypeFilter(undefined);
+              setActiveView(null);
+            }}
           />
         </div>
 
@@ -300,13 +309,14 @@ export default function HomePage() {
                 </SelectContent>
               </Select>
 
-              {(sourceFilter || contentTypeFilter) && (
+              {(sourceFilter || contentTypeFilter || projectFilter) && (
                 <Button
                   variant="ghost"
                   size="sm"
                   onClick={() => {
                     setSourceFilter(undefined);
                     setContentTypeFilter(undefined);
+                    setProjectFilter(undefined);
                     setActiveView(null);
                   }}
                 >

@@ -31,6 +31,7 @@ def _make_adapter(
     adapter.parse_file = AsyncMock(return_value=[])
     adapter.get_session_id = AsyncMock(return_value="session-001")
     adapter.get_session_title = AsyncMock(return_value="Test Session")
+    adapter.get_project = AsyncMock(return_value=None)
     return adapter
 
 

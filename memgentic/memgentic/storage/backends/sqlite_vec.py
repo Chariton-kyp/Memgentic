@@ -48,6 +48,7 @@ def _memory_to_payload(memory: Memory) -> dict[str, Any]:
         "status": memory.status.value,
         "created_at": memory.created_at.isoformat(),
         "user_id": memory.user_id,
+        "project": memory.project or "",
     }
 
 
@@ -133,9 +134,13 @@ class SqliteVecBackend:
             "  confidence REAL,"
             "  status TEXT,"
             "  created_at TEXT,"
-            "  user_id TEXT"
+            "  user_id TEXT,"
+            "  project TEXT NOT NULL DEFAULT ''"
             ")"
         )
+        # Idempotent ADD COLUMN for upgrades — skipped silently when the column
+        # already exists (fresh installs hit the CREATE TABLE above).
+        await self._ensure_payload_column(conn, "project", "TEXT NOT NULL DEFAULT ''")
         # Embedding-model safety pin (matches the intent of the Qdrant PR #19 pin)
         await conn.execute(
             f"CREATE TABLE IF NOT EXISTS {self.PIN_TABLE} ("
@@ -146,7 +151,7 @@ class SqliteVecBackend:
             ")"
         )
         # Indexes for filter predicates
-        for col in ("platform", "content_type", "status", "user_id", "confidence"):
+        for col in ("platform", "content_type", "status", "user_id", "confidence", "project"):
             await conn.execute(
                 f"CREATE INDEX IF NOT EXISTS idx_{self.PAYLOAD_TABLE}_{col} "
                 f"ON {self.PAYLOAD_TABLE}({col})"
@@ -165,6 +170,22 @@ class SqliteVecBackend:
         if self._conn is not None:
             await self._conn.close()
             self._conn = None
+
+    @classmethod
+    async def _ensure_payload_column(
+        cls, conn: aiosqlite.Connection, name: str, definition: str
+    ) -> None:
+        """Add ``name`` to the payload table if it does not already exist.
+
+        SQLite doesn't support ``ADD COLUMN IF NOT EXISTS`` directly, so we
+        introspect ``PRAGMA table_info`` first and skip the ALTER on a hit.
+        Runs on every initialize() to keep upgrades idempotent.
+        """
+        async with conn.execute(f"PRAGMA table_info({cls.PAYLOAD_TABLE})") as cur:
+            cols = {row[1] for row in await cur.fetchall()}
+        if name in cols:
+            return
+        await conn.execute(f"ALTER TABLE {cls.PAYLOAD_TABLE} ADD COLUMN {name} {definition}")
 
     # --- embedding-model safety pin -------------------------------------
 
@@ -245,8 +266,8 @@ class SqliteVecBackend:
             f"INSERT OR REPLACE INTO {self.PAYLOAD_TABLE} ("
             "  id, content, content_type, platform, platform_version,"
             "  session_id, session_title, topics_json, entities_json,"
-            "  confidence, status, created_at, user_id"
-            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "  confidence, status, created_at, user_id, project"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (
                 memory.id,
                 payload["content"],
@@ -261,6 +282,7 @@ class SqliteVecBackend:
                 payload["status"],
                 payload["created_at"],
                 payload["user_id"],
+                payload["project"],
             ),
         )
 
@@ -312,7 +334,7 @@ class SqliteVecBackend:
             f"SELECT v.id, v.distance, "
             "  p.content, p.content_type, p.platform, p.platform_version,"
             "  p.session_id, p.session_title, p.topics_json, p.entities_json,"
-            "  p.confidence, p.status, p.created_at, p.user_id "
+            "  p.confidence, p.status, p.created_at, p.user_id, p.project "
             f"FROM {self.VEC_TABLE} v "
             f"JOIN {self.PAYLOAD_TABLE} p ON p.id = v.id "
             "WHERE v.embedding MATCH ? AND k = ? "
@@ -344,6 +366,7 @@ class SqliteVecBackend:
                     status,
                     created_at,
                     row_user_id,
+                    row_project,
                 ) = row
                 # Cosine distance in sqlite-vec is in [0, 2]; convert to similarity.
                 score = 1.0 - float(distance)
@@ -364,6 +387,7 @@ class SqliteVecBackend:
                             "status": status,
                             "created_at": created_at,
                             "user_id": row_user_id,
+                            "project": row_project or "",
                         },
                     }
                 )
@@ -440,5 +464,15 @@ class SqliteVecBackend:
         if config.min_confidence > 0:
             clauses.append("p.confidence >= ?")
             params.append(config.min_confidence)
+
+        if config.include_projects:
+            placeholders = ", ".join("?" for _ in config.include_projects)
+            clauses.append(f"p.project IN ({placeholders})")
+            params.extend(p.lower() for p in config.include_projects)
+
+        if config.exclude_projects:
+            placeholders = ", ".join("?" for _ in config.exclude_projects)
+            clauses.append(f"p.project NOT IN ({placeholders})")
+            params.extend(p.lower() for p in config.exclude_projects)
 
         return " AND ".join(clauses), params

@@ -198,6 +198,7 @@ class MemgenticDaemon:
         try:
             session_id = await adapter.get_session_id(file_path)
             session_title = await adapter.get_session_title(file_path)
+            project = await adapter.get_project(file_path)
             chunks = await adapter.parse_file(file_path)
 
             if not chunks:
@@ -210,6 +211,7 @@ class MemgenticDaemon:
                 session_title=session_title,
                 capture_method=CaptureMethod.AUTO_DAEMON,
                 file_path=str(file_path),
+                project=project,
             )
 
             # Mark context file dirty so the update loop regenerates it

@@ -151,6 +151,7 @@ class IngestionPipeline:
         platform_version: str | None = None,
         user_id: str = "",
         capture_profile: CaptureProfile | None = None,
+        project: str | None = None,
     ) -> list[Memory]:
         """Ingest a parsed conversation into Memgentic.
 
@@ -164,6 +165,8 @@ class IngestionPipeline:
             platform_version: Model/tool version.
             capture_profile: Override the configured default capture profile
                 for this ingestion call. One of ``raw`` / ``enriched`` / ``dual``.
+            project: Friendly project key derived by the adapter from the
+                originating working directory. Empty/None when unknown.
 
         Returns:
             List of created Memory objects.
@@ -186,6 +189,7 @@ class IngestionPipeline:
                 platform_version=platform_version,
                 user_id=user_id,
                 capture_profile=profile,
+                project=project,
             )
             record_counter(
                 "memgentic.memories.ingested",
@@ -210,6 +214,7 @@ class IngestionPipeline:
         platform_version: str | None = None,
         user_id: str = "",
         capture_profile: CaptureProfile = "enriched",
+        project: str | None = None,
     ) -> list[Memory]:
         # Step 0: Defensive cap on absurd chunk sizes. A single Gemini CLI
         # turn that wraps a ``[Function Response: read_many_files]`` dump
@@ -242,6 +247,8 @@ class IngestionPipeline:
             file_path=file_path,
         )
 
+        project_key = (project or "").strip().lower()
+
         # Raw-profile memories store verbatim content with no LLM-derived
         # metadata. They get a neutral importance so downstream ranking falls
         # back to pure vector + recency scoring.
@@ -257,6 +264,7 @@ class IngestionPipeline:
                     user_id=user_id,
                     importance_score=0.5,
                     capture_profile="raw",
+                    project=project_key,
                 )
                 for chunk in chunks
                 if chunk.content.strip()  # Skip empty chunks
@@ -274,6 +282,7 @@ class IngestionPipeline:
                     confidence=chunk.confidence,
                     user_id=user_id,
                     capture_profile=capture_profile,
+                    project=project_key,
                 )
                 for chunk in chunks
                 if chunk.content.strip()  # Skip empty chunks

@@ -207,3 +207,57 @@ class LLMClient:
         except Exception as e:
             logger.warning("llm.structured_failed", error=str(e), schema=schema.__name__)
             return None
+
+    async def generate_structured_with_usage(
+        self, prompt: str, schema: type[BaseModel]
+    ) -> tuple[BaseModel | None, dict[str, int]]:
+        """Same as ``generate_structured`` but additionally returns token usage.
+
+        Uses langchain's ``include_raw=True`` so we can read
+        ``AIMessage.usage_metadata`` from the underlying provider response.
+        Falls back to the standard structured call when the provider rejects
+        ``include_raw`` — in that case usage is reported as zeros so the
+        caller can still trust the parsed result.
+
+        Returns ``(parsed, {"input_tokens": int, "output_tokens": int})``.
+        Tokens are 0 when the provider doesn't expose ``usage_metadata`` (most
+        Ollama / OpenAI-compat servers).
+        """
+        usage: dict[str, int] = {"input_tokens": 0, "output_tokens": 0}
+        if not self._model:
+            return None, usage
+        method_kwargs: dict = {}
+        if self._provider_kind in ("ollama", "openai_compat"):
+            method_kwargs["method"] = "json_schema"
+        try:
+            try:
+                structured = self._model.with_structured_output(
+                    schema, include_raw=True, **method_kwargs
+                )
+                result = await structured.ainvoke(prompt)
+                if isinstance(result, dict):
+                    parsed_obj = result.get("parsed")
+                    parsed = parsed_obj if isinstance(parsed_obj, BaseModel) else None
+                    raw = result.get("raw")
+                    um = getattr(raw, "usage_metadata", None) if raw is not None else None
+                    if um:
+                        usage["input_tokens"] = int(um.get("input_tokens", 0) or 0)
+                        usage["output_tokens"] = int(um.get("output_tokens", 0) or 0)
+                    return parsed, usage
+                if isinstance(result, BaseModel):
+                    return result, usage
+                return None, usage
+            except TypeError:
+                # Provider rejected ``include_raw=True`` — fall back to the
+                # legacy path. We lose token counts but keep correctness.
+                structured = self._model.with_structured_output(schema, **method_kwargs)
+                result = await structured.ainvoke(prompt)
+                parsed = result if isinstance(result, BaseModel) else None
+                return parsed, usage
+        except Exception as e:
+            logger.warning(
+                "llm.structured_with_usage_failed",
+                error=str(e),
+                schema=schema.__name__,
+            )
+            return None, usage

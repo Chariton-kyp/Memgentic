@@ -160,6 +160,10 @@ ignore = [
     # LangChain BaseModel | None flow across the distillation pipeline
     "memgentic/processing/intelligence.py",
     "memgentic/processing/pipeline.py",
+    # Same LangChain/LangGraph flow noise: DreamState is a total=False
+    # TypedDict whose keys are always seeded by the graph entrypoint, but
+    # pyright can't prove node access is safe
+    "memgentic/processing/dream.py",
 ]
 # Optional runtime dependencies (memgentic-native, OpenTelemetry observability)
 # are imported under try/except. Pyright can't see them when the extras aren't

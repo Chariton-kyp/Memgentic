@@ -22,6 +22,7 @@ from memgentic_api.routes import (
     briefing,
     chronograph,
     collections,
+    dreams,
     graph,
     import_export,
     ingestion,
@@ -247,15 +248,14 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 1. Security headers on all responses
 app.add_middleware(SecurityHeadersMiddleware)
 
-# 2. CORS — allow dashboard and local dev
+# 2. CORS — allow dashboard and local dev. ``allow_origin_regex`` covers any
+# localhost / 127.0.0.1 dev port (common when running a second dashboard
+# instance against a separate API for browser smoke tests); ``allow_origins``
+# pins the production hostname.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3690",
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "https://app.memgentic.dev",
-    ],
+    allow_origins=["https://app.memgentic.dev"],
+    allow_origin_regex=r"^http://(localhost|127\.0\.0\.1):\d+$",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization", "X-API-Key", "If-None-Match"],
@@ -285,6 +285,7 @@ app.include_router(settings_routes.router, prefix="/api/v1", tags=["settings"], 
 app.include_router(persona.router, prefix="/api/v1", tags=["persona"], dependencies=_auth)
 app.include_router(briefing.router, prefix="/api/v1", tags=["briefing"], dependencies=_auth)
 app.include_router(watchers.router, prefix="/api/v1", tags=["watchers"], dependencies=_auth)
+app.include_router(dreams.router, prefix="/api/v1", tags=["dreams"], dependencies=_auth)
 
 # WebSocket — no auth dependency (clients authenticate via initial message if needed)
 app.include_router(websocket.router, prefix="/api/v1", tags=["websocket"])

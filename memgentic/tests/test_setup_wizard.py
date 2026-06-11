@@ -32,8 +32,8 @@ def test_setup_records_storage_backend_sqlite_vec(monkeypatch, tmp_path: Path):
     to .env. Regression guard for the v0.5.0 Step 1 addition.
     """
     # Inputs: backend=1 (sqlite_vec), embedding=1 (preset), llm=1 (preset),
-    # install sqlite-vec? yes, pull models? no.
-    result = _invoke_setup("1\n1\n1\ny\nn\n", monkeypatch, tmp_path)
+    # dream-preset=6 (skip), install sqlite-vec? yes, pull models? no.
+    result = _invoke_setup("1\n1\n1\n6\ny\nn\n", monkeypatch, tmp_path)
     assert result.exit_code == 0, result.output
 
     env = (tmp_path / ".env").read_text()
@@ -53,8 +53,9 @@ def test_setup_records_storage_backend_qdrant_local(monkeypatch, tmp_path: Path)
 
     monkeypatch.setattr(cli_module, "_install_sqlite_vec_extra", fake_install)
 
-    # Inputs: backend=2 (local), embedding=1, llm=8 (heuristics), pull? no
-    result = _invoke_setup("2\n1\n8\nn\n", monkeypatch, tmp_path)
+    # Inputs: backend=2 (local), embedding=1, llm=8 (heuristics),
+    # dream-preset=6 (skip), pull? no
+    result = _invoke_setup("2\n1\n8\n6\nn\n", monkeypatch, tmp_path)
     assert result.exit_code == 0, result.output
 
     env = (tmp_path / ".env").read_text()

@@ -11,6 +11,7 @@ import structlog
 
 from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
+from memgentic.processing.project import derive_project
 
 logger = structlog.get_logger()
 
@@ -55,6 +56,43 @@ class ClaudeCodeAdapter(BaseAdapter):
     async def get_session_title(self, file_path: Path) -> str | None:
         """Try to extract title from the first user message."""
         return await asyncio.to_thread(self._read_session_title, file_path)
+
+    async def get_project(self, file_path: Path) -> str | None:
+        """Recover the project key from the JSONL ``cwd`` field.
+
+        Claude Code 2.x writes ``cwd`` on every turn header. We sample the
+        first non-empty value; on older sessions that lack it, we fall back to
+        decoding the parent-directory slug (``~/.claude/projects/<slug>/``).
+        """
+        cwd = await asyncio.to_thread(self._read_first_cwd, file_path)
+        slug = file_path.parent.name if file_path.parent else None
+        return derive_project(cwd=cwd, slug=slug) or None
+
+    @staticmethod
+    def _read_first_cwd(file_path: Path) -> str | None:
+        """Scan the first ~50 turns for a non-empty ``cwd`` field.
+
+        Stops as soon as one is found — every subsequent turn in a single
+        Claude Code session shares the same cwd.
+        """
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                for i, line in enumerate(f):
+                    if i >= 50:
+                        break
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        turn = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    cwd = turn.get("cwd")
+                    if isinstance(cwd, str) and cwd:
+                        return cwd
+        except (OSError, UnicodeDecodeError):
+            pass
+        return None
 
     def _read_session_title(self, file_path: Path) -> str | None:
         """Synchronous helper — reads the first human message as title."""

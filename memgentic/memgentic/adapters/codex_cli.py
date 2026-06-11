@@ -37,6 +37,7 @@ import structlog
 from memgentic.adapters._wsl import wsl_user_paths
 from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
+from memgentic.processing.project import derive_project
 
 logger = structlog.get_logger()
 
@@ -102,6 +103,12 @@ class CodexCliAdapter(BaseAdapter):
             if role == "user":
                 return text[:100].strip()
         return None
+
+    async def get_project(self, file_path: Path) -> str | None:
+        """Codex stores ``cwd`` inside ``session_meta`` — perfect signal."""
+        events = await asyncio.to_thread(self._read_events, file_path)
+        cwd = self._extract_cwd(events)
+        return derive_project(cwd=cwd) or None
 
     async def parse_file(self, file_path: Path) -> list[ConversationChunk]:
         """Group user-assistant message pairs into chunks.

@@ -6,10 +6,11 @@ import {
   Star,
   Plus,
   FolderOpen,
+  Folder,
 } from "lucide-react";
 import { toast } from "sonner";
 import { getPlatformConfig } from "@/lib/constants";
-import { useSources } from "@/hooks/use-memories";
+import { useSources, useProjects } from "@/hooks/use-memories";
 import { useCollections, useCreateCollection } from "@/hooks/use-collections";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -124,6 +125,8 @@ interface CollectionsSidebarProps {
   onViewChange: (view: string | null) => void;
   activeSource: string | undefined;
   onSourceChange: (source: string | undefined) => void;
+  activeProject?: string | undefined;
+  onProjectChange?: (project: string | undefined) => void;
 }
 
 export function CollectionsSidebar({
@@ -131,12 +134,16 @@ export function CollectionsSidebar({
   onViewChange,
   activeSource,
   onSourceChange,
+  activeProject,
+  onProjectChange,
 }: CollectionsSidebarProps) {
   const { data: collectionsData } = useCollections();
   const { data: sourcesData } = useSources();
+  const { data: projectsData } = useProjects();
 
   const collections = collectionsData?.collections ?? [];
   const sources = sourcesData?.sources ?? [];
+  const projects = projectsData?.projects ?? [];
 
   return (
     <aside className="w-56 shrink-0 space-y-1 pr-4 border-r hidden lg:block">
@@ -241,6 +248,39 @@ export function CollectionsSidebar({
           );
         })}
       </div>
+
+      {onProjectChange && projects.length > 0 ? (
+        <>
+          <Separator className="my-2" />
+          <div className="space-y-1">
+            <p className="px-2 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+              Projects
+            </p>
+            {projects.map((project) => {
+              const isActive = activeProject === project.project;
+              return (
+                <button
+                  key={project.project || "(unknown)"}
+                  onClick={() => {
+                    onViewChange(null);
+                    onSourceChange(undefined);
+                    onProjectChange(isActive ? undefined : project.project);
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
+                    isActive
+                      ? "bg-muted font-medium text-foreground"
+                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                  }`}
+                >
+                  <Folder className="size-4" />
+                  <span className="truncate flex-1 text-left">{project.label}</span>
+                  <span className="text-xs tabular-nums">{project.count}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>
+      ) : null}
     </aside>
   );
 }

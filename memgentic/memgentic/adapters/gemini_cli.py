@@ -10,6 +10,7 @@ import structlog
 
 from memgentic.adapters.base import BaseAdapter
 from memgentic.models import ContentType, ConversationChunk, Platform
+from memgentic.processing.project import derive_project
 
 logger = structlog.get_logger()
 
@@ -72,6 +73,31 @@ class GeminiCliAdapter(BaseAdapter):
     async def get_session_title(self, file_path: Path) -> str | None:
         """Try to extract title from the first user message."""
         return await asyncio.to_thread(self._read_session_title, file_path)
+
+    async def get_project(self, file_path: Path) -> str | None:
+        """Try the JSON ``cwd`` field, fall back to no signal.
+
+        Newer Gemini CLI sessions write a top-level ``cwd`` field; older ones
+        only carry an opaque project hash directory name (``<hex>``) which
+        cannot be reliably mapped back to a friendly project key.
+        """
+        cwd = await asyncio.to_thread(self._read_cwd, file_path)
+        return derive_project(cwd=cwd) or None
+
+    @staticmethod
+    def _read_cwd(file_path: Path) -> str | None:
+        """Best-effort scan for a top-level ``cwd`` or ``workingDirectory`` key."""
+        try:
+            with open(file_path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            return None
+        if isinstance(data, dict):
+            for key in ("cwd", "workingDirectory", "working_directory", "projectPath"):
+                value = data.get(key)
+                if isinstance(value, str) and value:
+                    return value
+        return None
 
     def _read_session_title(self, file_path: Path) -> str | None:
         """Synchronous helper — reads the first user message as title."""

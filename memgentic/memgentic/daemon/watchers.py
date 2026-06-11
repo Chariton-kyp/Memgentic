@@ -319,6 +319,13 @@ class WatchersOrchestrator:
             return
 
         from memgentic.models import CaptureMethod
+        from memgentic.processing.project import derive_project
+
+        # Hook events optionally carry the originating cwd; when present we
+        # honour it so hook-captured memories collapse under the same project
+        # key as their daemon-captured counterparts.
+        hook_cwd = event.event_data.get("cwd") or event.event_data.get("workingDirectory")
+        hook_project = derive_project(cwd=hook_cwd) if hook_cwd else None
 
         memories = await self._pipeline.ingest_conversation(
             chunks=kept,
@@ -326,6 +333,7 @@ class WatchersOrchestrator:
             session_id=event.session_id,
             session_title=event.event_data.get("session_title"),
             capture_method=CaptureMethod.HOOK,
+            project=hook_project,
         )
         self._state_store.append_log(
             event.tool,

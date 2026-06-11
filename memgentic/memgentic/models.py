@@ -59,6 +59,7 @@ class Platform(StrEnum):
     AIDER = "aider"
     CURSOR = "cursor"
     PERPLEXITY = "perplexity"
+    DREAM = "dream"  # Insights synthesized by the auto-dream consolidation pipeline
     CUSTOM = "custom"
     MANUAL = "manual"
     UNKNOWN = "unknown"
@@ -132,6 +133,18 @@ class Memory(BaseModel):
     # Source provenance
     source: SourceMetadata = Field(
         description="Where this memory came from — full provenance",
+    )
+
+    # Project provenance — friendly key that collapses memories from the same
+    # source tree across tools (claude_code, codex_cli, gemini_cli, ...). Empty
+    # string when the originating adapter could not determine a working
+    # directory. Derivation lives in ``memgentic.processing.project``.
+    project: str = Field(
+        default="",
+        description=(
+            "Friendly project key derived from the originating working directory. "
+            "Empty string when unknown. Used for cross-tool project filtering."
+        ),
     )
 
     # Knowledge metadata
@@ -233,6 +246,20 @@ class SessionConfig(BaseModel):
         ge=0.0,
         le=1.0,
         description="Minimum confidence threshold for retrieval",
+    )
+    include_projects: list[str] | None = Field(
+        default=None,
+        description=(
+            "Only include memories whose project key matches one of these "
+            "(None = all). Project keys are normalised lowercase."
+        ),
+    )
+    exclude_projects: list[str] | None = Field(
+        default=None,
+        description=(
+            "Exclude memories whose project key matches one of these. "
+            "Applied after include_projects."
+        ),
     )
 
 
@@ -510,3 +537,91 @@ class Violation(BaseModel):
         default=None,
         description="Offending source snippet, if available",
     )
+
+
+# ---------------------------------------------------------------------------
+# Dream models — auto-dream memory consolidation pipeline
+# ---------------------------------------------------------------------------
+
+
+class DreamStatus(StrEnum):
+    """Lifecycle status of a dream consolidation run."""
+
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELED = "canceled"
+
+
+class DreamPatchAction(StrEnum):
+    """Operation a dream patch performs against the live memory store."""
+
+    MERGE = "merge"
+    SUPERSEDE = "supersede"
+    ARCHIVE_STALE = "archive_stale"
+    NORMALIZE_DATE = "normalize_date"
+    INSERT_INSIGHT = "insert_insight"
+    UPDATE_FIELD = "update_field"
+
+
+class DreamPatchStatus(StrEnum):
+    """Lifecycle status of a single dream patch."""
+
+    PROPOSED = "proposed"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    SUPERSEDED_BY_APPLY = "superseded_by_apply"
+
+
+# Patches that mutate or hide existing memories require explicit user approval.
+DESTRUCTIVE_DREAM_ACTIONS: frozenset[DreamPatchAction] = frozenset(
+    {
+        DreamPatchAction.MERGE,
+        DreamPatchAction.SUPERSEDE,
+        DreamPatchAction.ARCHIVE_STALE,
+    }
+)
+
+
+class DreamPatch(BaseModel):
+    """A single proposed mutation produced by a dream consolidation run."""
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    dream_id: str = Field(description="Parent dream run id")
+    action: DreamPatchAction
+    target_memory_ids: list[str] = Field(default_factory=list)
+    new_content: str | None = Field(default=None)
+    new_metadata: dict | None = Field(default=None)
+    evidence: str | None = Field(default=None, description="LLM rationale for the patch")
+    status: DreamPatchStatus = Field(default=DreamPatchStatus.PROPOSED)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    applied_at: datetime | None = Field(default=None)
+
+
+class DreamRun(BaseModel):
+    """A single auto-dream consolidation run.
+
+    Mirrors Anthropic's Managed Agents `dream` resource — input is never mutated;
+    the run produces a list of `DreamPatch` proposals that the user reviews and
+    explicitly applies (or rejects).
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    project: str = Field(default="", description="Project scope (lowercased key)")
+    status: DreamStatus = Field(default=DreamStatus.PENDING)
+    model: str = Field(default="", description="Model used for Phase 3 (Consolidate)")
+    instructions: str = Field(default="", max_length=4096)
+    input_session_ids: list[str] = Field(default_factory=list)
+    input_memory_count: int = Field(default=0, ge=0)
+    error: str | None = Field(default=None)
+    usage_input_tokens: int = Field(default=0, ge=0)
+    usage_output_tokens: int = Field(default=0, ge=0)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    ended_at: datetime | None = Field(default=None)
+    applied_at: datetime | None = Field(default=None)
+    user_id: str = Field(default="")

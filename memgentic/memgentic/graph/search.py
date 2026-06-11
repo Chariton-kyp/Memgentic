@@ -160,10 +160,19 @@ async def _hybrid_search_impl(
     # Embed the cleaned query
     query_embedding = await embedder.embed_query(search_query)
 
-    # Run semantic + keyword in parallel
+    # Run semantic + keyword in parallel.
+    # ``search_fulltext`` must receive the same ``session_config`` so platform
+    # / project / content-type filters are honoured by the FTS5 path too —
+    # otherwise keyword hits leak through filters that semantic search
+    # respects, which is exactly how the project filter regressed in 0.9.x.
     semantic_results, keyword_results = await asyncio.gather(
         vector_store.search(query_embedding, session_config, limit=limit * 2, user_id=user_id),
-        metadata_store.search_fulltext(query, limit=limit * 2, user_id=user_id),
+        metadata_store.search_fulltext(
+            query,
+            session_config=session_config,
+            limit=limit * 2,
+            user_id=user_id,
+        ),
     )
 
     # Graph-boosted memory IDs
@@ -222,24 +231,54 @@ async def _hybrid_search_impl(
         memories_map = {}
     if not isinstance(memories_map, dict):
         memories_map = {}
+
+    # Pre-compute filter predicates on the resolved memory rows so graph-only
+    # hits — which never went through a SessionConfig-aware retriever — get
+    # post-filtered the same way the semantic and keyword paths already are.
+    include_projects = (
+        {p.lower() for p in (session_config.include_projects or [])}
+        if session_config and session_config.include_projects
+        else None
+    )
+    exclude_projects = (
+        {p.lower() for p in (session_config.exclude_projects or [])}
+        if session_config and session_config.exclude_projects
+        else None
+    )
+    drop: set[str] = set()
     for mid in all_mids:
         memory = memories_map.get(mid)
         if memory and hasattr(memory, "importance_score"):
+            mem_project = (memory.project or "").lower()
+            if include_projects is not None and mem_project not in include_projects:
+                drop.add(mid)
+                continue
+            if exclude_projects is not None and mem_project in exclude_projects:
+                drop.add(mid)
+                continue
             importance = memory.importance_score
             age_days = (now - memory.created_at).total_seconds() / 86400.0
             decay_factor = math.pow(0.5, age_days / half_life) if half_life > 0 else 1.0
             scores[mid] = scores[mid] * importance * decay_factor
             # Backfill payload for graph-only / missing IDs to avoid silent
-            # data loss in returned results.
+            # data loss in returned results. Also overlay ``project`` onto
+            # any payload that pre-dates the project-column rollout — the
+            # vec-payload table won't be repopulated until a re-embed, but
+            # the metadata store is the source of truth post-migration 9.
             if mid not in payloads or not payloads[mid]:
                 payloads[mid] = {
                     "content": memory.content,
                     "content_type": memory.content_type.value,
                     "platform": memory.source.platform.value,
+                    "project": memory.project or "",
                     "created_at": memory.created_at.isoformat() if memory.created_at else "",
                     "topics": list(memory.topics or []),
                     "session_title": memory.source.session_title or "",
                 }
+            elif not payloads[mid].get("project"):
+                payloads[mid]["project"] = memory.project or ""
+    for mid in drop:
+        scores.pop(mid, None)
 
     # Return raw fused weighted RRF * importance * decay scores plus
     # per-signal observability. We deliberately do NOT divide by max —
