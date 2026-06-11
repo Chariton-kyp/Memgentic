@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.10.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.9.0...v0.10.0) (2026-06-11)
+
+
+### Features
+
+* **guard:** daily-flow integration — decisions.yaml, pre-commit hook, MCP self-check ([#140](https://github.com/Chariton-kyp/Memgentic/issues/140)) ([e798c54](https://github.com/Chariton-kyp/Memgentic/commit/e798c5430a06654761b32fd08e83edf0d1f04639))
+* **guard:** daily-flow integration — decisions.yaml, pre-commit hook, MCP self-check tool ([e798c54](https://github.com/Chariton-kyp/Memgentic/commit/e798c5430a06654761b32fd08e83edf0d1f04639))
+* project-filter foundation + auto-dream pipeline (local baseline) ([#141](https://github.com/Chariton-kyp/Memgentic/issues/141)) ([592e484](https://github.com/Chariton-kyp/Memgentic/commit/592e484242163c37cf50b7c4ad2cbc7056826195))
+
 ## [0.9.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.8.0...v0.9.0) (2026-06-10)
 
 
