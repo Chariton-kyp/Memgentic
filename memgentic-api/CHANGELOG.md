@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.10.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v0.9.0...api-v0.10.0) (2026-06-11)
+
+
+### Features
+
+* project-filter foundation + auto-dream pipeline (local baseline) ([#141](https://github.com/Chariton-kyp/Memgentic/issues/141)) ([592e484](https://github.com/Chariton-kyp/Memgentic/commit/592e484242163c37cf50b7c4ad2cbc7056826195))
+
 ## [0.8.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v0.7.0...api-v0.8.0) (2026-05-03)
 
 

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "memgentic-native"
-version = "0.9.0"
+version = "0.10.0"
 description = "Native Rust acceleration for Memgentic — text processing, parsers, and knowledge graph"
 readme = "README.md"
 requires-python = ">=3.11"

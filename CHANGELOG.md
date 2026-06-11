@@ -4,6 +4,23 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.10.0] — 2026-06-11 — Project Filter + Auto-Dream + Guard in the Daily Flow
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
+
+### Added
+
+- **Project filter** — every memory now carries a top-level `project` key (cwd-derived, slug-normalized); Migration 9 backfills existing rows. `SessionConfig.include_projects` / `exclude_projects` with an `'auto'` sentinel; MCP `RecallInput` project params + new `memgentic_projects` tool; `GET /api/v1/projects`; dashboard Projects sidebar; CLI `memgentic projects` and `search -p`.
+- **Auto-dream consolidation pipeline** — Migration 10 (`dream_runs` / `dream_patches`); LangGraph propose/evidence/accept dream engine with per-phase model routing across Anthropic / Google / OpenAI-compatible / Ollama; `memgentic dream` CLI group; REST `/api/v1/dreams` + dashboard pages; dream MCP tools.
+- **Guard in the daily flow** — this repo now ships its own root `decisions.yaml` (rules enforced by `memgentic guard`); a pre-commit hook runs `memgentic guard --staged` on every commit (CI-safe skip when the package isn't installed); new MCP tool `memgentic_guard_check` lets coding agents self-check their diff against repo rules before declaring work done.
+- MCP surface expanded **30 → 36 tools** (`docs/MCP-TOOLS.md` regenerated).
+
+### Fixed
+
+- Cross-platform project derivation — Windows-recorded session paths now parse correctly on POSIX hosts (matters for WSL-discovered sessions)
+- `hybrid_search` keyword-path now honours the project filter
+- Dream engine: LangChain 1.x constructor signatures (`model_name` alias, kwargs-dict for OpenAI-compatible) + pyright fixes in `migrations.py`
+
 ## [0.9.0] — 2026-06-10 — Memgentic Guard (Agentic CI) + Capture Repairs
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
