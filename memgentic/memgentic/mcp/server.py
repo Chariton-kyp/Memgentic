@@ -3015,6 +3015,124 @@ async def memgentic_dream_list(params: DreamListInput, ctx: Context) -> dict:
         return {"error": str(exc)}
 
 
+# ---------------------------------------------------------------------------
+# Guard — deterministic self-check of a diff against the repo's decisions.yaml
+# ---------------------------------------------------------------------------
+
+
+class GuardCheckInput(BaseModel):
+    """Input for :func:`memgentic_guard_check`."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    repo: str = Field(
+        default=".",
+        description="Path to the git repository to check (defaults to the cwd).",
+    )
+    base: str | None = Field(
+        default=None,
+        description=(
+            "Base ref to diff the working branch against (e.g. 'origin/main'). "
+            "Defaults to 'main' when unset. Ignored when staged=True."
+        ),
+    )
+    staged: bool = Field(
+        default=False,
+        description="Check the staged diff (git index) instead of branch-vs-base.",
+    )
+    rules_path: str | None = Field(
+        default=None,
+        description="Explicit path to a decisions.yaml. Defaults to <repo>/decisions.yaml.",
+    )
+
+
+@mcp.tool(
+    name="memgentic_guard_check",
+    annotations={
+        "title": "Guard Self-Check",
+        "readOnlyHint": True,
+        "destructiveHint": False,
+        "idempotentHint": True,
+        "openWorldHint": False,
+    },
+)
+async def memgentic_guard_check(params: GuardCheckInput, ctx: Context) -> dict:
+    """Self-check the current diff against the repo's architectural rules.
+
+    Lets a coding agent verify its own changes against ``decisions.yaml``
+    BEFORE declaring a task done — the same deterministic checks the
+    ``memgentic guard`` CLI and the pre-commit hook run. Use it as the final
+    step of any code change: a non-empty ``violations`` list means the diff
+    breaks a documented rule and must be fixed before completing the task.
+
+    The rules are loaded from ``rules_path`` if given, otherwise from
+    ``<repo>/decisions.yaml``. With ``staged=True`` it inspects the git index
+    (what's about to be committed); otherwise it diffs the working branch
+    against ``base`` (defaults to 'main').
+
+    Returns:
+        ``{passed, violation_count, violations: [{rule_id, message, file,
+        line, snippet}], repo, rules_path}``. When no rules file exists,
+        returns ``{passed: True, violation_count: 0, violations: [],
+        message: "..."}`` rather than an error — a repo without rules simply
+        has nothing to enforce.
+    """
+    from pathlib import Path
+
+    try:
+        repo_path = Path(params.repo).resolve()
+        if not (repo_path / ".git").exists():
+            return {
+                "passed": False,
+                "violation_count": 0,
+                "violations": [],
+                "error": f"Not a git repository: {repo_path}",
+            }
+
+        rp = Path(params.rules_path) if params.rules_path else repo_path / "decisions.yaml"
+        if not rp.exists():
+            return {
+                "passed": True,
+                "violation_count": 0,
+                "violations": [],
+                "message": (
+                    f"No rules file at {rp} — nothing to enforce. "
+                    "Add a decisions.yaml to define architectural rules."
+                ),
+            }
+
+        # Lazy import so the MCP server never pays the guard import cost unless
+        # this tool is actually invoked.
+        from memgentic.guard import engine
+
+        rules = engine.load_rules(rp)
+        violations = engine.run(repo_path, rules, base=params.base, staged=params.staged)
+        return {
+            "passed": not violations,
+            "violation_count": len(violations),
+            "violations": [
+                {
+                    "rule_id": v.rule_id,
+                    "message": v.message,
+                    "file": v.file,
+                    "line": v.line,
+                    "snippet": v.snippet,
+                }
+                for v in violations
+            ],
+            "repo": str(repo_path),
+            "rules_path": str(rp),
+        }
+    except Exception as exc:
+        logger.error("memgentic_guard_check.error", error=str(exc))
+        return {
+            "passed": False,
+            "violation_count": 0,
+            "violations": [],
+            "error": str(exc),
+        }
+
+
 async def _aggregate_top_topics(
     metadata_store: MetadataStore, limit: int
 ) -> list[dict[str, int | str]]:
