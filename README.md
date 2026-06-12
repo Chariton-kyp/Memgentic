@@ -324,6 +324,41 @@ make native    # Build native acceleration manually
 
 ---
 
+## Memgentic Guard
+
+**Deterministic Agentic CI.** AI coding agents write a lot of your diffs now — Guard checks those diffs against **your** architectural rules before they land. It is not an LLM judge: it parses the diff, applies rules you wrote in `decisions.yaml`, and exits non-zero on a violation. Same rules, same answer, every run.
+
+Guard only fires on **introduced** violations — a banned import that already existed on the base branch never trips the check, so dropping it into a legacy repo doesn't bury you in pre-existing noise.
+
+### 60-second quickstart
+
+```bash
+pip install memgentic
+memgentic guard init                 # writes a starter decisions.yaml (all rules commented out)
+# edit decisions.yaml — uncomment + tailor the rules you want
+memgentic guard                      # check your branch vs its base (default: main)
+memgentic guard install-hook         # block bad commits at pre-commit time
+```
+
+### Rule types
+
+| Type | What it checks | Languages / files |
+|------|----------------|-------------------|
+| `import_direction` | A layer must not import another (enforces dependency direction) | Python `import`/`from`, C# `using` |
+| `banned_import` | Specific modules/packages must not be imported | Python `import`/`from`, C# `using` |
+| `banned_dependency` | A package must not be added to a manifest | `pyproject.toml`, `package.json`, `requirements.txt`, `*.csproj`, `Directory.Packages.props` |
+| `forbidden_path` | Files matching a glob must not be touched | any path (e.g. `**/.env`, `**/*.pem`) |
+
+Each rule carries a `severity`: **`error`** fails the run (exit 1, blocks the commit/CI), **`warn`** prints but passes (exit 0). Exit codes: `0` clean, `1` error-severity violation, `2` guard/config error (not a git repo, malformed rules).
+
+Don't want to write rules by hand? `memgentic guard suggest` drafts machine-checkable rules from your `AGENTS.md` / `CLAUDE.md` / ADRs using an LLM (requires the `[intelligence]` extra). It only proposes YAML to stdout — you review and save it.
+
+Agents can self-check before proposing a diff via the MCP tool `memgentic_guard_check`.
+
+**Not yet supported (roadmap):** TypeScript/JavaScript `import` direction, and C# project-reference (`.csproj` → `.csproj`) direction. See [`docs/guard/getting-started.md`](docs/guard/getting-started.md) for the full guide.
+
+---
+
 ## Installation
 
 ### Default (local-first)

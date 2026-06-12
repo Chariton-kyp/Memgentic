@@ -20,7 +20,9 @@ _CHECKS = {
 def load_rules(path: Path) -> list[GuardRule]:
     data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     rules: list[GuardRule] = []
-    for i, r in enumerate(data.get("rules", [])):
+    # ``rules:`` with no value parses to None (e.g. the all-commented starter
+    # template from ``guard init``); treat it as an empty ruleset, not a crash.
+    for i, r in enumerate(data.get("rules") or []):
         try:
             rules.append(GuardRule(**r))
         except ValidationError as exc:
