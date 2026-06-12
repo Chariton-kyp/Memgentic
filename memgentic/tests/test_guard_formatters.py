@@ -48,3 +48,26 @@ def test_format_text_survives_markup_in_data():
     v = [Violation(rule_id="[/x]", message="bad", file="a.py", line=1, snippet="x = [not markup]")]
     out = format_text(v)  # must not raise
     assert "a.py" in out and "not markup" in out
+
+
+# ---------------------------------------------------------------------------
+# severity-aware formatting
+# ---------------------------------------------------------------------------
+
+
+def test_format_json_includes_severity():
+    v = [Violation(rule_id="r", message="m", file="a.py", severity="warn")]
+    data = json.loads(format_json(v))
+    assert data["violations"][0]["severity"] == "warn"
+
+
+def test_format_text_distinguishes_error_and_warn():
+    v = [
+        Violation(rule_id="e", message="an error", file="a.py", severity="error"),
+        Violation(rule_id="w", message="a warning", file="b.py", severity="warn"),
+    ]
+    out = format_text(v)
+    # error uses ✗, warn uses ⚠
+    assert "✗" in out
+    assert "⚠" in out
+    assert "an error" in out and "a warning" in out

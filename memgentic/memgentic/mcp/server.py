@@ -3070,10 +3070,14 @@ async def memgentic_guard_check(params: GuardCheckInput, ctx: Context) -> dict:
     (what's about to be committed); otherwise it diffs the working branch
     against ``base`` (defaults to 'main').
 
+    Each violation carries a ``severity`` of ``error`` or ``warn``. ``passed``
+    is True when there are NO error-severity violations: warn-only output is
+    advisory and does not fail the check (mirroring the CLI's exit code).
+
     Returns:
         ``{passed, violation_count, violations: [{rule_id, message, file,
-        line, snippet}], repo, rules_path}``. When no rules file exists,
-        returns ``{passed: True, violation_count: 0, violations: [],
+        line, snippet, severity}], repo, rules_path}``. When no rules file
+        exists, returns ``{passed: True, violation_count: 0, violations: [],
         message: "..."}`` rather than an error — a repo without rules simply
         has nothing to enforce.
     """
@@ -3107,8 +3111,10 @@ async def memgentic_guard_check(params: GuardCheckInput, ctx: Context) -> dict:
 
         rules = engine.load_rules(rp)
         violations = engine.run(repo_path, rules, base=params.base, staged=params.staged)
+        # `passed` means no error-severity violations; warn-only is advisory.
+        has_error = any(v.severity == "error" for v in violations)
         return {
-            "passed": not violations,
+            "passed": not has_error,
             "violation_count": len(violations),
             "violations": [
                 {
@@ -3117,6 +3123,7 @@ async def memgentic_guard_check(params: GuardCheckInput, ctx: Context) -> dict:
                     "file": v.file,
                     "line": v.line,
                     "snippet": v.snippet,
+                    "severity": v.severity,
                 }
                 for v in violations
             ],

@@ -13,6 +13,15 @@ BlobGetter = Callable[[str], str | None]
 _MANIFESTS = ("pyproject.toml", "package.json", "requirements.txt")
 
 
+def _is_csharp_manifest(path: str) -> bool:
+    """True for .NET dependency manifests (.csproj and Directory.Packages.props)."""
+    return path.endswith(".csproj") or path.endswith("Directory.Packages.props")
+
+
+def _is_manifest(path: str) -> bool:
+    return path.endswith(_MANIFESTS) or _is_csharp_manifest(path)
+
+
 def _in_scope(path: str, scope: str) -> bool:
     if scope in ("**", "*", ""):
         return True
@@ -165,6 +174,70 @@ def _build_target_pattern(target: str) -> re.Pattern[str]:
     return re.compile(rf"(?<![\w.-]){pattern}(?![\w.-])", re.IGNORECASE)
 
 
+# Match <PackageReference Include="X" .../> and Update="X"; also
+# <PackageVersion Include="X" .../> used by central package management. The
+# package ID is whatever sits inside the Include/Update attribute quotes.
+_PKG_REF = re.compile(
+    r"<Package(?:Reference|Version)\b[^>]*?\b(?:Include|Update)\s*=\s*"
+    r'"([^"]+)"',
+    re.IGNORECASE,
+)
+
+
+# Strip complete single-line XML comments (<!-- ... -->) so a commented-out
+# PackageReference does not fire. Multi-line comment spans are out of scope
+# (we only ever see added lines, never the surrounding span); a fully
+# single-line comment is by far the common case.
+_XML_COMMENT = re.compile(r"<!--.*?-->", re.DOTALL)
+
+
+def _strip_xml_comments(text: str) -> str:
+    return _XML_COMMENT.sub("", text)
+
+
+def _csproj_pkg_ids(blob: str | None) -> set[str]:
+    """Return the lowercased set of NuGet package IDs referenced in a manifest blob."""
+    if not blob:
+        return set()
+    return {m.group(1).strip().lower() for m in _PKG_REF.finditer(_strip_xml_comments(blob))}
+
+
+def _check_csharp(
+    rule: GuardRule,
+    df: DiffFile,
+    base_blob_getter: BlobGetter | None,
+) -> list[Violation]:
+    # NuGet IDs are case-insensitive; match must be EXACT (no prefix/substring).
+    targets_lower = {t.strip().lower() for t in rule.targets}
+
+    # Base-side suppression: any package ID already in the base manifest (at any
+    # version) suppresses a re-fire — version bumps stay silent.
+    base_ids: set[str] = set()
+    if base_blob_getter is not None:
+        base_ids = _csproj_pkg_ids(base_blob_getter(df.path))
+
+    out: list[Violation] = []
+    for lineno, text in sorted(df.added_lines.items()):
+        for m in _PKG_REF.finditer(_strip_xml_comments(text)):
+            pkg_id = m.group(1).strip().lower()
+            if pkg_id not in targets_lower:
+                continue
+            if pkg_id in base_ids:
+                continue
+            out.append(
+                Violation(
+                    rule_id=rule.id,
+                    message=rule.message,
+                    file=df.path,
+                    line=lineno,
+                    snippet=text.strip(),
+                    severity=rule.severity,
+                )
+            )
+            break  # one violation per line
+    return out
+
+
 def check(
     rule: GuardRule,
     diff_files: list[DiffFile],
@@ -177,7 +250,10 @@ def check(
     # does NOT match inside 'langchain-core-extras'
     targets = [(t, _build_target_pattern(t)) for t in rule.targets]
     for df in diff_files:
-        if df.is_binary or not df.path.endswith(_MANIFESTS) or not _in_scope(df.path, rule.scope):
+        if df.is_binary or not _is_manifest(df.path) or not _in_scope(df.path, rule.scope):
+            continue
+        if _is_csharp_manifest(df.path):
+            out.extend(_check_csharp(rule, df, base_blob_getter))
             continue
         # For pyproject.toml, restrict to packages actually in [project.dependencies]
         # so a banned package living in an optional extra does not fire. None means
@@ -207,6 +283,7 @@ def check(
                         file=df.path,
                         line=lineno,
                         snippet=text.strip(),
+                        severity=rule.severity,
                     )
                 )
                 break  # one violation per line

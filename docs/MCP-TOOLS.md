@@ -1221,10 +1221,14 @@ The rules are loaded from ``rules_path`` if given, otherwise from
 (what's about to be committed); otherwise it diffs the working branch
 against ``base`` (defaults to 'main').
 
+Each violation carries a ``severity`` of ``error`` or ``warn``. ``passed``
+is True when there are NO error-severity violations: warn-only output is
+advisory and does not fail the check (mirroring the CLI's exit code).
+
 Returns:
     ``{passed, violation_count, violations: [{rule_id, message, file,
-    line, snippet}], repo, rules_path}``. When no rules file exists,
-    returns ``{passed: True, violation_count: 0, violations: [],
+    line, snippet, severity}], repo, rules_path}``. When no rules file
+    exists, returns ``{passed: True, violation_count: 0, violations: [],
     message: "..."}`` rather than an error — a repo without rules simply
     has nothing to enforce.
 

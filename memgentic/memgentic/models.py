@@ -486,6 +486,7 @@ class GuardRuleType(StrEnum):
     IMPORT_DIRECTION = "import_direction"
     BANNED_DEPENDENCY = "banned_dependency"
     BANNED_IMPORT = "banned_import"
+    FORBIDDEN_PATH = "forbidden_path"
 
 
 class GuardRule(BaseModel):
@@ -536,6 +537,11 @@ class Violation(BaseModel):
     snippet: str | None = Field(
         default=None,
         description="Offending source snippet, if available",
+    )
+    severity: Literal["error", "warn"] = Field(
+        default="error",
+        description="Severity copied from the violated rule: 'error' fails the "
+        "guard (exit 1); 'warn' is printed but does not fail.",
     )
 
 

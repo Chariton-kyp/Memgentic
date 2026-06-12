@@ -6,13 +6,14 @@ import yaml
 from pydantic import ValidationError
 
 from memgentic.guard import blobs, diff
-from memgentic.guard.checks import dependencies, import_direction, imports
+from memgentic.guard.checks import dependencies, import_direction, imports, paths
 from memgentic.models import GuardRule, GuardRuleType, Violation
 
 _CHECKS = {
     GuardRuleType.IMPORT_DIRECTION: import_direction.check,
     GuardRuleType.BANNED_DEPENDENCY: dependencies.check,
     GuardRuleType.BANNED_IMPORT: imports.check,
+    GuardRuleType.FORBIDDEN_PATH: paths.check,
 }
 
 

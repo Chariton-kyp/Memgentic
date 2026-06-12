@@ -152,6 +152,87 @@ def test_explicit_missing_rules_on_guard_rules_exits_2(tmp_path):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# severity-aware exit codes
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def repo_with_path_rules(tmp_path):
+    """Repo whose decisions.yaml has an error-severity and a warn-severity
+    forbidden_path rule."""
+    repo = tmp_path / "p"
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+    _run(repo, "config", "user.email", "t@t.t")
+    _run(repo, "config", "user.name", "t")
+    (repo / "readme.txt").write_text("hi\n", encoding="utf-8")
+    (repo / "decisions.yaml").write_text(
+        "rules:\n"
+        "  - id: no-env\n"
+        "    type: forbidden_path\n"
+        '    targets: ["**/.env"]\n'
+        '    message: "never commit secrets"\n'
+        "    severity: error\n"
+        "  - id: no-dapr\n"
+        "    type: forbidden_path\n"
+        '    targets: ["dapr/**"]\n'
+        '    message: "dapr config is generated"\n'
+        "    severity: warn\n",
+        encoding="utf-8",
+    )
+    _run(repo, "add", "readme.txt", "decisions.yaml")
+    _run(repo, "commit", "-m", "base")
+    _run(repo, "checkout", "-b", "feat")
+    return repo
+
+
+def test_warn_only_violation_exits_0_but_prints(repo_with_path_rules):
+    repo = repo_with_path_rules
+    (repo / "dapr").mkdir()
+    (repo / "dapr" / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    _run(repo, "add", "dapr/config.yaml")
+    _run(repo, "commit", "-m", "add dapr config")
+    res = CliRunner().invoke(main, ["guard", "--repo", str(repo), "--base", "main"])
+    assert res.exit_code == 0
+    assert "dapr/config.yaml" in res.output  # printed despite exit 0
+
+
+def test_error_violation_exits_1(repo_with_path_rules):
+    repo = repo_with_path_rules
+    (repo / ".env").write_text("SECRET=abc\n", encoding="utf-8")
+    _run(repo, "add", ".env")
+    _run(repo, "commit", "-m", "add env")
+    res = CliRunner().invoke(main, ["guard", "--repo", str(repo), "--base", "main"])
+    assert res.exit_code == 1
+    assert ".env" in res.output
+
+
+def test_mixed_severity_exits_1(repo_with_path_rules):
+    repo = repo_with_path_rules
+    (repo / ".env").write_text("SECRET=abc\n", encoding="utf-8")
+    (repo / "dapr").mkdir()
+    (repo / "dapr" / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    _run(repo, "add", ".env", "dapr/config.yaml")
+    _run(repo, "commit", "-m", "add both")
+    res = CliRunner().invoke(main, ["guard", "--repo", str(repo), "--base", "main"])
+    assert res.exit_code == 1
+    assert ".env" in res.output and "dapr/config.yaml" in res.output
+
+
+def test_warn_only_json_includes_severity(repo_with_path_rules):
+    repo = repo_with_path_rules
+    (repo / "dapr").mkdir()
+    (repo / "dapr" / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    _run(repo, "add", "dapr/config.yaml")
+    _run(repo, "commit", "-m", "add dapr config")
+    res = CliRunner().invoke(
+        main, ["guard", "--repo", str(repo), "--base", "main", "--format", "json"]
+    )
+    assert res.exit_code == 0
+    assert '"severity": "warn"' in res.output
+
+
 def test_master_only_repo_hints_base_flag(tmp_path):
     """When 'main' doesn't exist and --base was not passed, the error must hint --base."""
     repo = tmp_path / "m"
