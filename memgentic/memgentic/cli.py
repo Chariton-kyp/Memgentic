@@ -1155,6 +1155,65 @@ def guard_rules(ctx, repo, rules_path):
         ctx.exit(2)
 
 
+@guard.command("suggest")
+@click.option("--repo", default=".", help="Repository path to scan for prose rule files")
+@click.option(
+    "--model",
+    default=None,
+    help=(
+        "Override the LLM for this run. Same routing as dream's --model: "
+        "'claude-haiku-4-5', 'gemini-3.1-flash-lite', 'gemma4:e4b', "
+        "'qwen3.6:35b-a3b'. Defaults to the configured provider chain "
+        "(Gemini -> OpenAI-compat -> Ollama)."
+    ),
+)
+@click.pass_context
+def guard_suggest(ctx, repo, model):
+    """LLM-assisted rule DISCOVERY — propose decisions.yaml rules for review.
+
+    \b
+    Reads the target repo's prose rule files (AGENTS.md, CLAUDE.md, cursor
+    rules, ADRs, ...) and PROPOSES machine-checkable guard rules as
+    ready-to-paste YAML on stdout. It NEVER enforces and NEVER writes any
+    file — you review the output and save it as decisions.yaml yourself.
+
+    \b
+    Requires the [intelligence] extra and a reachable LLM provider. Ollama
+    works out of the box when running.
+
+    \b
+    Examples:
+      memgentic guard suggest --repo .
+      memgentic guard suggest --repo ../other --model qwen3.6:35b-a3b
+    """
+    import asyncio
+    from pathlib import Path
+
+    from memgentic.guard.suggest import SuggestUnavailableError, render_yaml, suggest_rules
+
+    repo_path = Path(repo).resolve()
+    try:
+        result = asyncio.run(suggest_rules(repo_path, settings=settings, model=model))
+    except SuggestUnavailableError as exc:
+        click.echo(str(exc), err=True)
+        ctx.exit(2)
+    except (click.exceptions.Exit, click.exceptions.Abort):
+        raise
+    except Exception as exc:  # noqa: BLE001 — advisory tool, surface cleanly
+        click.echo(f"guard suggest error: {exc}", err=True)
+        ctx.exit(2)
+
+    # Advisory summary goes to stderr so stdout stays a clean, pasteable YAML.
+    click.echo(
+        f"# scanned {len(result.sources_found)} source file(s); "
+        f"proposed {result.total_proposed} rule(s) "
+        f"({len(result.warnings)} dropped). Review before enforcing.",
+        err=True,
+    )
+    click.echo(render_yaml(result))
+    ctx.exit(0)
+
+
 # ---------------------------------------------------------------------------
 # memgentic dream ...
 # ---------------------------------------------------------------------------
