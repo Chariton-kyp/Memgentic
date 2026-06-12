@@ -37,3 +37,31 @@ def test_empty_targets_rejected():
     """GuardRule with targets=[] must raise a validation error."""
     with pytest.raises(ValidationError):
         GuardRule(id="x", type="banned_import", targets=[], message="m")
+
+
+# ---------------------------------------------------------------------------
+# C# / forbidden-path additions
+# ---------------------------------------------------------------------------
+
+
+def test_forbidden_path_rule_type_exists():
+    """The forbidden_path rule type must be loadable from a decisions file."""
+    r = GuardRule(
+        id="no-env",
+        type="forbidden_path",
+        targets=["**/.env"],
+        message="never commit secrets",
+    )
+    assert r.type is GuardRuleType.FORBIDDEN_PATH
+    assert r.type.value == "forbidden_path"
+
+
+def test_violation_severity_defaults_to_error():
+    """Violation.severity defaults to 'error' for backward compatibility."""
+    v = Violation(rule_id="r1", message="bad", file="a.py")
+    assert v.severity == "error"
+
+
+def test_violation_severity_accepts_warn():
+    v = Violation(rule_id="r1", message="bad", file="a.py", severity="warn")
+    assert v.severity == "warn"

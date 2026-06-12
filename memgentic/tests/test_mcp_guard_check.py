@@ -143,3 +143,38 @@ async def test_guard_check_explicit_rules_path(violating_repo, ctx):
     )
     assert result["passed"] is False
     assert result["rules_path"].endswith("alt_rules.yaml")
+
+
+WARN_RULES = """\
+rules:
+  - id: no-dapr
+    type: forbidden_path
+    targets: ["dapr/**"]
+    message: "dapr config is generated"
+    severity: warn
+"""
+
+
+async def test_guard_check_warn_only_passes_with_severity(tmp_path, ctx):
+    """Warn-only violations: passed=True, but the violation is still reported
+    with its severity."""
+    repo = tmp_path / "w"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+    _git(repo, "config", "user.email", "t@t.t")
+    _git(repo, "config", "user.name", "t")
+    (repo / "decisions.yaml").write_text(WARN_RULES, encoding="utf-8")
+    (repo / "readme.txt").write_text("hi\n", encoding="utf-8")
+    _git(repo, "add", "decisions.yaml", "readme.txt")
+    _git(repo, "commit", "-m", "base")
+    _git(repo, "checkout", "-b", "feat")
+    (repo / "dapr").mkdir()
+    (repo / "dapr" / "config.yaml").write_text("x: 1\n", encoding="utf-8")
+    _git(repo, "add", "dapr/config.yaml")
+    _git(repo, "commit", "-m", "add dapr config")
+
+    result = await memgentic_guard_check(GuardCheckInput(repo=str(repo), base="main"), ctx)
+    assert result["passed"] is True  # warn-only does not fail
+    assert result["violation_count"] == 1
+    assert result["violations"][0]["severity"] == "warn"
+    assert result["violations"][0]["file"] == "dapr/config.yaml"

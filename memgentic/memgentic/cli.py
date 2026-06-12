@@ -1121,7 +1121,9 @@ def guard(ctx, repo, base, staged, rules_path, fmt):
     else:
         output = formatters.format_text(violations)
     click.echo(output)
-    ctx.exit(1 if violations else 0)
+    # Only error-severity violations fail the guard; warn-only output exits 0.
+    has_error = any(v.severity == "error" for v in violations)
+    ctx.exit(1 if has_error else 0)
 
 
 @guard.command("rules")
