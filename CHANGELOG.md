@@ -4,6 +4,23 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-06-12 — Guard Goes Polyglot: C# Support, LLM Rule Discovery, First-Run UX
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
+
+### Added
+
+- **C# support for Guard** — `banned_import` now checks C# `using` directives (`using` / `global using` / `using static` / alias form; precise enough to ignore `using var`, using-statements, comments and strings); `banned_dependency` now checks NuGet `<PackageReference>` / `<PackageVersion>` in `.csproj` and `Directory.Packages.props` with exact, case-insensitive package-ID matching and base-side suppression (version bumps stay silent).
+- **`forbidden_path` check** — block or warn when a diff touches protected paths (secrets like `**/.env` and `appsettings.Production.json`, review-carefully zones); gitignore-style matching catches root-level files too.
+- **Severity-aware exit codes** — `severity: warn` rules print but never block; only `error`-severity violations exit 1 (pre-commit/CI safe for advisory rules).
+- **`memgentic guard suggest`** — optional LLM-assisted rule discovery: reads a repo's prose rule files (AGENTS.md, CLAUDE.md, .cursor/rules, ADRs…) and proposes ready-to-paste `decisions.yaml` rules with source citations and confidence scores. Advisory-only: never writes files, never enforces; behind the `[intelligence]` extra (Ollama works out of the box; stronger cloud models recommended for quality).
+- **First-run UX** — new `memgentic guard init` (commented starter `decisions.yaml` covering all four rule types) and `memgentic guard install-hook` (one-command pre-commit hook with `--force` backup and `--uninstall`; honors `core.hooksPath`; fail-open if the interpreter disappears). Guard now has a README section and a full guide at `docs/guard/getting-started.md`.
+
+### Fixed
+
+- Guard output no longer crashes on legacy-codepage consoles (e.g. Greek cp1253) — automatic ASCII fallback (`[OK]`/`[X]`/`[WARN]`) when the stream can't encode the Unicode glyphs
+- `engine.load_rules` treats an empty `rules:` key as no rules instead of erroring
+
 ## [0.10.0] — 2026-06-11 — Project Filter + Auto-Dream + Guard in the Daily Flow
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
