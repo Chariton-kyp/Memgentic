@@ -1119,7 +1119,12 @@ def guard(ctx, repo, base, staged, rules_path, fmt):
     if fmt == "json":
         output = formatters.format_json(violations)
     else:
-        output = formatters.format_text(violations)
+        # Fall back to ASCII markers when stdout is a legacy codepage (e.g. a
+        # Greek Windows cp1253 console, or a redirected/hook stream) that can't
+        # encode the ✓/✗/⚠ glyphs — otherwise click.echo raises
+        # UnicodeEncodeError and the guard crashes instead of reporting.
+        ascii_only = not formatters.stream_supports_unicode(sys.stdout)
+        output = formatters.format_text(violations, ascii_only=ascii_only)
     click.echo(output)
     # Only error-severity violations fail the guard; warn-only output exits 0.
     has_error = any(v.severity == "error" for v in violations)
@@ -1211,6 +1216,210 @@ def guard_suggest(ctx, repo, model):
         err=True,
     )
     click.echo(render_yaml(result))
+    ctx.exit(0)
+
+
+# Starter ``decisions.yaml`` written by ``guard init``. Every example rule is
+# COMMENTED OUT so nothing is enforced until the user opts in — the file parses
+# to an empty ruleset on day one. Prose/header lines use ``##`` so a simple
+# "strip a leading '# '" uncomment leaves them as comments; example rule lines
+# use ``# `` so the same strip turns them into live YAML.
+_GUARD_INIT_TEMPLATE = """\
+## Memgentic Guard — architectural rules for THIS repo.
+##
+## `memgentic guard` diffs your branch against its base and fails only on
+## rules you define here. Nothing below is enforced yet: every example is
+## commented out. Uncomment + edit the ones you want, then run `memgentic guard`.
+##
+## Tip: `memgentic guard suggest` can draft rules from your AGENTS.md / CLAUDE.md
+## / ADRs using an LLM ([intelligence] extra). Review its output before saving.
+##
+## Four rule types (severity: error blocks the commit/CI, warn just prints):
+##   import_direction  — forbid a layer importing another (enforces dependency
+##                        direction). Python + C# (`using`).
+##   banned_import     — forbid importing specific modules/packages in code.
+##                        Python `import`/`from`, C# `using`.
+##   banned_dependency — forbid adding a package to a manifest (pyproject.toml,
+##                        package.json, requirements.txt, *.csproj,
+##                        Directory.Packages.props).
+##   forbidden_path    — forbid touching files matching a glob (secrets,
+##                        generated code, vendored dirs).
+
+rules:
+# - id: no-reverse-dependency
+#   type: import_direction
+#   scope: "core/**"                # only files under core/ are checked
+#   targets: ["app", "web"]         # core/ must NOT import app or web
+#   message: "core is the dependency root — it must not import app/web layers."
+#   severity: error
+#
+# - id: no-requests
+#   type: banned_import
+#   scope: "**"                     # all files (default)
+#   targets: ["requests"]           # ban `import requests` — use httpx
+#   message: "Use httpx, not requests (async-friendly, already a dependency)."
+#   severity: error
+#   # C# note: targets match `using` namespaces too, e.g. targets: ["MediatR"]
+#   #          bans `using MediatR;` in any .cs file in scope.
+#
+# - id: no-moment
+#   type: banned_dependency
+#   scope: "**"
+#   targets: ["moment"]             # ban adding `moment` to package.json
+#   message: "moment is in maintenance mode — use date-fns or Temporal."
+#   severity: error
+#
+# - id: no-committed-secrets
+#   type: forbidden_path
+#   targets: ["**/.env", "**/*.pem"]   # never commit env files or private keys
+#   message: "Secrets must not be committed. Use a secret manager."
+#   severity: error
+"""
+
+
+@guard.command("init")
+@click.option("--repo", default=".", help="Repository path to write decisions.yaml into")
+@click.pass_context
+def guard_init(ctx, repo):
+    """Write a STARTER decisions.yaml (all rules commented out, ready to edit).
+
+    \b
+    Honest template — NOT auto-discovery. It scaffolds fully-commented examples
+    for all four rule types (import_direction, banned_import, banned_dependency,
+    forbidden_path) with severity examples and a C# note. Nothing is enforced
+    until you uncomment and edit the rules you want.
+
+    \b
+    Refuses (exit 2) if decisions.yaml already exists. For LLM-assisted drafting
+    from your existing AGENTS.md / CLAUDE.md / ADRs, see `guard suggest`.
+    """
+    from pathlib import Path
+
+    repo_path = Path(repo).resolve()
+    target = repo_path / "decisions.yaml"
+    if target.exists():
+        click.echo(
+            f"decisions.yaml already exists at {target} — refusing to overwrite. "
+            "Edit it directly, or `guard suggest` for LLM-drafted rules.",
+            err=True,
+        )
+        ctx.exit(2)
+    target.write_text(_GUARD_INIT_TEMPLATE, encoding="utf-8")
+    click.echo(f"Wrote starter rules to {target}")
+    click.echo("Next: uncomment + edit the rules you want, then run `memgentic guard`.")
+    ctx.exit(0)
+
+
+# Marker that identifies a pre-commit hook installed by ``guard install-hook``.
+# Used to decide whether ``--uninstall`` may safely remove it.
+_GUARD_HOOK_MARKER = "# memgentic-guard-hook (managed by `memgentic guard install-hook`)"
+
+
+def _guard_hook_body(python_exe: str) -> str:
+    """POSIX-sh pre-commit hook that runs the staged guard via this interpreter.
+
+    Fails OPEN (exit 0 with a note) if the interpreter is gone, so a relocated
+    venv never wedges the user's commits. Sets PYTHONIOENCODING=utf-8 because
+    hooks run in whatever console the user has (often a legacy codepage).
+    """
+    # python_exe is embedded literally; quote for sh safety.
+    return (
+        "#!/bin/sh\n"
+        f"{_GUARD_HOOK_MARKER}\n"
+        "# Edit rules in decisions.yaml; "
+        "run `memgentic guard install-hook --uninstall` to remove.\n"
+        'PYTHON="' + python_exe.replace('"', '\\"') + '"\n'
+        'if [ ! -x "$PYTHON" ] && ! command -v "$PYTHON" >/dev/null 2>&1; then\n'
+        '  echo "memgentic guard: interpreter $PYTHON not found — skipping (fail-open)." >&2\n'
+        "  exit 0\n"
+        "fi\n"
+        'PYTHONIOENCODING=utf-8 "$PYTHON" -m memgentic.cli guard --staged\n'
+    )
+
+
+def _resolve_hooks_dir(repo_path):
+    """Return the directory git uses for hooks, honoring core.hooksPath."""
+    import subprocess
+    from pathlib import Path
+
+    try:
+        res = subprocess.run(
+            ["git", "-C", str(repo_path), "config", "--get", "core.hooksPath"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError:
+        res = None
+    if res is not None and res.returncode == 0 and res.stdout.strip():
+        hp = Path(res.stdout.strip())
+        return hp if hp.is_absolute() else (repo_path / hp)
+    return repo_path / ".git" / "hooks"
+
+
+@guard.command("install-hook")
+@click.option("--repo", default=".", help="Repository to install the pre-commit hook into")
+@click.option("--force", is_flag=True, help="Back up an existing hook to pre-commit.backup")
+@click.option("--uninstall", is_flag=True, help="Remove the guard hook (only if it's ours)")
+@click.pass_context
+def guard_install_hook(ctx, repo, force, uninstall):
+    """Install (or remove) a pre-commit hook that runs `guard --staged`.
+
+    \b
+    The hook invokes THIS interpreter on your staged diff before each commit,
+    blocking the commit on any error-severity violation. Honors core.hooksPath.
+
+    \b
+    If a pre-commit hook already exists, install refuses (exit 2) unless --force
+    (which backs the old one up to pre-commit.backup). --uninstall removes the
+    hook only when it carries our marker, so foreign hooks are never touched.
+    """
+    import sys as _sys
+    from pathlib import Path
+
+    repo_path = Path(repo).resolve()
+    if not (repo_path / ".git").exists():
+        click.echo(f"Not a git repository: {repo_path}", err=True)
+        ctx.exit(2)
+
+    hooks_dir = _resolve_hooks_dir(repo_path)
+    hook = hooks_dir / "pre-commit"
+
+    if uninstall:
+        if not hook.exists():
+            click.echo("No pre-commit hook to remove.")
+            ctx.exit(0)
+        if _GUARD_HOOK_MARKER not in hook.read_text(encoding="utf-8"):
+            click.echo(
+                f"{hook} is not a memgentic guard hook — refusing to remove it.",
+                err=True,
+            )
+            ctx.exit(2)
+        hook.unlink()
+        click.echo(f"Removed guard hook at {hook}")
+        ctx.exit(0)
+
+    hooks_dir.mkdir(parents=True, exist_ok=True)
+    if hook.exists():
+        existing = hook.read_text(encoding="utf-8")
+        is_ours = _GUARD_HOOK_MARKER in existing
+        if not force and not is_ours:
+            click.echo(
+                f"A pre-commit hook already exists at {hook}. "
+                "Re-run with --force to back it up (pre-commit.backup) and replace it.",
+                err=True,
+            )
+            ctx.exit(2)
+        if not is_ours:  # --force on a foreign hook → back it up first
+            backup = hooks_dir / "pre-commit.backup"
+            backup.write_text(existing, encoding="utf-8")
+            click.echo(f"Backed up existing hook to {backup}")
+
+    hook.write_text(_guard_hook_body(_sys.executable), encoding="utf-8")
+    with contextlib.suppress(OSError):
+        # Make executable where the filesystem honors the bit (POSIX); harmless on Windows.
+        hook.chmod(0o755)
+    click.echo(f"Installed guard pre-commit hook at {hook}")
     ctx.exit(0)
 
 
