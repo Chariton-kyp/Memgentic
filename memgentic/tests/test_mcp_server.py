@@ -231,6 +231,33 @@ async def test_memgentic_recall_error_handling(ctx, mock_embedder):
     assert "Error searching memories" in result
 
 
+async def test_recall_excludes_raw_exchange_by_default(ctx, mock_vector_store):
+    """With no explicit content_types, recall filters out raw_exchange noise."""
+    await memgentic_recall(RecallInput(query="anything relevant"), ctx)
+
+    session_config = mock_vector_store.search.call_args.args[1]
+    assert session_config.exclude_content_types == [ContentType.RAW_EXCHANGE]
+
+
+async def test_recall_include_raw_exchange_escape(ctx, mock_vector_store):
+    """include_raw_exchange=True turns off the default exclusion."""
+    await memgentic_recall(RecallInput(query="anything relevant", include_raw_exchange=True), ctx)
+
+    session_config = mock_vector_store.search.call_args.args[1]
+    assert not session_config.exclude_content_types
+
+
+async def test_recall_explicit_content_types_searches_those(ctx, mock_vector_store):
+    """An explicit content_types list is an intentional scope — no auto-exclude."""
+    await memgentic_recall(
+        RecallInput(query="anything relevant", content_types=["raw_exchange"]), ctx
+    )
+
+    session_config = mock_vector_store.search.call_args.args[1]
+    assert session_config.include_content_types == [ContentType.RAW_EXCHANGE]
+    assert not session_config.exclude_content_types
+
+
 # --- memgentic_sources ---
 
 

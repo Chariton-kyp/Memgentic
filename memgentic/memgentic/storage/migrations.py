@@ -252,6 +252,20 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "CREATE INDEX IF NOT EXISTS idx_dream_patches_status ON dream_patches(status)",
         ],
     ),
+    (
+        11,
+        "retention — updated_at bookkeeping for GC",
+        [
+            # Last-modified timestamp, stamped by save_memory / save_memories_batch
+            # / update_memory_status. The retention GC sweep uses
+            # COALESCE(updated_at, created_at) as the "archived/superseded at"
+            # anchor to decide when a soft-deleted row is past its grace period.
+            # Legacy rows keep updated_at = NULL and fall back to created_at.
+            "ALTER TABLE memories ADD COLUMN updated_at TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_memories_status_updated "
+            "ON memories(status, updated_at)",
+        ],
+    ),
 ]
 
 SCHEMA_VERSION_TABLE = """

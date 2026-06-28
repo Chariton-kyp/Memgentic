@@ -461,6 +461,11 @@ class SqliteVecBackend:
             clauses.append(f"p.content_type IN ({placeholders})")
             params.extend(ct.value for ct in config.include_content_types)
 
+        if config.exclude_content_types:
+            placeholders = ", ".join("?" for _ in config.exclude_content_types)
+            clauses.append(f"p.content_type NOT IN ({placeholders})")
+            params.extend(ct.value for ct in config.exclude_content_types)
+
         if config.min_confidence > 0:
             clauses.append("p.confidence >= ?")
             params.append(config.min_confidence)

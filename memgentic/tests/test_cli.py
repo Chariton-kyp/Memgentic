@@ -61,7 +61,13 @@ class TestCLIHelp:
     def test_serve_watch_falls_back_to_mcp_only_when_lock_held(self):
         """If another process holds the daemon lock, --watch must warn and
         continue as MCP-only — never crash, never silently drop the watcher.
+
+        The lock-acquisition path only runs for non-Qdrant backends (Qdrant
+        server supports concurrent writers, so no exclusive lock is needed).
+        Pin the backend to sqlite_vec so this test exercises the fallback
+        regardless of the configured default.
         """
+        from memgentic.config import StorageBackend
         from memgentic.utils.process_lock import ProcessLockError
 
         runner = CliRunner()
@@ -70,7 +76,13 @@ class TestCLIHelp:
             patch("memgentic.mcp.server.run_server") as run_server,
             patch("memgentic.mcp.server.run_server_with_watcher") as run_fused,
             patch("memgentic.observability.init_observability"),
+            patch("memgentic.cli.settings") as mock_settings,
         ):
+            # A real Path instance is needed for the isinstance check in cli.py
+            mock_settings.data_dir = Path("/tmp/memgentic-test")
+            mock_settings.storage_backend = StorageBackend.SQLITE_VEC
+            mock_settings.otlp_endpoint = None
+            mock_settings.enable_observability = False
             acquire.side_effect = ProcessLockError("pid=1234 role=daemon")
             result = runner.invoke(main, ["serve", "--watch"])
 
@@ -158,6 +170,98 @@ class TestSourcesCommand:
                 assert "claude_code" in result.output
                 assert "42" in result.output
                 assert "chatgpt" in result.output
+
+
+class TestRetentionCLI:
+    """Tests for `memgentic gc` and `memgentic clean` (W4)."""
+
+    def test_gc_help(self):
+        result = CliRunner().invoke(main, ["gc", "--help"])
+        assert result.exit_code == 0
+        assert "--apply" in result.output
+        assert "Pinned and mcp_tool" in result.output
+
+    def test_clean_help(self):
+        result = CliRunner().invoke(main, ["clean", "--help"])
+        assert result.exit_code == 0
+        assert "--apply" in result.output
+        assert "duplicate" in result.output.lower()
+
+    def test_clean_dry_run_reports_without_mutating(self, tmp_path: Path, monkeypatch):
+        """`clean` (no --apply) reports duplicates but archives nothing."""
+        import asyncio
+
+        from memgentic import cli as cli_module
+        from memgentic.models import (
+            CaptureMethod,
+            ContentType,
+            Memory,
+            MemoryStatus,
+            Platform,
+            SourceMetadata,
+        )
+        from memgentic.storage.metadata import MetadataStore
+
+        db_path = tmp_path / "memgentic.db"
+
+        def _mem(mid: str) -> Memory:
+            return Memory(
+                id=mid,
+                content="We use Valkey for the cache layer.",
+                content_type=ContentType.FACT,
+                source=SourceMetadata(
+                    platform=Platform.CLAUDE_CODE, capture_method=CaptureMethod.AUTO_DAEMON
+                ),
+            )
+
+        async def _seed():
+            store = MetadataStore(db_path)
+            await store.initialize()
+            await store.save_memory(_mem("dup-a"))
+            await store.save_memory(_mem("dup-b"))
+            await store.close()
+
+        asyncio.run(_seed())
+
+        monkeypatch.setattr(cli_module.settings, "data_dir", tmp_path)
+        # Avoid spinning a real vector backend in the dry-run path.
+        monkeypatch.setattr(
+            "memgentic.storage.vectors.VectorStore",
+            lambda *a, **kw: _DummyVectorStore(),
+        )
+
+        result = CliRunner().invoke(main, ["clean"])
+        assert result.exit_code == 0, result.output
+        assert "Total to archive" in result.output
+        assert "Dry run" in result.output
+
+        async def _check():
+            store = MetadataStore(db_path)
+            await store.initialize()
+            try:
+                a = await store.get_memory("dup-a")
+                b = await store.get_memory("dup-b")
+                assert a is not None and b is not None
+                # Nothing archived on a dry run.
+                assert a.status == MemoryStatus.ACTIVE
+                assert b.status == MemoryStatus.ACTIVE
+            finally:
+                await store.close()
+
+        asyncio.run(_check())
+
+
+class _DummyVectorStore:
+    """Minimal async no-op vector store for CLI dry-run tests."""
+
+    async def initialize(self, *args, **kwargs):  # noqa: D401
+        return None
+
+    async def delete_memory(self, *args, **kwargs):
+        return None
+
+    async def close(self):
+        return None
 
 
 class TestRememberCommand:
@@ -347,6 +451,9 @@ class TestSearchCommand:
             ),
         ):
             mock_settings.sqlite_path = tmp_path / "memgentic.db"
+            # Reranker is OFF by default; a bare MagicMock attribute would be
+            # truthy and wrongly trigger the (optional) rerank path.
+            mock_settings.enable_reranker = False
             runner = CliRunner()
             result = runner.invoke(main, ["search", "nonexistent query"])
             assert result.exit_code == 0

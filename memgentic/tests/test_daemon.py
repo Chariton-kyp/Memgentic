@@ -420,6 +420,8 @@ class TestContextFileAutoUpdate:
         s.idle_threshold = 0.05
         s.watch_interval = 0.01
         s.skill_sync_interval = 0  # 0 → skip skill sync loop
+        s.gc_interval_seconds = 0  # 0 → skip retention GC loop
+        s.hard_delete_archived_after_days = 0
         return s
 
     async def test_daemon_writes_context_file_when_dirty(self, tmp_path):
@@ -508,5 +510,54 @@ class TestContextFileAutoUpdate:
             await daemon.start()
             try:
                 assert daemon._context_update_task is None
+            finally:
+                await daemon.stop()
+
+
+class TestRetentionGCLoop:
+    """W4: the daemon's throttled GC loop drives run_gc(apply=True)."""
+
+    async def test_gc_loop_invokes_run_gc_with_apply(self, monkeypatch):
+        from memgentic.processing.retention import GCReport
+
+        s = MagicMock()
+        s.gc_interval_seconds = 1
+        s.hard_delete_archived_after_days = 30
+        daemon = MemgenticDaemon(
+            s, MagicMock(), [], metadata_store=MagicMock(), vector_store=MagicMock()
+        )
+        daemon._running = True
+
+        captured: dict = {}
+
+        async def fake_run_gc(**kwargs):
+            captured.update(kwargs)
+            daemon._running = False  # stop after one sweep
+            return GCReport(grace_days=30, cutoff_iso="", hard_deleted=2)
+
+        async def fast_sleep(_seconds):
+            return None
+
+        monkeypatch.setattr("memgentic.processing.retention.run_gc", fake_run_gc)
+        monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+
+        await daemon._gc_loop()
+
+        assert captured.get("apply") is True
+        assert captured.get("metadata_store") is daemon._metadata_store
+        assert captured.get("vector_store") is daemon._vector_store
+
+    async def test_gc_task_not_started_when_interval_zero(self):
+        s = MagicMock()
+        s.gc_interval_seconds = 0
+        s.hard_delete_archived_after_days = 30
+        s.enable_context_file_auto_update = False
+        s.skill_sync_interval = 0
+        daemon = MemgenticDaemon(s, AsyncMock(), [], metadata_store=MagicMock())
+        with patch("memgentic.daemon.watcher.Observer"):
+            daemon._observer = MagicMock()
+            await daemon.start()
+            try:
+                assert daemon._gc_task is None
             finally:
                 await daemon.stop()

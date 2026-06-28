@@ -28,6 +28,7 @@ Resources (readable data endpoints):
 
 from __future__ import annotations
 
+import os
 from collections import Counter
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -48,7 +49,12 @@ from memgentic.mcp.schemas import (
 from memgentic.models import ContentType, MemoryStatus, Platform, SessionConfig
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
+from memgentic.processing.project import (
+    is_global_project,
+    resolve_current_project,
+)
 from memgentic.processing.search_basic import basic_search
+from memgentic.retrieval.reranker import LlamaCppReranker, Reranker
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
@@ -186,6 +192,19 @@ async def app_lifespan(server: FastMCP):
     vector_store = VectorStore(settings)
     embedder = Embedder(settings)
 
+    # Optional cross-encoder reranker (llama-server). Constructed once so the
+    # short-lived "down" cache survives across recall calls; a no-op when
+    # disabled. Never blocks startup — it only connects lazily on first use.
+    reranker: Reranker | None = (
+        LlamaCppReranker.from_settings(settings) if settings.enable_reranker else None
+    )
+    if reranker is not None:
+        logger.info(
+            "mcp_server.reranker_enabled",
+            url=settings.reranker_url,
+            model=settings.reranker_model,
+        )
+
     # Optional: LLM client and knowledge graph (require [intelligence] extras)
     llm_client = None
     graph = None
@@ -232,6 +251,7 @@ async def app_lifespan(server: FastMCP):
         "embedder": embedder,
         "pipeline": pipeline,
         "graph": graph,
+        "reranker": reranker,
     }
 
     # If ``run_server_with_watcher`` asked to fuse the daemon, start it now
@@ -254,6 +274,8 @@ async def app_lifespan(server: FastMCP):
         if graph:
             await graph.save()
         await embedder.close()
+        if isinstance(reranker, LlamaCppReranker):
+            await reranker.aclose()
         await metadata_store.close()
         await vector_store.close()
 
@@ -310,7 +332,27 @@ class RecallInput(BaseModel):
         default=None,
         description=(
             "Filter by content type: decision, code_snippet, fact, "
-            "preference, learning, action_item, conversation_summary"
+            "preference, learning, action_item, conversation_summary. "
+            "When omitted, recall excludes low-signal 'raw_exchange' "
+            "memories by default (see include_raw_exchange)."
+        ),
+    )
+    include_raw_exchange: bool = Field(
+        default=False,
+        description=(
+            "Include verbatim 'raw_exchange' turns in results. Off by "
+            "default because raw exchanges are noisy; set True (or pass an "
+            "explicit content_types list) to search them."
+        ),
+    )
+    min_relevance: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Override the relevance floor (0-1). Results below it are "
+            "dropped. Defaults to the configured recall_min_relevance "
+            "(≈0.15); lower it to widen recall, raise it to tighten."
         ),
     )
     limit: int = Field(
@@ -604,6 +646,76 @@ def _get_effective_config(
     return config
 
 
+def _session_project(config: SessionConfig) -> str | None:
+    """Return the single configured project key for a session, if unambiguous.
+
+    ``configure_session`` stores ``include_projects`` as a list; for
+    current-project resolution we only treat it as "the connection's project"
+    when exactly one key is set (multiple keys = an explicit multi-project
+    filter, not a single current-project scope).
+
+    Returns ``None`` for multi-project sessions (len > 1) so ``memgentic_remember``
+    falls back to the env/cwd-resolved project rather than silently picking one.
+    """
+    projects = config.include_projects or []
+    return projects[0] if len(projects) == 1 else None
+
+
+async def _execute_recall(
+    *,
+    query: str,
+    config: SessionConfig,
+    limit: int,
+    min_relevance: float,
+    metadata_store: MetadataStore,
+    vector_store: VectorStore,
+    embedder: Embedder,
+    graph,
+    reranker: Reranker | None = None,
+) -> list[dict]:
+    """Run the configured recall backend (hybrid when intelligence is installed)."""
+    if HAS_INTELLIGENCE and hybrid_search is not None:
+        return await hybrid_search(
+            query=query,
+            metadata_store=metadata_store,
+            vector_store=vector_store,
+            embedder=embedder,
+            graph=graph,
+            session_config=config,
+            limit=limit,
+            settings=settings,
+            min_relevance=min_relevance,
+            enable_feature_boost=settings.enable_recall_feature_boost,
+            reranker=reranker,
+        )
+    return await basic_search(
+        query=query,
+        metadata_store=metadata_store,
+        vector_store=vector_store,
+        embedder=embedder,
+        session_config=config,
+        limit=limit,
+        min_relevance=min_relevance,
+        settings=settings,
+        reranker=reranker,
+    )
+
+
+def _merge_recall_results(primary: list[dict], extra: list[dict], limit: int) -> list[dict]:
+    """Merge two recall result lists, keeping ``primary`` first, de-duping by id."""
+    merged = list(primary)
+    seen = {r.get("id") for r in primary}
+    for r in extra:
+        rid = r.get("id")
+        if rid in seen:
+            continue
+        merged.append(r)
+        seen.add(rid)
+        if len(merged) >= limit:
+            break
+    return merged[:limit]
+
+
 def _format_memory_md(
     memory_data: dict, score: float | None = None, detail: str = "preview"
 ) -> str:
@@ -704,6 +816,7 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
         vector_store: VectorStore = state["vector_store"]
         metadata_store: MetadataStore = state["metadata_store"]
         graph = state.get("graph")
+        reranker: Reranker | None = state.get("reranker")
 
         # Build effective filter config
         config = _get_effective_config(
@@ -716,26 +829,84 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
             exclude_projects=params.exclude_projects,
         )
 
-        # Use hybrid search if intelligence installed, otherwise basic vector search
-        if HAS_INTELLIGENCE and hybrid_search is not None:
-            results = await hybrid_search(
+        # Default-exclude low-signal raw_exchange turns. Only applies when the
+        # caller did NOT name explicit content types (an explicit list is an
+        # intentional scope) and did not opt back in via include_raw_exchange.
+        if (
+            params.content_types is None
+            and not config.include_content_types
+            and not params.include_raw_exchange
+        ):
+            existing = list(config.exclude_content_types or [])
+            if ContentType.RAW_EXCHANGE not in existing:
+                existing.append(ContentType.RAW_EXCHANGE)
+            config.exclude_content_types = existing
+
+        # Relevance floor — caller override wins, else the configured default.
+        min_relevance = (
+            params.min_relevance
+            if params.min_relevance is not None
+            else settings.recall_min_relevance
+        )
+
+        # --- Per-project scoping (W3) ---------------------------------------
+        # An explicit project="*"/"all"/"global" (on either field), a global
+        # sentinel stored in the session include_projects list, or a global
+        # recall_scope forces a global search; we also clear any project the
+        # session config carried so the sentinel always wins.
+        global_requested = (
+            settings.recall_scope == "global"
+            or is_global_project(params.project)
+            or bool(params.projects and any(is_global_project(p) for p in params.projects))
+            # A sentinel in the session-configured include_projects list (e.g. from
+            # configure_session(include_projects=['*'])) means "go global", not a
+            # literal project-key filter.
+            or bool(
+                config.include_projects
+                and any(is_global_project(p) for p in config.include_projects)
+            )
+        )
+        auto_scoped = False
+        if global_requested:
+            config.include_projects = None
+        elif settings.recall_scope == "project" and not config.include_projects:
+            # No explicit/session project in play — resolve the current project
+            # from the MCP subprocess (MEMGENTIC_PROJECT env → repo-aware cwd).
+            current = resolve_current_project(env=os.environ, cwd=os.getcwd())
+            if current:
+                config.include_projects = [current]
+                auto_scoped = True
+
+        results = await _execute_recall(
+            query=params.query,
+            config=config,
+            limit=params.limit,
+            min_relevance=min_relevance,
+            metadata_store=metadata_store,
+            vector_store=vector_store,
+            embedder=embedder,
+            graph=graph,
+            reranker=reranker,
+        )
+
+        # Graceful fallback: when WE auto-scoped to the current project (not an
+        # explicit/session choice) and strict mode is off, a project that yields
+        # fewer than the requested results widens to a global search and merges,
+        # so auto-scoping is never worse than the pre-W3 global behaviour.
+        if auto_scoped and not settings.recall_scope_strict and len(results) < params.limit:
+            global_config = config.model_copy(update={"include_projects": None})
+            global_results = await _execute_recall(
                 query=params.query,
+                config=global_config,
+                limit=params.limit,
+                min_relevance=min_relevance,
                 metadata_store=metadata_store,
                 vector_store=vector_store,
                 embedder=embedder,
                 graph=graph,
-                session_config=config,
-                limit=params.limit,
+                reranker=reranker,
             )
-        else:
-            results = await basic_search(
-                query=params.query,
-                metadata_store=metadata_store,
-                vector_store=vector_store,
-                embedder=embedder,
-                session_config=config,
-                limit=params.limit,
-            )
+            results = _merge_recall_results(results, global_results, params.limit)
 
         if not results:
             return f"No memories found for: '{params.query}'"
@@ -752,7 +923,10 @@ async def memgentic_recall(params: RecallInput, ctx: Context) -> str:
             payload = dict(result.get("payload") or {})
             payload.setdefault("id", result["id"])
             returned_payloads.append(payload)
-            lines.append(_format_memory_md(payload, result["score"], detail=params.detail))
+            # Show the normalised [0,1] relevance (consistent across hybrid +
+            # basic paths), falling back to raw score for any legacy result.
+            display_score = result.get("relevance", result.get("score"))
+            lines.append(_format_memory_md(payload, display_score, detail=params.detail))
 
         _record_loaded_payloads(ctx, returned_payloads, returned_by="memgentic_recall")
         return "\n".join(lines)
@@ -841,6 +1015,15 @@ async def memgentic_remember(params: RememberInput, ctx: Context) -> str:
         except ValueError:
             platform = Platform.UNKNOWN
 
+        # Stamp the current project so manual remembers are scoped like
+        # auto-captured memories: session-configured project → MEMGENTIC_PROJECT
+        # env → repo-aware cwd. Empty/unresolved → global (project="").
+        current_project = resolve_current_project(
+            session_project=_session_project(_get_session_config(ctx)),
+            env=os.environ,
+            cwd=os.getcwd(),
+        )
+
         memory = await pipeline.ingest_single(
             content=params.content,
             content_type=ct,
@@ -848,6 +1031,7 @@ async def memgentic_remember(params: RememberInput, ctx: Context) -> str:
             topics=params.topics,
             entities=params.entities,
             capture_profile=params.capture_profile,
+            project=current_project,
         )
 
         return (

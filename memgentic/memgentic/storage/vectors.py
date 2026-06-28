@@ -8,7 +8,9 @@ instantiates it and forwards every call.
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import structlog
@@ -102,7 +104,7 @@ class VectorStore:
 
             self._backend = SqliteVecBackend(self._settings)
             await self._backend.initialize()
-            self._warn_if_legacy_qdrant_data()
+            await self._maybe_warn_legacy_qdrant_data(metadata_store)
             return
 
         if self._settings.storage_backend == StorageBackend.LOCAL:
@@ -407,39 +409,94 @@ class VectorStore:
 
     # --- Private helpers ---
 
-    def _warn_if_legacy_qdrant_data(self) -> None:
-        """Emit a one-time loud warning when an old Qdrant data directory is found.
+    # How long (seconds) to stay quiet after emitting the migration notice,
+    # so an established user with stranded vectors is reminded periodically
+    # without it spamming every process start.
+    _LEGACY_WARN_THROTTLE_SECONDS = 24 * 60 * 60
 
-        Triggered on first sqlite-vec start when:
-          1. The legacy Qdrant local directory exists (``~/.memgentic/data/qdrant/``), AND
-          2. The sqlite-vec DB file is freshly created (size below a small threshold),
-             which implies no memories have been migrated yet.
+    def _should_warn_legacy_qdrant(self, *, vector_count: int, memory_count: int) -> bool:
+        """Decide whether un-migrated Qdrant data is stranding memories.
 
-        The warning tells users what to run — it never auto-migrates.
+        The old guard early-returned whenever the SQLite DB was larger than
+        100 KB, which silenced the notice for every *established* user — the
+        exact population whose curated vectors were stranded (RC1). The real
+        signal is a population gap: the live vector store holds materially
+        fewer rows than there are active memories.
+
+        Returns True when ALL hold:
+          1. the legacy Qdrant local directory still exists, AND
+          2. there is at least one active memory, AND
+          3. the live vector count is materially below the memory count
+             (>10% of memories lack a vector).
         """
-        qdrant_dir = self._settings.qdrant_local_path
-        sqlite_path = self._settings.sqlite_path
+        if not self._settings.qdrant_local_path.exists():
+            return False
+        if memory_count <= 0:
+            return False
+        if vector_count >= memory_count:
+            return False
+        # Material gap only — a handful of in-flight rows shouldn't nag.
+        return vector_count < memory_count * 0.9
 
-        if not qdrant_dir.exists():
-            return
+    def _legacy_warn_marker(self) -> Path:
+        return self._settings.data_dir / ".legacy_qdrant_warned"
 
-        # Heuristic: newly-created SQLite DB (schema only, no memories) is small.
-        # A DB with even one memory will be larger than 100 KB.
+    def _legacy_warn_throttled(self) -> bool:
+        """True when we warned recently and should stay quiet for now."""
+        marker = self._legacy_warn_marker()
         try:
-            db_size = sqlite_path.stat().st_size if sqlite_path.exists() else 0
+            age = time.time() - marker.stat().st_mtime
         except OSError:
-            db_size = 0
+            return False
+        return age < self._LEGACY_WARN_THROTTLE_SECONDS
 
-        if db_size > 102_400:  # 100 KB
-            # DB already has data — user is aware of the situation, stay silent.
+    def _touch_legacy_warn_marker(self) -> None:
+        marker = self._legacy_warn_marker()
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text(str(time.time()), encoding="utf-8")
+        except OSError:
+            pass
+
+    async def _maybe_warn_legacy_qdrant_data(self, metadata_store: MetadataStore | None) -> None:
+        """Warn (throttled) when un-migrated Qdrant vectors strand memories.
+
+        Compares the live vector-store population against the active-memory
+        count. Never auto-migrates — it only tells the user what to run.
+        """
+        if metadata_store is None or self._backend is None:
+            return
+        if self._legacy_warn_throttled():
+            return
+        try:
+            info = await self._backend.get_collection_info()
+            vector_count = int(info.get("points_count", 0) or 0)
+            memory_count = await metadata_store.get_filtered_count()
+        except Exception:
             return
 
+        if not self._should_warn_legacy_qdrant(
+            vector_count=vector_count, memory_count=memory_count
+        ):
+            return
+
+        self._emit_legacy_qdrant_warning(vector_count=vector_count, memory_count=memory_count)
+        self._touch_legacy_warn_marker()
+
+    def _emit_legacy_qdrant_warning(self, *, vector_count: int, memory_count: int) -> None:
+        """Render the one-time/throttled Qdrant migration notice."""
+        qdrant_dir = self._settings.qdrant_local_path
+        stranded = memory_count - vector_count
         logger.warning(
             "vector_store.legacy_qdrant_data_detected",
             qdrant_dir=str(qdrant_dir),
+            vector_count=vector_count,
+            memory_count=memory_count,
+            stranded=stranded,
             hint=(
-                "Existing Qdrant data found. Run `memgentic migrate-storage "
-                "--from local --to sqlite_vec` to copy your memories."
+                "Active memories outnumber stored vectors. Run `memgentic "
+                "migrate-storage --from local --to sqlite_vec` to restore "
+                "semantic recall for the un-migrated memories."
             ),
         )
         import rich.console
@@ -448,12 +505,11 @@ class VectorStore:
         console.print(
             "\n[bold yellow]Memgentic[/bold yellow] — [yellow]data migration notice[/yellow]\n"
             "\n"
-            f"  Existing Qdrant data found at: [cyan]{qdrant_dir}[/cyan]\n"
-            "  The default storage backend is now [bold]sqlite-vec[/bold] (zero-config,\n"
-            "  multi-process safe). Your previous memories are [bold]not[/bold] lost —\n"
-            "  they just live in the old Qdrant store and won't appear in search yet.\n"
+            f"  {stranded} of {memory_count} active memories have no vector in the\n"
+            f"  current store — semantic recall can't see them. Legacy Qdrant data\n"
+            f"  was found at: [cyan]{qdrant_dir}[/cyan]\n"
             "\n"
-            "  To migrate, run:\n"
+            "  To restore them, run:\n"
             "\n"
             "    [bold green]memgentic migrate-storage "
             "--from local --to sqlite_vec[/bold green]\n"
@@ -542,6 +598,15 @@ class VectorStore:
                     match=models.MatchAny(any=[ct.value for ct in config.include_content_types]),
                 )
             )
+
+        if config.exclude_content_types:
+            for ct in config.exclude_content_types:
+                conditions.append(
+                    models.FieldCondition(
+                        key="content_type",
+                        match=models.MatchExcept(**{"except": [ct.value]}),
+                    )
+                )
 
         if config.min_confidence > 0:
             conditions.append(

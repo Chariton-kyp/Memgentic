@@ -11,10 +11,12 @@ import pytest
 from memgentic.config import MemgenticSettings, StorageBackend
 from memgentic.exceptions import EmbeddingError
 from memgentic.models import (
+    CaptureMethod,
     ContentType,
     ConversationChunk,
     Memory,
     Platform,
+    SourceMetadata,
 )
 from memgentic.processing.pipeline import IngestionPipeline
 from memgentic.storage.metadata import MetadataStore
@@ -289,6 +291,204 @@ class TestWriteTimeDedup:
         result = await pipeline.ingest_conversation(chunks=chunks, platform=Platform.CLAUDE_CODE)
         # High score but low overlap → not a duplicate
         assert len(result) == 1
+
+
+class TestIngestSingleDedup:
+    """W4: the memgentic_remember path now de-duplicates at write time, but only
+    true near-identical content — a deliberately rephrased remember is kept."""
+
+    async def test_ingest_single_dedups_true_duplicate(
+        self,
+        pipeline_settings: MemgenticSettings,
+        metadata_store: MetadataStore,
+        mock_embedder,
+        mock_vector_store,
+    ):
+        pipeline_settings.enable_write_time_dedup = True
+        mock_vector_store.search.return_value = []
+        pipeline = IngestionPipeline(
+            settings=pipeline_settings,
+            metadata_store=metadata_store,
+            vector_store=mock_vector_store,
+            embedder=mock_embedder,
+        )
+        first = await pipeline.ingest_single(
+            content="We standardized on psycopg 3 for all database access.",
+            content_type=ContentType.DECISION,
+        )
+        assert await metadata_store.get_total_count() == 1
+
+        # A near-identical remember: vector search returns the existing memory.
+        async def fake_search(*_args, **_kwargs):
+            return [
+                {
+                    "id": first.id,
+                    "score": 0.97,
+                    "payload": {"content": "We standardized on psycopg 3 for all database access."},
+                }
+            ]
+
+        mock_vector_store.search.side_effect = fake_search
+        mock_vector_store.upsert_memory.reset_mock()
+
+        second = await pipeline.ingest_single(
+            content="We standardized on psycopg 3 for all database access.",
+            content_type=ContentType.DECISION,
+        )
+        # Deduped → returns the EXISTING memory, writes nothing new.
+        assert second.id == first.id
+        mock_vector_store.upsert_memory.assert_not_called()
+        assert await metadata_store.get_total_count() == 1
+
+    async def test_ingest_single_keeps_distinct_remember(
+        self,
+        pipeline_settings: MemgenticSettings,
+        metadata_store: MetadataStore,
+        mock_embedder,
+        mock_vector_store,
+    ):
+        pipeline_settings.enable_write_time_dedup = True
+
+        # High cosine but lexically unrelated → overlap gate keeps it distinct.
+        async def fake_search(*_args, **_kwargs):
+            return [
+                {
+                    "id": "unrelated",
+                    "score": 0.98,
+                    "payload": {"content": "kubernetes ingress controller routing rules"},
+                }
+            ]
+
+        mock_vector_store.search.side_effect = fake_search
+        pipeline = IngestionPipeline(
+            settings=pipeline_settings,
+            metadata_store=metadata_store,
+            vector_store=mock_vector_store,
+            embedder=mock_embedder,
+        )
+        memory = await pipeline.ingest_single(
+            content="The owner prefers emerald, night and mist design tokens.",
+            content_type=ContentType.PREFERENCE,
+        )
+        # Distinct content is stored even when a high-cosine neighbour exists.
+        mock_vector_store.upsert_memory.assert_called_once()
+        assert await metadata_store.get_memory(memory.id) is not None
+
+
+class TestIngestSingleDedupPromotion:
+    """Fix I2: dedup against a less-protected survivor promotes it to the
+    incoming protection class; dedup against an already-protected survivor
+    leaves its protection unchanged."""
+
+    async def test_mcp_tool_remember_promotes_auto_daemon_survivor(
+        self,
+        pipeline_settings: MemgenticSettings,
+        metadata_store: MetadataStore,
+        mock_embedder,
+        mock_vector_store,
+    ):
+        """A mcp_tool ingest_single that dedups against an auto_daemon survivor
+        promotes the survivor's capture_method to mcp_tool (now GC-protected)."""
+        pipeline_settings.enable_write_time_dedup = True
+
+        # Seed a non-protected auto_daemon survivor in the store.
+        survivor = Memory(
+            id="auto-survivor",
+            content="We use psycopg 3 for all database access.",
+            content_type=ContentType.DECISION,
+            source=SourceMetadata(
+                platform=Platform.CLAUDE_CODE,
+                capture_method=CaptureMethod.AUTO_DAEMON,
+            ),
+        )
+        await metadata_store.save_memory(survivor)
+        assert (
+            await metadata_store.get_memory("auto-survivor")
+        ).source.capture_method == CaptureMethod.AUTO_DAEMON
+
+        async def _fake_search(*_args, **_kwargs):
+            return [
+                {
+                    "id": "auto-survivor",
+                    "score": 0.97,
+                    "payload": {"content": "We use psycopg 3 for all database access."},
+                }
+            ]
+
+        mock_vector_store.search.side_effect = _fake_search
+        pipeline = IngestionPipeline(
+            settings=pipeline_settings,
+            metadata_store=metadata_store,
+            vector_store=mock_vector_store,
+            embedder=mock_embedder,
+        )
+
+        result = await pipeline.ingest_single(
+            content="We use psycopg 3 for all database access.",
+            content_type=ContentType.DECISION,
+            capture_method=CaptureMethod.MCP_TOOL,
+        )
+
+        # Dedup fired — returns the survivor, no new row written.
+        assert result.id == "auto-survivor"
+        mock_vector_store.upsert_memory.assert_not_called()
+
+        # Survivor is now promoted to mcp_tool (GC-protected).
+        promoted = await metadata_store.get_memory("auto-survivor")
+        assert promoted is not None
+        assert promoted.source.capture_method == CaptureMethod.MCP_TOOL
+
+    async def test_non_protected_incoming_doesnt_demote_protected_survivor(
+        self,
+        pipeline_settings: MemgenticSettings,
+        metadata_store: MetadataStore,
+        mock_embedder,
+        mock_vector_store,
+    ):
+        """A non-protected (auto_daemon) incoming that dedups against a
+        protected (mcp_tool) survivor changes nothing on the survivor."""
+        pipeline_settings.enable_write_time_dedup = True
+
+        # Seed a protected mcp_tool survivor.
+        protected = Memory(
+            id="mcp-survivor",
+            content="We standardized on Python 3.13.",
+            content_type=ContentType.DECISION,
+            source=SourceMetadata(
+                platform=Platform.CLAUDE_CODE,
+                capture_method=CaptureMethod.MCP_TOOL,
+            ),
+        )
+        await metadata_store.save_memory(protected)
+
+        async def _fake_search(*_args, **_kwargs):
+            return [
+                {
+                    "id": "mcp-survivor",
+                    "score": 0.97,
+                    "payload": {"content": "We standardized on Python 3.13."},
+                }
+            ]
+
+        mock_vector_store.search.side_effect = _fake_search
+        pipeline = IngestionPipeline(
+            settings=pipeline_settings,
+            metadata_store=metadata_store,
+            vector_store=mock_vector_store,
+            embedder=mock_embedder,
+        )
+
+        result = await pipeline.ingest_single(
+            content="We standardized on Python 3.13.",
+            content_type=ContentType.DECISION,
+            capture_method=CaptureMethod.AUTO_DAEMON,
+        )
+
+        # Dedup fired — returns the survivor unchanged.
+        assert result.id == "mcp-survivor"
+        still_protected = await metadata_store.get_memory("mcp-survivor")
+        assert still_protected is not None
+        assert still_protected.source.capture_method == CaptureMethod.MCP_TOOL
 
 
 class TestErrorHandling:

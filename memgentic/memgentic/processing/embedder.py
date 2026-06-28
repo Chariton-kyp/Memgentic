@@ -43,9 +43,11 @@ _RETRY_DECORATOR = retry(
 )
 
 # Default retrieval task description used by Qwen3-Embedding when the
-# caller doesn't override. Kept generic so it works for memory recall,
-# code search, and conversation transcript retrieval.
-_QWEN3_DEFAULT_TASK = "Given a search query, retrieve relevant memory passages that match the query"
+# caller doesn't override. Qwen3-Embedding is ASYMMETRIC: queries carry
+# `Instruct: <task>\nQuery: <text>`, documents are stored UNPREFIXED. The
+# task wording is the one fixed in the memory-quality remediation (§2b) so
+# query embeddings target curated memories/decisions over raw chatter.
+_QWEN3_DEFAULT_TASK = "Retrieve relevant memories and past decisions"
 
 
 def _model_family(model_name: str) -> str:
@@ -245,12 +247,19 @@ class Embedder:
 
     @_RETRY_DECORATOR
     async def _embed_ollama(self, text: str) -> list[float]:
-        """Generate embedding via Ollama API (with retry)."""
+        """Generate embedding via Ollama API (with retry).
+
+        Passes ``dimensions`` to Ollama so the server applies MRL truncation
+        at the model level (required for qwen3-embedding:4b which is natively
+        2560-dim; requesting 1024 here activates the Matryoshka layer).
+        """
+        expected_dim = self._settings.embedding_dimensions
         response = await self._client.post(
             f"{self._settings.ollama_url}/api/embed",
             json={
                 "model": self._settings.embedding_model,
                 "input": text,
+                "dimensions": expected_dim,
             },
         )
         response.raise_for_status()
@@ -259,9 +268,21 @@ class Embedder:
         # Ollama returns {"embeddings": [[...]]} for /api/embed
         embedding: list[float] = data["embeddings"][0]
 
-        # Truncate to configured dimensions (MRL support)
-        if len(embedding) > self._settings.embedding_dimensions:
-            embedding = embedding[: self._settings.embedding_dimensions]
+        # Defensive truncation: older Ollama builds may ignore the `dimensions`
+        # parameter and return the full native dimensionality.
+        if len(embedding) > expected_dim:
+            embedding = embedding[:expected_dim]
+
+        # Validate the final length matches the configured dimension.  A shorter
+        # vector means the model or Ollama build returned fewer dims than
+        # requested, which would silently corrupt cosine-similarity comparisons.
+        if len(embedding) != expected_dim:
+            raise EmbeddingError(
+                f"Embedding dimension mismatch: expected {expected_dim} dimensions "
+                f"but Ollama returned {len(embedding)}. Check that the model "
+                f"({self._settings.embedding_model!r}) supports the requested "
+                f"dimension count and that Ollama is up to date."
+            )
 
         return embedding
 

@@ -1767,7 +1767,7 @@ Examples:
             }
           ],
           "default": null,
-          "description": "Filter by content type: decision, code_snippet, fact, preference, learning, action_item, conversation_summary",
+          "description": "Filter by content type: decision, code_snippet, fact, preference, learning, action_item, conversation_summary. When omitted, recall excludes low-signal 'raw_exchange' memories by default (see include_raw_exchange).",
           "title": "Content Types"
         },
         "detail": {
@@ -1813,6 +1813,12 @@ Examples:
           "description": "Exclude memories from these platforms (e.g., ['codex_cli'])",
           "title": "Exclude Sources"
         },
+        "include_raw_exchange": {
+          "default": false,
+          "description": "Include verbatim 'raw_exchange' turns in results. Off by default because raw exchanges are noisy; set True (or pass an explicit content_types list) to search them.",
+          "title": "Include Raw Exchange",
+          "type": "boolean"
+        },
         "limit": {
           "default": 10,
           "description": "Maximum number of results (1-50)",
@@ -1820,6 +1826,21 @@ Examples:
           "minimum": 1,
           "title": "Limit",
           "type": "integer"
+        },
+        "min_relevance": {
+          "anyOf": [
+            {
+              "maximum": 1.0,
+              "minimum": 0.0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override the relevance floor (0-1). Results below it are dropped. Defaults to the configured recall_min_relevance (\u22480.15); lower it to widen recall, raise it to tighten.",
+          "title": "Min Relevance"
         },
         "project": {
           "anyOf": [

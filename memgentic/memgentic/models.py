@@ -241,6 +241,14 @@ class SessionConfig(BaseModel):
         default=None,
         description="Only include these content types (None = all)",
     )
+    exclude_content_types: list[ContentType] | None = Field(
+        default=None,
+        description=(
+            "Exclude memories of these content types (applied after "
+            "include_content_types). Recall defaults to excluding "
+            "raw_exchange so low-signal verbatim turns stay out of results."
+        ),
+    )
     min_confidence: float = Field(
         default=0.0,
         ge=0.0,

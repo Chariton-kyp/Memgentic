@@ -4,15 +4,27 @@ from __future__ import annotations
 
 from httpx import AsyncClient
 
+# Semantically DISTINCT contents — write-time dedup (cosine>0.90 AND high text
+# overlap) collapses near-identical inserts, so seed memories must differ in
+# substance, not just an index, for batch/pagination tests to see N rows.
+_DISTINCT_CONTENTS = [
+    "Postgres uses MVCC to isolate concurrent transactions",
+    "React reconciles the UI through a virtual DOM diff",
+    "Kubernetes bin-packs pods onto nodes by their resource requests",
+    "Rust's borrow checker enforces memory safety at compile time",
+    "GraphQL lets a client request exactly the fields it needs",
+    "Redis persists data with RDB snapshots and the append-only log",
+]
+
 
 async def _seed_memories(client: AsyncClient, count: int = 3) -> list[str]:
-    """Create ``count`` memories and return their IDs."""
+    """Create ``count`` distinct memories and return their IDs."""
     ids: list[str] = []
     for i in range(count):
         resp = await client.post(
             "/api/v1/memories",
             json={
-                "content": f"Seed memory number {i} for batch tests",
+                "content": _DISTINCT_CONTENTS[i % len(_DISTINCT_CONTENTS)],
                 "source": "claude_code",
                 "topics": ["seed"],
             },

@@ -68,20 +68,56 @@ def _resolve_capture_profile(
     return candidate
 
 
-# Hard cap on a single chunk's content length. Beyond this we truncate
-# rather than refuse — but truncation should be rare in practice because
-# adapters filter tool-output dumps before reaching the pipeline. Set high
-# enough to keep meaningful long-form turns intact (~50 KB ≈ 12 K tokens),
-# low enough that one bad turn cannot blow up an SQLite row or the
-# embedder context window.
-_MAX_CHUNK_CONTENT_CHARS: int = 50_000
+# Default hard cap on a single chunk's content length, used when no settings
+# value is supplied. Beyond this we truncate rather than refuse — but truncation
+# should be rare in practice because adapters filter tool-output dumps before
+# reaching the pipeline. The effective cap is configurable via
+# ``MemgenticSettings.max_memory_content_chars`` (default 64 KB); this constant
+# is only the fallback for callers that don't pass one in.
+_MAX_CHUNK_CONTENT_CHARS: int = 65_536
 _TRUNCATION_MARKER: str = "\n\n…[truncated by Memgentic — original length {orig} chars]"
+
+# Write-time dedup thresholds (shared by the conversation and single-memory
+# paths). A candidate is treated as a near-duplicate only when BOTH a high
+# vector score AND a high lexical overlap hold — deliberately conservative so a
+# deliberately rephrased ``memgentic_remember`` (high cosine, lower word
+# overlap) is never silently dropped; only true near-identical content is.
+_WRITE_DEDUP_SCORE_THRESHOLD: float = 0.90
+_WRITE_DEDUP_OVERLAP_THRESHOLD: float = 0.7
+
+
+def _truncate_if_oversized(content: str, cap: int) -> str:
+    """Return ``content`` truncated to ``cap`` chars (plus a marker) if needed."""
+    if len(content) <= cap:
+        return content
+    return content[:cap] + _TRUNCATION_MARKER.format(orig=len(content))
+
+
+def _distillation_is_worthless(distillation: Any, min_score: float) -> bool:
+    """Decide whether the value gate should drop a chunk (W1 / RC2).
+
+    Conservative by design: returns True ONLY when the distillation node
+    explicitly judged the chunk worthless — ``is_valuable is False`` AND a
+    numeric ``value_score`` below ``min_score``. When the signal is missing,
+    None, or merely uncertain, returns False so real knowledge is never
+    dropped on absent evidence.
+    """
+    if not isinstance(distillation, dict):
+        return False
+    if distillation.get("is_valuable") is not False:
+        return False
+    value_score = distillation.get("value_score")
+    if not isinstance(value_score, (int, float)) or isinstance(value_score, bool):
+        return False
+    return value_score < min_score
 
 
 def _enforce_chunk_size_cap(
-    chunks: list[ConversationChunk], platform: Platform
+    chunks: list[ConversationChunk],
+    platform: Platform,
+    cap: int = _MAX_CHUNK_CONTENT_CHARS,
 ) -> list[ConversationChunk]:
-    """Truncate any chunk whose content exceeds ``_MAX_CHUNK_CONTENT_CHARS``.
+    """Truncate any chunk whose content exceeds ``cap`` characters.
 
     Returns a new list of chunks (does not mutate the originals). Logs
     one ``pipeline.chunk_truncated`` warning per oversized chunk so the
@@ -91,12 +127,10 @@ def _enforce_chunk_size_cap(
     capped: list[ConversationChunk] = []
     for chunk in chunks:
         content = chunk.content
-        if len(content) <= _MAX_CHUNK_CONTENT_CHARS:
+        if len(content) <= cap:
             capped.append(chunk)
             continue
-        truncated = content[:_MAX_CHUNK_CONTENT_CHARS] + _TRUNCATION_MARKER.format(
-            orig=len(content)
-        )
+        truncated = _truncate_if_oversized(content, cap)
         logger.warning(
             "pipeline.chunk_truncated",
             platform=platform.value,
@@ -223,7 +257,7 @@ class IngestionPipeline:
         # through (e.g. very long Claude Code thinking blocks, future
         # adapter regressions) gets truncated here so it never bloats
         # the embedder, the SQLite row, or the vector store.
-        chunks = _enforce_chunk_size_cap(chunks, platform)
+        chunks = _enforce_chunk_size_cap(chunks, platform, self._settings.max_memory_content_chars)
 
         # Step 1: Deduplication check — compute hash ONCE and reuse
         file_hash: str | None = None
@@ -378,6 +412,51 @@ class IngestionPipeline:
                     for memory in memories:
                         memory.source = source
 
+                # Step 2c-2: Value gate (W1 / RC2). The distillation node
+                # produced an is_valuable / value_score signal per chunk; drop
+                # the memories it judged clearly worthless before we spend an
+                # embedding on them. Conservative: only drops when the signal
+                # is explicitly negative (see _distillation_is_worthless), never
+                # when it is absent. memories and chunks are kept aligned so the
+                # downstream dual-sibling path stays correct.
+                if self._settings.enable_value_gate and classified:
+                    min_score = self._settings.value_gate_min_score
+                    kept_memories: list[Memory] = []
+                    kept_chunks: list[ConversationChunk] = []
+                    gate_dropped = 0
+                    for memory, chunk, classified_chunk in zip(
+                        memories, chunks, classified, strict=False
+                    ):
+                        distillation = (
+                            classified_chunk.get("distillation")
+                            if isinstance(classified_chunk, dict)
+                            else None
+                        )
+                        if _distillation_is_worthless(distillation, min_score):
+                            gate_dropped += 1
+                            continue
+                        kept_memories.append(memory)
+                        kept_chunks.append(chunk)
+                    if gate_dropped:
+                        # Only commit the filtered lists when alignment held
+                        # (zip truncates on length mismatch — never drop the
+                        # tail of an unaligned list).
+                        if len(memories) == len(chunks) == len(classified):
+                            memories = kept_memories
+                            chunks = kept_chunks
+                            logger.info(
+                                "pipeline.value_gate_dropped",
+                                dropped=gate_dropped,
+                                kept=len(memories),
+                            )
+                        else:
+                            logger.warning(
+                                "pipeline.value_gate_skipped_misaligned",
+                                memories=len(memories),
+                                chunks=len(chunks),
+                                classified=len(classified),
+                            )
+
                 if intel_result.get("errors"):
                     logger.warning(
                         "pipeline.intelligence_warnings",
@@ -385,6 +464,11 @@ class IngestionPipeline:
                     )
             except Exception as exc:
                 logger.warning("pipeline.intelligence_failed", error=str(exc))
+
+        # Value gate may have emptied the batch — bail out cleanly.
+        if not memories:
+            logger.info("pipeline.no_memories_after_value_gate", file=file_path)
+            return []
         elif capture_profile == "raw":
             logger.info(
                 "pipeline.raw_profile",
@@ -435,32 +519,13 @@ class IngestionPipeline:
             filtered_embeddings: list[list[float]] = []
             skipped = 0
             for memory, embedding in zip(memories, embeddings, strict=False):
-                is_duplicate = False
-                try:
-                    similar = await self._vectors.search(embedding, limit=3)
-                except Exception:
-                    similar = []
-                if not isinstance(similar, list):
-                    similar = []
-                for match in similar:
-                    if not isinstance(match, dict):
-                        continue
-                    if match.get("score", 0) > 0.90:
-                        match_content = (match.get("payload") or {}).get("content", "")
-                        overlap = text_overlap(memory.content, match_content)
-                        if overlap > 0.7:
-                            logger.info(
-                                "pipeline.dedup_skip",
-                                memory_id=memory.id,
-                                match_score=match.get("score"),
-                                overlap=round(overlap, 3),
-                            )
-                            is_duplicate = True
-                            skipped += 1
-                            break
-                if not is_duplicate:
-                    filtered_memories.append(memory)
-                    filtered_embeddings.append(embedding)
+                dup_id = await self._find_write_time_duplicate(memory.content, embedding)
+                if dup_id is not None:
+                    logger.info("pipeline.dedup_skip", memory_id=memory.id, match=dup_id)
+                    skipped += 1
+                    continue
+                filtered_memories.append(memory)
+                filtered_embeddings.append(embedding)
             memories = filtered_memories
             embeddings = filtered_embeddings
             if skipped:
@@ -585,18 +650,33 @@ class IngestionPipeline:
         user_id: str = "",
         capture_method: CaptureMethod = CaptureMethod.MCP_TOOL,
         capture_profile: CaptureProfile | None = None,
+        project: str | None = None,
     ) -> Memory:
         """Quick-ingest a single memory (e.g., from MCP 'remember' tool).
 
         Respects ``capture_profile``: raw drops supplied topics/entities and
         uses a neutral importance; dual spawns an extra raw sibling linked via
-        ``dual_sibling_id``.
+        ``dual_sibling_id``. ``project`` stamps the memory's project key so
+        manual remembers are scoped to the current project/repository like
+        auto-captured ones (empty string when unknown → global).
         """
         profile = _resolve_capture_profile(capture_profile, self._settings)
+        project_key = (project or "").strip().lower()
         source = SourceMetadata(
             platform=platform,
             capture_method=capture_method,
         )
+
+        # Cap absurdly long single memories (e.g. a pasted file dump) before
+        # embedding/storage. Same policy as the conversation path.
+        capped = _truncate_if_oversized(content, self._settings.max_memory_content_chars)
+        if capped != content:
+            logger.warning(
+                "pipeline.single_truncated",
+                original_length=len(content),
+                truncated_length=len(capped),
+            )
+            content = capped
 
         # Scrub credentials before storage
         if self._settings.enable_credential_scrubbing:
@@ -615,6 +695,7 @@ class IngestionPipeline:
                 user_id=user_id,
                 importance_score=0.5,
                 capture_profile="raw",
+                project=project_key,
             )
         else:
             memory = Memory(
@@ -625,6 +706,7 @@ class IngestionPipeline:
                 entities=entities or [],
                 user_id=user_id,
                 capture_profile=profile,
+                project=project_key,
             )
 
         t0 = time.perf_counter()
@@ -634,6 +716,54 @@ class IngestionPipeline:
             logger.error("pipeline.single_embedding_failed", error=str(exc))
             raise EmbeddingError(f"Failed to embed single memory: {exc}") from exc
         embed_elapsed = time.perf_counter() - t0
+
+        # Write-time dedup (W4) — the ``memgentic_remember`` path used to insert
+        # unconditionally, so re-saying the same fact created a duplicate every
+        # time. Reuse the same conservative near-duplicate test as the
+        # conversation path (high cosine AND high overlap). When a near-identical
+        # memory already exists we return IT instead of writing a second copy —
+        # the owner's deliberate (and merely rephrased) saves still go through
+        # because the overlap gate keeps them distinct.
+        #
+        # Protection promotion: when the incoming call is MORE protected than the
+        # surviving duplicate (e.g. an mcp_tool remember that matches an
+        # auto_daemon row), we promote the survivor so it inherits the higher
+        # protection class — preventing the owner's deliberate save from silently
+        # leaving an unprotected GC-eligible row as the sole copy.
+        if self._settings.enable_write_time_dedup:
+            dup_id = await self._find_write_time_duplicate(content, embedding)
+            if dup_id is not None:
+                existing = await self._metadata.get_memory(dup_id)
+                if existing is not None:
+                    incoming_is_mcp = capture_method == CaptureMethod.MCP_TOOL
+                    incoming_is_pinned = memory.is_pinned
+                    promote_method = (
+                        incoming_is_mcp and existing.source.capture_method != CaptureMethod.MCP_TOOL
+                    )
+                    promote_pin = incoming_is_pinned and not existing.is_pinned
+                    if promote_method or promote_pin:
+                        updates: dict[str, Any] = {}
+                        if promote_method:
+                            updates["source"] = existing.source.model_copy(
+                                update={"capture_method": CaptureMethod.MCP_TOOL}
+                            )
+                        if promote_pin:
+                            updates["is_pinned"] = True
+                        existing = existing.model_copy(update=updates)
+                        await self._metadata.save_memory(existing)
+                        logger.info(
+                            "pipeline.single_dedup_promoted",
+                            match=dup_id,
+                            capture_method=existing.source.capture_method.value,
+                            is_pinned=existing.is_pinned,
+                        )
+                    logger.info(
+                        "pipeline.single_dedup_skip",
+                        candidate=memory.id,
+                        match=dup_id,
+                        capture_method=capture_method.value,
+                    )
+                    return existing
 
         t1 = time.perf_counter()
         await self._metadata.save_memory(memory)
@@ -666,6 +796,7 @@ class IngestionPipeline:
                 importance_score=0.5,
                 capture_profile="dual",
                 dual_sibling_id=memory.id,
+                project=project_key,
             )
             try:
                 raw_embedding = await self._embedder.embed_document(content)
@@ -691,6 +822,31 @@ class IngestionPipeline:
         await self._emit_memory_created_events([memory])
 
         return memory
+
+    async def _find_write_time_duplicate(self, content: str, embedding: list[float]) -> str | None:
+        """Return the id of an existing near-duplicate memory, or None.
+
+        Near-duplicate := a top vector match with score above
+        ``_WRITE_DEDUP_SCORE_THRESHOLD`` AND lexical overlap above
+        ``_WRITE_DEDUP_OVERLAP_THRESHOLD``. Both signals are required so a
+        deliberately rephrased memory (high cosine, lower word overlap) is never
+        treated as a duplicate. Any vector-store error degrades to "no
+        duplicate" so dedup can never block a write.
+        """
+        try:
+            similar = await self._vectors.search(embedding, limit=3)
+        except Exception:
+            return None
+        if not isinstance(similar, list):
+            return None
+        for match in similar:
+            if not isinstance(match, dict):
+                continue
+            if match.get("score", 0) > _WRITE_DEDUP_SCORE_THRESHOLD:
+                match_content = (match.get("payload") or {}).get("content", "")
+                if text_overlap(content, match_content) > _WRITE_DEDUP_OVERLAP_THRESHOLD:
+                    return str(match.get("id") or "") or None
+        return None
 
     async def _detect_contradictions(self, memories: list[Memory]) -> None:
         """Check new memories against existing similar memories for contradictions.

@@ -13,6 +13,9 @@ from memgentic.models import ContentType, SessionConfig
 from memgentic.observability import record_counter, record_histogram, trace_span
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.query import parse_query_intent
+from memgentic.processing.query_features import extract_features
+from memgentic.retrieval.feature_boost import apply_feature_boosts
+from memgentic.retrieval.reranker import Reranker, maybe_rerank
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
 
@@ -25,6 +28,26 @@ from memgentic.storage.vectors import VectorStore
 DEFAULT_SEMANTIC_WEIGHT = 0.6
 DEFAULT_KEYWORD_WEIGHT = 0.25
 DEFAULT_GRAPH_WEIGHT = 0.15
+
+# Query-time per-content-type relevance multipliers. Curated knowledge
+# (decision/fact/preference/learning) keeps full weight; lower-signal types
+# are damped so they sink beneath curated hits of comparable cosine without
+# being excluded outright. Applied AFTER fusion/importance/decay — ingestion
+# importance is left untouched so the same memory is never penalised twice.
+CONTENT_TYPE_WEIGHTS: dict[str, float] = {
+    ContentType.DECISION.value: 1.0,
+    ContentType.FACT.value: 1.0,
+    ContentType.PREFERENCE.value: 1.0,
+    ContentType.LEARNING.value: 1.0,
+    ContentType.CODE_SNIPPET.value: 0.9,
+    ContentType.ACTION_ITEM.value: 0.9,
+    ContentType.CONVERSATION_SUMMARY.value: 0.7,
+    ContentType.RAW_EXCHANGE.value: 0.4,
+}
+# Weight for a content type not present in the table above (e.g. an unknown
+# or unresolved type) — slightly below curated so it never outranks a real
+# decision on a tie, but well above raw_exchange noise.
+DEFAULT_CONTENT_TYPE_WEIGHT = 0.8
 
 
 async def hybrid_search(
@@ -43,6 +66,9 @@ async def hybrid_search(
     keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
     graph_weight: float = DEFAULT_GRAPH_WEIGHT,
     min_score: float = 0.0,
+    min_relevance: float = 0.0,
+    enable_feature_boost: bool = True,
+    reranker: Reranker | None = None,
 ) -> list[dict]:
     """Merge results from semantic, keyword, and graph search using RRF.
 
@@ -78,19 +104,38 @@ async def hybrid_search(
 
     Returns:
         List of dicts, each with ``id``, ``score`` (raw weighted RRF *
-        importance * decay — NOT normalised to 0-1), ``payload``, and
-        observability fields ``semantic_rank``, ``keyword_rank``,
-        ``graph_boosted``, ``search_method`` ("hybrid" / "semantic" /
-        "keyword" / "graph"), sorted by descending score.
+        importance * decay — NOT normalised), ``relevance`` (the ``score``
+        after content-type weighting + feature boosts, min-max normalised
+        to 0-1 across the candidate pool — this is the figure surfaced to
+        users), ``payload``, and observability fields ``semantic_rank``,
+        ``keyword_rank``, ``graph_boosted``, ``content_type_weight``,
+        ``boost_multiplier``, ``search_method`` ("hybrid" / "semantic" /
+        "keyword" / "graph"), sorted by descending ``relevance``.
 
     Args (continued):
         semantic_weight / keyword_weight / graph_weight: per-signal RRF
             multipliers. Defaults bias dense semantic over keyword over
             graph (0.6 / 0.25 / 0.15) per the sibling-project tuning.
-        min_score: drop results whose final fused score is below this
+        min_score: drop results whose RAW fused score is below this
             threshold. Default 0.0 = no filter (preserves v0.7 behaviour).
             A value of ~0.005 effectively requires the result to appear
             in at least one signal at rank 5 or better.
+        min_relevance: drop results whose NORMALISED ``relevance`` is below
+            this threshold. Default 0.0 = no floor; the MCP recall tool
+            passes ``settings.recall_min_relevance`` (≈0.15). Applied after
+            content-type weighting + feature boosts so curated signal
+            survives and damped noise is trimmed. The top candidate always
+            normalises to 1.0, so a non-zero floor never empties a
+            non-empty result set.
+        enable_feature_boost: when True (default) multiply scores by
+            query-feature boosts (quoted-phrase / proper-noun / temporal
+            proximity) before normalisation.
+        reranker: optional cross-encoder reranker. When supplied AND
+            ``settings.enable_reranker`` is set, the top ``reranker_top_k``
+            fused candidates are re-scored, reordered by the absolute rerank
+            score (written back as ``relevance``), and any below
+            ``reranker_min_score`` are dropped. A ``None`` reranker or an
+            unreachable server is a graceful no-op (fused order preserved).
     """
     with trace_span("search.hybrid", query_len=len(query)):
         _search_start = _t.perf_counter()
@@ -109,6 +154,9 @@ async def hybrid_search(
             keyword_weight=keyword_weight,
             graph_weight=graph_weight,
             min_score=min_score,
+            min_relevance=min_relevance,
+            enable_feature_boost=enable_feature_boost,
+            reranker=reranker,
         )
         record_histogram(
             "memgentic.search.duration_seconds",
@@ -134,6 +182,9 @@ async def _hybrid_search_impl(
     keyword_weight: float = DEFAULT_KEYWORD_WEIGHT,
     graph_weight: float = DEFAULT_GRAPH_WEIGHT,
     min_score: float = 0.0,
+    min_relevance: float = 0.0,
+    enable_feature_boost: bool = True,
+    reranker: Reranker | None = None,
 ) -> list[dict]:
     # Detect query intent — extracts implicit filters and a cleaned query.
     # Only substitute the cleaned query when intent rewrote it; otherwise pass
@@ -280,18 +331,85 @@ async def _hybrid_search_impl(
     for mid in drop:
         scores.pop(mid, None)
 
-    # Return raw fused weighted RRF * importance * decay scores plus
-    # per-signal observability. We deliberately do NOT divide by max —
-    # that made the top result always read as 1.0 even when every
-    # candidate was a poor match (relevance lie). Callers that need a
-    # 0-1 display can normalise themselves with full context.
-    ranked = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+    # Apply the raw-score floor first (backward-compatible behaviour): a
+    # candidate that never cleared the fused-score threshold is dropped
+    # before any presentation re-weighting can resurrect it.
     if min_score > 0.0:
-        ranked = [(mid, s) for mid, s in ranked if s >= min_score]
-    ranked = ranked[:limit]
+        for mid in [m for m, s in scores.items() if s < min_score]:
+            scores.pop(mid, None)
+
+    # --- Presentation re-weighting -------------------------------------
+    # Derive a separate ``weighted`` value (content-type weight × feature
+    # boosts) used for ranking + the displayed ``relevance``. The raw fused
+    # ``score`` is preserved untouched for observability and downstream
+    # tooling that calibrated against it.
+    def _content_type_for(mid: str) -> str | None:
+        mem = memories_map.get(mid)
+        ct = getattr(mem, "content_type", None)
+        if ct is not None:
+            return ct.value
+        return (payloads.get(mid) or {}).get("content_type")
+
+    content_type_weight: dict[str, float] = {}
+    weighted: dict[str, float] = {}
+    for mid, raw in scores.items():
+        ct = _content_type_for(mid)
+        if ct:
+            w = CONTENT_TYPE_WEIGHTS.get(ct, DEFAULT_CONTENT_TYPE_WEIGHT)
+        else:
+            w = DEFAULT_CONTENT_TYPE_WEIGHT
+        content_type_weight[mid] = w
+        weighted[mid] = raw * w
+
+    # Query-feature boosts (quoted phrase / proper noun / temporal). Only
+    # run when the query actually carried a signal — otherwise the boost is
+    # a no-op and we skip the per-candidate work entirely.
+    boost_multiplier: dict[str, float] = dict.fromkeys(weighted, 1.0)
+    if enable_feature_boost and weighted:
+        features = extract_features(query)
+        has_features = bool(
+            features.quoted_phrases
+            or features.proper_nouns
+            or features.temporal_reference_days is not None
+        )
+        if has_features:
+            candidates = [
+                {"id": mid, "score": weighted[mid], "payload": payloads.get(mid, {})}
+                for mid in weighted
+            ]
+            for c in apply_feature_boosts(candidates, features):
+                cid = c["id"]
+                weighted[cid] = float(c.get("score", weighted.get(cid, 0.0)))
+                boost_multiplier[cid] = float(c.get("boost_multiplier", 1.0))
+
+    # Min-max normalise the weighted scores across the whole candidate pool
+    # → ``relevance`` in [0, 1]. The top candidate always maps to 1.0 so a
+    # non-zero ``min_relevance`` floor can never empty a non-empty pool; the
+    # bottom maps to 0.0. Degenerate pools (single / all-equal) map to 1.0
+    # rather than 0.0 so a lone legitimate hit is never floored away.
+    relevance: dict[str, float] = {}
+    if weighted:
+        lo = min(weighted.values())
+        hi = max(weighted.values())
+        span = hi - lo
+        for mid, w in weighted.items():
+            relevance[mid] = (w - lo) / span if span > 0 else 1.0
+
+    ranked = sorted(weighted.items(), key=lambda x: x[1], reverse=True)
+    if min_relevance > 0.0:
+        ranked = [(mid, w) for mid, w in ranked if relevance.get(mid, 0.0) >= min_relevance]
+    # When reranking is active, keep a wider candidate window (at least
+    # reranker_top_k) so the cross-encoder can reorder/promote results that the
+    # fused order ranked below ``limit``. ``maybe_rerank`` truncates back to
+    # ``limit`` afterwards. Without a reranker this is a no-op (slice == limit).
+    do_rerank = bool(reranker is not None and settings is not None and settings.enable_reranker)
+    effective_limit = (
+        max(limit, settings.reranker_top_k) if (do_rerank and settings is not None) else limit
+    )
+    ranked = ranked[:effective_limit]
 
     out: list[dict] = []
-    for mid, score in ranked:
+    for mid, _weighted in ranked:
         in_semantic = mid in semantic_ranks
         in_keyword = mid in keyword_ranks
         in_graph = mid in graph_boosted_ids
@@ -310,12 +428,21 @@ async def _hybrid_search_impl(
         out.append(
             {
                 "id": mid,
-                "score": round(float(score), 6),
+                "score": round(float(scores[mid]), 6),
+                "relevance": round(float(relevance.get(mid, 0.0)), 4),
                 "payload": payloads.get(mid, {}),
                 "semantic_rank": semantic_ranks.get(mid),
                 "keyword_rank": keyword_ranks.get(mid),
                 "graph_boosted": in_graph,
+                "content_type_weight": round(content_type_weight.get(mid, 1.0), 4),
+                "boost_multiplier": round(boost_multiplier.get(mid, 1.0), 4),
                 "search_method": method,
             }
         )
+
+    # Absolute relevance gate (optional). After fusion / weighting / boosts,
+    # re-score the top candidates with the cross-encoder, reorder by the
+    # absolute rerank score, and drop sub-threshold hits. Graceful no-op when
+    # the reranker is disabled / absent / unreachable — fused order survives.
+    out = await maybe_rerank(query, out, reranker=reranker, settings=settings, limit=limit)
     return out
