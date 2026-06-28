@@ -490,6 +490,8 @@ def search(
                     output.append(
                         {
                             "score": round(r["score"], 3),
+                            "relevance": round(r.get("relevance", r.get("score", 0.0)), 3),
+                            "reranked": bool(r.get("reranked", False)),
                             "content": payload.get("content", ""),
                             "content_type": payload.get("content_type", ""),
                             "platform": payload.get("platform", ""),
@@ -502,7 +504,11 @@ def search(
                 return
 
             table = Table(title=f"Memory Search: '{query}'")
-            table.add_column("Score", style="cyan", width=6)
+            # Show the normalized [0,1] relevance (the rerank score when reranked,
+            # otherwise the RRF/cosine relevance) rather than the raw RRF score,
+            # which is in tiny, non-intuitive units. A ✓ marks reranked rows.
+            table.add_column("Rel.", style="cyan", width=6)
+            table.add_column("RR", style="cyan", width=2)
             table.add_column("Platform", style="green", width=14)
             table.add_column("Type", style="magenta", width=14)
             table.add_column("Content", style="white")
@@ -510,8 +516,10 @@ def search(
             for r in results:
                 payload = r["payload"]
                 content = payload.get("content", "")[:80]
+                relevance = r.get("relevance", r.get("score", 0.0))
                 table.add_row(
-                    f"{r['score']:.2f}",
+                    f"{relevance:.2f}",
+                    "✓" if r.get("reranked") else "",
                     payload.get("platform", "?"),
                     payload.get("content_type", "?"),
                     content,
