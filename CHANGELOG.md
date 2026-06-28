@@ -4,6 +4,25 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.1.0] — 2026-06-28 — BGE-M3, One Stack, One Config
+
+Follow-up to the 1.0.0 recall overhaul, hardening it for real multi-tool installs. Surfaced while activating the high-quality stack on a live store.
+
+### Fixed
+
+- **Critical: the `updated_at` retention migration never reached existing databases.** It was numbered 11, colliding with the prior v11 migration; the runner compares each migration against the schema version captured at the start of the run, so a database already at v11 skipped it. Every install upgrading from a pre-1.0.0 version then hit `no such column: updated_at` on `memgentic clean` / `gc`. Renumbered to 12 so existing databases apply it.
+- **Reranking silently no-op'd on long memories.** A long candidate document made llama-server reject the whole rerank request (or blow the timeout); each document is now truncated to a bounded prefix before reranking, keeping it fast and robust.
+- **`re-embed --model X` no longer needs a manual collection delete** — it rebuilds the vector collection from scratch instead of tripping the dimension/model compatibility guard.
+
+### Added
+
+- **BGE-M3 is a selectable embedding model** in `memgentic setup` / `models` (multilingual incl. Greek, 1024-dim native, fast). The embedder already handled its prefix dialect.
+- **User-wide `~/.memgentic/.env`** read as a base config before the project-local `.env`, so a single file pins the embedding model and vector backend for the daemon, the CLI, and every tool's MCP `serve` regardless of the directory it launches in.
+
+### Changed
+
+- `memgentic search` displays the normalized `[0,1]` relevance (the absolute rerank score when reranked, with a reranked marker) instead of the raw RRF score in tiny, non-intuitive units.
+
 ## [1.0.0] — 2026-06-28 — Recall Overhaul: Signal Over Noise
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`). A six-part overhaul of capture, recall, and storage quality after a forensic audit found ~40% of memories were unsearchable orphaned vectors and ~43% were captured noise.
