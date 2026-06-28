@@ -91,6 +91,7 @@ class MemgenticDaemon:
         adapters: list[BaseAdapter],
         *,
         metadata_store: MetadataStore | None = None,
+        vector_store: object | None = None,
     ) -> None:
         self._settings = settings
         self._pipeline = pipeline
@@ -100,10 +101,12 @@ class MemgenticDaemon:
         self._running = False
         self._process_task: asyncio.Task | None = None
         self._metadata_store = metadata_store
+        self._vector_store = vector_store
         self._context_update_task: asyncio.Task | None = None
         self._context_dirty = False
         self._last_context_update: float = 0.0
         self._skill_sync_task: asyncio.Task | None = None
+        self._gc_task: asyncio.Task | None = None
 
     async def start(self) -> None:
         """Start watching all adapter directories."""
@@ -134,6 +137,12 @@ class MemgenticDaemon:
             self._context_update_task = asyncio.create_task(self._context_update_loop())
         if self._metadata_store and self._settings.skill_sync_interval > 0:
             self._skill_sync_task = asyncio.create_task(self._skill_sync_loop())
+        if (
+            self._metadata_store
+            and self._settings.gc_interval_seconds > 0
+            and self._settings.hard_delete_archived_after_days > 0
+        ):
+            self._gc_task = asyncio.create_task(self._gc_loop())
         logger.info("daemon.started", adapters=len(self._adapters))
 
     async def stop(self) -> None:
@@ -153,6 +162,10 @@ class MemgenticDaemon:
             self._skill_sync_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await self._skill_sync_task
+        if self._gc_task:
+            self._gc_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._gc_task
         logger.info("daemon.stopped")
 
     async def scan_existing(self) -> int:
@@ -311,3 +324,34 @@ class MemgenticDaemon:
                 break
             except Exception as exc:
                 logger.error("daemon.skill_sync_error", error=str(exc))
+
+    async def _gc_loop(self) -> None:
+        """Periodically hard-delete archived/superseded memories past the grace
+        period (retention GC). Throttled to ``gc_interval_seconds``; honors all
+        W4 safety rules via ``run_gc`` (pinned / mcp_tool / active never touched).
+        """
+        if self._metadata_store is None:
+            return
+
+        from memgentic.processing.retention import run_gc
+
+        interval = max(60, int(self._settings.gc_interval_seconds))
+        while self._running:
+            try:
+                await asyncio.sleep(interval)
+                report = await run_gc(
+                    metadata_store=self._metadata_store,
+                    settings=self._settings,
+                    vector_store=self._vector_store,
+                    apply=True,
+                )
+                if report.hard_deleted:
+                    logger.info(
+                        "daemon.gc.swept",
+                        hard_deleted=report.hard_deleted,
+                        vectors_deleted=report.vectors_deleted,
+                    )
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:
+                logger.error("daemon.gc_error", error=str(exc))

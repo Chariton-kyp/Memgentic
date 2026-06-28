@@ -41,10 +41,13 @@ class MemgenticSettings(BaseSettings):
         description="Root directory for all Memgentic data (SQLite, Qdrant files, graph)",
     )
     storage_backend: StorageBackend = Field(
-        default=StorageBackend.SQLITE_VEC,
+        default=StorageBackend.QDRANT,
         description=(
-            "Vector storage backend: 'sqlite_vec' (default, zero-config, multi-process safe), "
-            "'local' (file-based Qdrant, single-process), or 'qdrant' (Qdrant server)"
+            "Vector storage backend: 'qdrant' (default, Qdrant server — run via Docker or "
+            "Qdrant Cloud), 'sqlite_vec' (zero-config, multi-process safe, no server), "
+            "or 'local' (file-based Qdrant, single-process). "
+            "BREAKING CHANGE from v0.7: default changed from 'sqlite_vec' to 'qdrant'. "
+            "Set MEMGENTIC_STORAGE_BACKEND=sqlite_vec to keep the previous behaviour."
         ),
     )
     qdrant_url: str = Field(
@@ -66,12 +69,28 @@ class MemgenticSettings(BaseSettings):
         description="Embedding provider: 'ollama' (local) or 'openai'",
     )
     embedding_model: str = Field(
-        default="qwen3-embedding:0.6b",
-        description="Embedding model name (Ollama model name or OpenAI model ID)",
+        default="qwen3-embedding:4b",
+        description=(
+            "Embedding model name (Ollama model name or OpenAI model ID). "
+            "Override via MEMGENTIC_EMBEDDING_MODEL. Default 'qwen3-embedding:4b' "
+            "(Ollama q4_K_M, ~2.5 GB) MRL-truncated to 1024 dims (~+5 MTEB vs 0.6b). "
+            "Light fallback: 'qwen3-embedding:0.6b' (639 MB). "
+            "Switching the model OR the dimensions changes the vector space and "
+            "REQUIRES a full re-embed of the store (`memgentic re-embed`) — "
+            "old and new vectors are not comparable."
+        ),
     )
     embedding_dimensions: int = Field(
-        default=768,
-        description="Embedding vector dimensions (768 via MRL truncation)",
+        default=1024,
+        description=(
+            "Embedding vector dimensions via Matryoshka (MRL) truncation. "
+            "Override via MEMGENTIC_EMBEDDING_DIMENSIONS. 1024 pairs with the "
+            "default qwen3-embedding:4b (natively 2560-dim; Ollama applies "
+            "server-side MRL truncation via the 'dimensions' request parameter). "
+            "Use 768 with the light qwen3-embedding:0.6b fallback. "
+            "MUST match the model the store was embedded with — "
+            "changing it requires a full re-embed (`memgentic re-embed`)."
+        ),
     )
     ollama_url: str = Field(
         default="http://localhost:11434",
@@ -88,6 +107,74 @@ class MemgenticSettings(BaseSettings):
     import_concurrency: int = Field(
         default=4,
         description="Number of files to process concurrently during import",
+    )
+
+    # --- Reranker (optional cross-encoder, served by llama-server) ---
+    # Absolute relevance gate applied AFTER fusion. OFF by default so installs
+    # without a llama-server are unaffected; when on but the server is
+    # unreachable, recall falls back to the fused order (never breaks).
+    # Ollama CANNOT serve rerankers — run llama.cpp's llama-server:
+    #   llama-server -m Qwen3-Reranker-0.6B-Q4_K_M.gguf \
+    #       --reranking --pooling rank --embedding --port 8081
+    # Use the verified-working Voodisss GGUFs. See docs/reranker-setup.md.
+    enable_reranker: bool = Field(
+        default=False,
+        description=(
+            "Enable cross-encoder reranking of fused recall candidates. OFF by "
+            "default. Requires a reachable llama-server at reranker_url; when "
+            "unreachable, recall gracefully falls back to the fused order. "
+            "Override via MEMGENTIC_ENABLE_RERANKER."
+        ),
+    )
+    reranker_url: str = Field(
+        default="http://localhost:8081",
+        description=(
+            "Base URL of the llama-server exposing /v1/rerank (started with "
+            "--reranking --pooling rank --embedding). Override via "
+            "MEMGENTIC_RERANKER_URL."
+        ),
+    )
+    reranker_model: str = Field(
+        default="Qwen3-Reranker-0.6B-Q4_K_M",
+        description=(
+            "Informational reranker model name (sent in the request body; most "
+            "local servers ignore it). Default = Qwen3-Reranker-0.6B-Q4_K_M "
+            "(Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp, ~396 MB, verified "
+            "working GGUF with intact classifier head). Opt into the 4B variant "
+            "('Qwen3-Reranker-4B-Q4_K_M') for maximum quality. "
+            "Override via MEMGENTIC_RERANKER_MODEL."
+        ),
+    )
+    reranker_top_k: int = Field(
+        default=20,
+        ge=1,
+        description=(
+            "How many top fused candidates to send to the reranker. The rerank "
+            "window: a larger value reorders more of the pool at the cost of "
+            "latency. Override via MEMGENTIC_RERANKER_TOP_K."
+        ),
+    )
+    reranker_min_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "ABSOLUTE floor on the rerank score [0,1]. Candidates scoring below "
+            "this are DROPPED — the 'drop weak results' gate that the relative "
+            "min-max relevance floor cannot provide. Default 0.0 = no floor "
+            "(rerank only reorders). Raise (e.g. 0.3) to prune off-topic hits. "
+            "Override via MEMGENTIC_RERANKER_MIN_SCORE."
+        ),
+    )
+    reranker_timeout_s: float = Field(
+        default=2.0,
+        gt=0.0,
+        description=(
+            "Per-request timeout (seconds) for the llama-server rerank call. "
+            "Kept short so a slow/wedged server cannot stall recall; on timeout "
+            "recall falls back to the fused order. Override via "
+            "MEMGENTIC_RERANKER_TIMEOUT_S."
+        ),
     )
 
     # --- LLM (for summarization) ---
@@ -170,6 +257,51 @@ class MemgenticSettings(BaseSettings):
         default=90,
         description="Half-life in days for memory importance decay",
     )
+    recall_min_relevance: float = Field(
+        default=0.15,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Post-rank relevance floor for recall (0-1). Results whose "
+            "normalized relevance (hybrid) or cosine similarity (basic) is "
+            "below this are dropped. Conservative default 0.15 trims clear "
+            "noise without hiding legitimate hits (observed on-topic cosines "
+            "run 0.2-0.5). Callers may lower it to widen recall."
+        ),
+    )
+    enable_recall_feature_boost: bool = Field(
+        default=True,
+        description=(
+            "Apply query-feature boosts (exact quoted phrases, proper-noun "
+            "mentions, temporal proximity) during hybrid recall ranking. "
+            "Enabled by default; disable to fall back to plain fused ranking."
+        ),
+    )
+    recall_scope: Literal["project", "global"] = Field(
+        default="project",
+        description=(
+            "Default scope for memory recall. 'project' (default) scopes recall "
+            "to the current project/repository, resolved for the MCP server in "
+            "priority order: explicit project arg → configure_session project → "
+            "MEMGENTIC_PROJECT env → the subprocess cwd's git-repo / directory. "
+            "'global' searches every project (the pre-W3 behaviour). Override "
+            "per install or via the MEMGENTIC_RECALL_SCOPE env var. Pass "
+            "project='*' (or 'all'/'global') on a single call to force global "
+            "regardless of this setting."
+        ),
+    )
+    recall_scope_strict: bool = Field(
+        default=False,
+        description=(
+            "How project scope behaves when the current project yields nothing. "
+            "False (default) = project-first with a graceful global fallback: an "
+            "auto-scoped recall that returns fewer than the requested results "
+            "retries globally and merges, so recall is never worse than global. "
+            "True = project-only: auto-scoped recall never falls back, so a "
+            "project with no matching memories returns nothing. Override via the "
+            "MEMGENTIC_RECALL_SCOPE_STRICT env var."
+        ),
+    )
     enable_write_time_dedup: bool = Field(
         default=True,
         description=(
@@ -184,6 +316,35 @@ class MemgenticSettings(BaseSettings):
             "Run fact-distillation node in the intelligence pipeline. Enabled by "
             "default for higher-quality memories; falls back to heuristics when "
             "no LLM is configured. Disable to save one LLM call per chunk."
+        ),
+    )
+    enable_value_gate: bool = Field(
+        default=True,
+        description=(
+            "Drop clearly-worthless memories at ingestion using the distillation "
+            "value signal (is_valuable=False AND value_score below "
+            "value_gate_min_score). Conservative: never drops when the signal is "
+            "absent. Disable to keep every enriched chunk regardless of value."
+        ),
+    )
+    value_gate_min_score: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description=(
+            "Distillation value_score below which a chunk explicitly marked "
+            "is_valuable=False is dropped by the value gate. Lower = more "
+            "conservative (drops fewer)."
+        ),
+    )
+    max_memory_content_chars: int = Field(
+        default=65_536,
+        gt=0,
+        description=(
+            "Hard cap on a single memory's content length (characters). Anything "
+            "longer is truncated with a marker before embedding/storage so one "
+            "pathological turn (e.g. a 765 KB file-read dump) cannot bloat the "
+            "embedder context window or an SQLite row."
         ),
     )
     enable_corroboration: bool = Field(
@@ -250,6 +411,29 @@ class MemgenticSettings(BaseSettings):
         ge=1,
         le=100,
         description="Default sessions per dream when --limit-sessions is not given.",
+    )
+
+    # --- Retention / self-cleaning (GC) ---
+    hard_delete_archived_after_days: int = Field(
+        default=30,
+        ge=0,
+        description=(
+            "Grace period in days before archived/superseded memories become "
+            "eligible for permanent hard-deletion by the retention GC sweep "
+            "(`memgentic gc`). 0 disables GC entirely — memories are still "
+            "archived but never hard-deleted. Pinned and mcp_tool-captured "
+            "memories are NEVER hard-deleted regardless of this setting."
+        ),
+    )
+    gc_interval_seconds: int = Field(
+        default=0,
+        ge=0,
+        description=(
+            "How often the daemon runs the retention GC sweep (seconds). 0 "
+            "(default) disables the in-daemon loop — run `memgentic gc --apply` "
+            "manually or via cron instead. Only takes effect when "
+            "hard_delete_archived_after_days > 0."
+        ),
     )
 
     # --- Daemon ---

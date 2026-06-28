@@ -54,12 +54,76 @@ _OUTPUT_LINE_INDICATORS = re.compile(
     r'^\s*(?:at |File "|Traceback|>>>|\$|>|#|[0-9]+:|\s*\w+\.(?:py|js|ts|go|rs):\d+)'
 )
 
+# Instruction / meta-prompt shapes. These are the system prompts of Claude Code
+# internal tasks (daily-log summarizer, compaction compressor, suggestion-mode,
+# adversarial verifier, skill loaders, continuation banners) that the auto-daemon
+# was ingesting verbatim as "memories" — at the audit 97.1% of rows started with
+# ``Human: `` raw turn text and ~43% of the store was this junk (RC2/RC6).
+#
+# Anchored at the start (after an optional ``Human: `` capture prefix) and kept
+# deliberately narrow to avoid eating real knowledge. ``match`` is anchored, so
+# these only fire when the *memory itself begins* with an instruction.
+_META_PROMPT_PATTERNS = [
+    # Fix 1 (W1 review): removed `the ` from the alternation — "You are the X"
+    # fired on genuine knowledge like "You are the right engineer to ask about
+    # this migration."  Added concrete role nouns instead (summarizer, evaluator,
+    # verifier, classifier, memory consolidation agent) so the pattern stays
+    # tight on real internal-task prompt openings.
+    re.compile(
+        r"^(?:Human:\s*)?You are (?:a |an |summarizing|classifying"
+        r"|an? ADVERSARIAL|a memory|summarizer|evaluator|verifier|classifier"
+        r"|memory consolidation agent)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:Human:\s*)?Apply (?:maximum )?(?:non-destructive )?compression",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:Human:\s*)?Your task is to create a detailed summary of the conversation",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"^(?:Human:\s*)?This session is being continued from a previous conversation",
+        re.IGNORECASE,
+    ),
+    re.compile(r"^(?:Human:\s*)?\[SUGGESTION MODE", re.IGNORECASE),
+    # NOTE: The bare ^(Rules?|Instructions?|Guidelines?|Constraints?):\s pattern
+    # was removed in W1 review (Fix 2) — it incorrectly filtered genuine
+    # knowledge entries that open with project-scoped labels like
+    # "Guidelines: always prefer psycopg 3 over asyncpg for consistency."
+    # Real meta-prompts that used these labels are now caught by the concrete
+    # patterns above (Apply compression, Your task is to create, etc.).
+]
+
+
+def is_meta_prompt(text: str) -> bool:
+    """Return True if ``text`` is shaped like an instruction / meta-prompt.
+
+    Pure-Python and intentionally NOT delegated to the Rust native module: it
+    runs from :func:`is_noise` *before* the native dispatch so a native build
+    that lacks these patterns can never let meta-prompt junk through. See
+    W1 (capture hygiene) / RC2 / RC6.
+    """
+    if not text:
+        return False
+    stripped = text.lstrip()
+    if not stripped:
+        return False
+    return any(pattern.match(stripped) for pattern in _META_PROMPT_PATTERNS)
+
 
 def is_noise(text: str) -> bool:
-    """Return True if this text is noise (pleasantry, acknowledgment, or tool output dump).
+    """Return True if this text is noise (pleasantry, acknowledgment, tool output
+    dump, or instruction/meta-prompt).
 
-    Uses Rust native implementation when available (5-10x faster).
+    The meta-prompt guard runs in pure Python regardless of whether the Rust
+    native implementation is installed, so installing the native module cannot
+    silently reopen the meta-prompt hole. The remaining checks use the Rust
+    native implementation when available (5-10x faster).
     """
+    if is_meta_prompt(text):
+        return True
     if _USE_NATIVE:
         return _native_is_noise(text)
     if not text:
@@ -94,6 +158,12 @@ def is_noise(text: str) -> bool:
 # ---------------------------------------------------------------------------
 # Keyword dictionaries
 # ---------------------------------------------------------------------------
+#
+# DRIFT GUARD (Fix 3, W1 review): the Rust native classifier in
+# memgentic-native/src/textproc/classify.rs maintains a parallel copy of these
+# keyword lists.  Any change here MUST be reflected there (and vice-versa).
+# Do NOT add "from ", "let ", or "return " — they are English-ambiguous and
+# were explicitly removed in W1 (RC6) from both the Python and Rust tables.
 
 CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
     "decision": [
@@ -115,15 +185,17 @@ CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
         "we should use",
     ],
     "code_snippet": [
+        # NOTE: the English-ambiguous triggers "from ", "let ", "return " were
+        # removed in W1 (RC6) — they fired on plain prose. Combined with the
+        # >=2-match rule in heuristic_classify(), a single stray token no
+        # longer mislabels prose as code.
         "```",
         "def ",
         "class ",
         "function ",
         "import ",
         "const ",
-        "let ",
         "var ",
-        "return ",
         "=>",
         "async ",
         "fn ",
@@ -131,7 +203,6 @@ CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
         "struct ",
         "#include",
         "package ",
-        "from ",
         "export ",
         "require(",
         ".py",
@@ -351,10 +422,12 @@ def heuristic_classify(text: str) -> tuple[str, float]:
                 best_score = score
                 best_type = ct
 
-    if best_score == 0:
+    # W1 (RC6): require >=2 keyword matches before committing to a non-raw
+    # type, so a single stray keyword in ordinary prose ("version", "rather",
+    # "supports", a lone "import") does not mislabel the memory.
+    if best_score < 2:
         return "raw_exchange", 0.5
-    confidence = 0.85 if best_score >= 2 else 0.7
-    return best_type, confidence
+    return best_type, 0.85
 
 
 # ---------------------------------------------------------------------------

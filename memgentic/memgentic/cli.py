@@ -281,7 +281,11 @@ def daemon(scan: bool):
             adapters = get_daemon_adapters()
 
             daemon_inst = MemgenticDaemon(
-                settings, pipeline, adapters, metadata_store=metadata_store
+                settings,
+                pipeline,
+                adapters,
+                metadata_store=metadata_store,
+                vector_store=vector_store,
             )
 
             if scan:
@@ -413,6 +417,13 @@ def search(
                 console.print("[yellow]Run 'memgentic doctor' to check your setup.[/]")
                 return
 
+            # Optional cross-encoder reranker (llama-server). No-op when off;
+            # graceful fallback to fused order when the server is unreachable.
+            from memgentic.retrieval.reranker import LlamaCppReranker
+
+            reranker = (
+                LlamaCppReranker.from_settings(settings) if settings.enable_reranker else None
+            )
             try:
                 from memgentic.graph.knowledge import create_knowledge_graph
                 from memgentic.graph.search import hybrid_search
@@ -431,6 +442,7 @@ def search(
                     session_config=config,
                     limit=limit,
                     settings=settings,
+                    reranker=reranker,
                 )
             except ImportError:
                 from memgentic.processing.search_basic import basic_search
@@ -442,7 +454,12 @@ def search(
                     embedder=embedder,
                     session_config=config,
                     limit=limit,
+                    settings=settings,
+                    reranker=reranker,
                 )
+            finally:
+                if reranker is not None:
+                    await reranker.aclose()
 
             if not results:
                 if output_format == "compact":
@@ -1677,9 +1694,12 @@ def dream_apply_cmd(dream_id: str, yes: bool, non_destructive_only: bool):
     async def _run():
         from memgentic.processing.dream import apply_dream
         from memgentic.storage.metadata import MetadataStore
+        from memgentic.storage.vectors import VectorStore
 
         store = MetadataStore(settings.sqlite_path)
+        vector_store = VectorStore(settings)
         await store.initialize()
+        await vector_store.initialize(store)
         try:
             patches = await store.get_dream_patches(dream_id, status="proposed")
             if not patches:
@@ -1691,9 +1711,12 @@ def dream_apply_cmd(dream_id: str, yes: bool, non_destructive_only: bool):
             if not yes and not click.confirm("Continue?"):
                 return
 
+            # Pass the vector store so reductive consolidation (archived /
+            # superseded sources) is also dropped from recall.
             report = await apply_dream(
                 dream_id,
                 metadata_store=store,
+                vector_store=vector_store,
                 only_non_destructive=non_destructive_only,
             )
             table = Table(title=f"Apply Report — {dream_id[:12]}")
@@ -1711,6 +1734,7 @@ def dream_apply_cmd(dream_id: str, yes: bool, non_destructive_only: bool):
                 console.print(f"  [red]{err}[/]")
         finally:
             await store.close()
+            await vector_store.close()
 
     asyncio.run(_run())
 
@@ -4337,6 +4361,167 @@ def briefing(
     exit_code = asyncio.run(_run())
     if exit_code:
         raise SystemExit(exit_code)
+
+
+# ---------------------------------------------------------------------------
+# Retention — self-cleaning (clean) + garbage collection (gc)
+# ---------------------------------------------------------------------------
+
+
+@main.command()
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    help="Actually hard-delete. Without this flag the command is a dry run.",
+)
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt when applying.")
+@click.option("--limit", default=10_000, show_default=True, help="Max candidates to scan.")
+def gc(apply_changes: bool, yes: bool, limit: int):
+    """Garbage-collect expired archived/superseded memories (retention).
+
+    \b
+    Dry-run by default — prints what WOULD be permanently deleted. With --apply
+    it hard-deletes rows that are ALREADY archived/superseded AND older than
+    settings.hard_delete_archived_after_days (and removes their vectors).
+    Pinned and mcp_tool memories are NEVER deleted. Active rows are never
+    touched. Set hard_delete_archived_after_days=0 to disable GC entirely.
+    """
+    from memgentic.processing.retention import run_gc
+    from memgentic.storage.metadata import MetadataStore
+    from memgentic.storage.vectors import VectorStore
+
+    async def _run():
+        metadata_store = MetadataStore(settings.sqlite_path)
+        vector_store = VectorStore(settings)
+        await metadata_store.initialize()
+        await vector_store.initialize(metadata_store)
+        try:
+            if settings.hard_delete_archived_after_days <= 0:
+                console.print(
+                    "[yellow]GC is disabled[/] (hard_delete_archived_after_days=0). "
+                    "Set it > 0 to enable retention."
+                )
+                return
+
+            preview = await run_gc(
+                metadata_store=metadata_store,
+                settings=settings,
+                vector_store=vector_store,
+                limit=limit,
+            )
+            noun = "memory" if preview.candidates == 1 else "memories"
+            console.print(
+                f"[cyan]GC preview[/]: {preview.candidates} archived/superseded {noun} "
+                f"older than {preview.grace_days} day(s) eligible for hard deletion."
+            )
+            for mid in preview.deleted_ids[:20]:
+                console.print(f"  [dim]- {mid}[/]")
+            if preview.candidates > 20:
+                console.print(f"  [dim]... and {preview.candidates - 20} more[/]")
+
+            if not apply_changes:
+                console.print("[yellow]Dry run[/] — re-run with --apply to delete.")
+                return
+            if preview.candidates == 0:
+                return
+            if not yes and not click.confirm(f"Permanently delete {preview.candidates} {noun}?"):
+                return
+
+            report = await run_gc(
+                metadata_store=metadata_store,
+                settings=settings,
+                vector_store=vector_store,
+                apply=True,
+                limit=limit,
+            )
+            console.print(
+                f"[green]GC done[/]: hard-deleted {report.hard_deleted}, "
+                f"vectors removed {report.vectors_deleted}."
+            )
+            for err in report.errors:
+                console.print(f"  [red]{err}[/]")
+        finally:
+            await metadata_store.close()
+            await vector_store.close()
+
+    asyncio.run(_run())
+
+
+@main.command()
+@click.option(
+    "--apply",
+    "apply_changes",
+    is_flag=True,
+    help="Actually archive. Without this flag the command is a dry run.",
+)
+@click.option("--yes", "-y", is_flag=True, help="Skip the confirmation prompt when applying.")
+@click.option("--limit", default=50_000, show_default=True, help="Max active memories to scan.")
+def clean(apply_changes: bool, yes: bool, limit: int):
+    """One-time bulk cleanup — archive duplicate clusters + stored noise.
+
+    \b
+    Keeps the best of each duplicate cluster (pinned > mcp_tool > importance >
+    newest) and archives the rest, plus obvious noise the capture-hygiene
+    filters now catch (meta-prompts, acknowledgments, tool dumps). Soft-delete
+    only (status=archived) so it stays recoverable — hard deletion is left to
+    `memgentic gc` after the grace period. NEVER touches pinned or mcp_tool
+    memories. Dry-run by default; --apply to archive.
+    """
+    from memgentic.processing.retention import run_clean
+    from memgentic.storage.metadata import MetadataStore
+    from memgentic.storage.vectors import VectorStore
+
+    async def _run():
+        metadata_store = MetadataStore(settings.sqlite_path)
+        vector_store = VectorStore(settings)
+        await metadata_store.initialize()
+        await vector_store.initialize(metadata_store)
+        try:
+            preview = await run_clean(metadata_store=metadata_store, limit=limit)
+
+            table = Table(title="Clean preview")
+            table.add_column("Metric", style="bold")
+            table.add_column("Value")
+            table.add_row("Duplicate clusters", str(preview.dup_clusters))
+            table.add_row("Duplicate rows to archive", str(preview.dup_archived))
+            table.add_row("Noise rows to archive", str(preview.noise_archived))
+            table.add_row("Total to archive", str(preview.total_archived))
+            table.add_row("Preserved (pinned)", str(preview.preserved_pinned))
+            table.add_row("Preserved (mcp_tool)", str(preview.preserved_mcp_tool))
+            console.print(table)
+            if preview.by_content_type:
+                breakdown = ", ".join(
+                    f"{k}={v}" for k, v in sorted(preview.by_content_type.items())
+                )
+                console.print(f"[dim]By content type:[/] {breakdown}")
+
+            if not apply_changes:
+                console.print("[yellow]Dry run[/] — re-run with --apply to archive.")
+                return
+            if preview.total_archived == 0:
+                return
+            noun = "memory" if preview.total_archived == 1 else "memories"
+            if not yes and not click.confirm(f"Archive {preview.total_archived} {noun}?"):
+                return
+
+            report = await run_clean(
+                metadata_store=metadata_store,
+                vector_store=vector_store,
+                apply=True,
+                limit=limit,
+            )
+            console.print(
+                f"[green]Clean done[/]: archived {report.total_archived} "
+                f"(dups={report.dup_archived}, noise={report.noise_archived})."
+            )
+            for err in report.errors:
+                console.print(f"  [red]{err}[/]")
+        finally:
+            await metadata_store.close()
+            await vector_store.close()
+
+    asyncio.run(_run())
 
 
 # ---------------------------------------------------------------------------

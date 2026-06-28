@@ -174,13 +174,20 @@ async def test_collection_memories_list_pagination(client: AsyncClient):
     coll_resp = await client.post("/api/v1/collections", json={"name": "Paginated"})
     collection_id = coll_resp.json()["id"]
 
-    # Create 3 memories and add them to the collection
+    # Create 3 SEMANTICALLY DISTINCT memories (write-time dedup collapses
+    # near-identical inserts, so an index-only difference would yield one row)
+    # and add them to the collection.
+    _contents = [
+        "Postgres uses MVCC to isolate concurrent transactions",
+        "React reconciles the UI through a virtual DOM diff",
+        "Kubernetes bin-packs pods onto nodes by their resource requests",
+    ]
     memory_ids = []
-    for i in range(3):
+    for content in _contents:
         resp = await client.post(
             "/api/v1/memories",
             json={
-                "content": f"Distinct memory number {i} for pagination tests",
+                "content": content,
                 "source": "claude_code",
             },
         )

@@ -15,9 +15,22 @@ from pathlib import Path
 
 import structlog
 
+from memgentic.models import ContentType, SessionConfig
 from memgentic.storage.metadata import MetadataStore
 
 logger = structlog.get_logger()
+
+# Curated content types worth injecting into a fresh session. Excludes
+# raw_exchange / conversation_summary / entity_relationship so the
+# SessionStart briefing surfaces distilled signal instead of whatever is
+# merely most recent (which is often auto-captured noise).
+BRIEFING_CONTENT_TYPES: list[ContentType] = [
+    ContentType.DECISION,
+    ContentType.FACT,
+    ContentType.PREFERENCE,
+    ContentType.LEARNING,
+    ContentType.ACTION_ITEM,
+]
 
 
 async def generate_briefing(
@@ -25,14 +38,32 @@ async def generate_briefing(
     *,
     hours: int = 48,
     limit: int = 5,
+    project: str | None = None,
 ) -> str:
     """Generate a compact briefing of recent memories.
 
     Returns a short text suitable for hook additionalContext injection.
-    Queries SQLite only — no embedding or vector search needed.
+    Queries SQLite only — no embedding or vector search needed. Only curated
+    content types (decisions, facts, preferences, learnings, action items)
+    are included so noise never gets injected into a new session.
+
+    When ``project`` is set the briefing is scoped to that project first; if
+    the project has no recent curated memories it falls back to an unscoped
+    briefing so a fresh session is never left with an empty context.
     """
     since = datetime.now(UTC) - timedelta(hours=hours)
-    memories = await metadata_store.get_memories_since(since, limit=limit)
+    curated = SessionConfig(include_content_types=BRIEFING_CONTENT_TYPES)
+    if project:
+        curated.include_projects = [project]
+    memories = await metadata_store.get_memories_since(since, session_config=curated, limit=limit)
+
+    if not memories and project:
+        # Project yielded nothing recent — widen to all projects (graceful
+        # fallback) rather than inject an empty briefing.
+        unscoped = SessionConfig(include_content_types=BRIEFING_CONTENT_TYPES)
+        memories = await metadata_store.get_memories_since(
+            since, session_config=unscoped, limit=limit
+        )
 
     if not memories:
         # Fallback: surface the most important all-time memories so a fresh

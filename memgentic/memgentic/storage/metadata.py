@@ -224,6 +224,11 @@ class MetadataStore:
         """Insert or update a memory record."""
         if not self._db:
             raise StorageError("MetadataStore not initialized — call initialize() first")
+        # ``updated_at`` is stamped server-side on every save so the retention
+        # GC sweep has a reliable "last modified" anchor (e.g. the moment a row
+        # was archived/superseded). The Memory model carries no updated_at
+        # field — it is bookkeeping only.
+        now_iso = datetime.now(UTC).isoformat()
         await self._db.execute(
             """
             INSERT OR REPLACE INTO memories
@@ -232,8 +237,8 @@ class MetadataStore:
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
              user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
-             project)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             project, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory.id,
@@ -264,6 +269,7 @@ class MetadataStore:
                 memory.capture_profile,
                 memory.dual_sibling_id,
                 memory.project or "",
+                now_iso,
             ),
         )
         await self._db.commit()
@@ -272,6 +278,7 @@ class MetadataStore:
         """Insert multiple memories in a single transaction."""
         if not self._db:
             raise StorageError("MetadataStore not initialized — call initialize() first")
+        now_iso = datetime.now(UTC).isoformat()
         rows = [
             (
                 m.id,
@@ -300,6 +307,7 @@ class MetadataStore:
                 m.capture_profile,
                 m.dual_sibling_id,
                 m.project or "",
+                now_iso,
             )
             for m in memories
         ]
@@ -311,8 +319,8 @@ class MetadataStore:
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
              user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
-             project)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             project, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -758,20 +766,129 @@ class MetadataStore:
         await self._db.commit()
 
     async def update_memory_status(self, memory_id: str, status: str, user_id: str = "") -> None:
-        """Update a memory's lifecycle status (active, archived, superseded)."""
+        """Update a memory's lifecycle status (active, archived, superseded).
+
+        Also stamps ``updated_at`` so the retention GC sweep can measure the
+        grace period from the moment the row was archived/superseded.
+        """
         if not self._db:
             raise StorageError("MetadataStore not initialized")
+        now_iso = datetime.now(UTC).isoformat()
         if user_id:
             await self._db.execute(
-                "UPDATE memories SET status = ? WHERE id = ? AND user_id = ?",
-                (status, memory_id, user_id),
+                "UPDATE memories SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+                (status, now_iso, memory_id, user_id),
             )
         else:
             await self._db.execute(
-                "UPDATE memories SET status = ? WHERE id = ?",
-                (status, memory_id),
+                "UPDATE memories SET status = ?, updated_at = ? WHERE id = ?",
+                (status, now_iso, memory_id),
             )
         await self._db.commit()
+
+    async def get_gc_candidates(
+        self,
+        *,
+        before_iso: str,
+        limit: int = 10_000,
+        user_id: str = "",
+    ) -> list[Memory]:
+        """Return memories eligible for retention hard-deletion.
+
+        A row is a candidate only when it is **already soft-deleted**
+        (``status IN ('archived','superseded')``) AND its last-modified anchor
+        (``COALESCE(updated_at, created_at)``) is older than ``before_iso``.
+
+        The two absolute safety rules are enforced directly in SQL: pinned rows
+        (``is_pinned = 1``) and owner-deliberate ``mcp_tool`` captures are
+        excluded and can never be returned as candidates. Active rows are never
+        returned.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        params: list = [before_iso]
+        user_clause = ""
+        if user_id:
+            user_clause = "AND user_id = ?"
+            params.append(user_id)
+        params.append(limit)
+        sql = f"""
+            SELECT * FROM memories
+            WHERE status IN ('archived', 'superseded')
+              AND is_pinned = 0
+              AND capture_method != 'mcp_tool'
+              AND COALESCE(updated_at, created_at) < ?
+              {user_clause}
+            ORDER BY COALESCE(updated_at, created_at) ASC
+            LIMIT ?
+        """
+        cursor = await self._db.execute(sql, params)
+        rows = await cursor.fetchall()
+        return [self._row_to_memory(row) for row in rows]
+
+    async def hard_delete_memories(self, ids: list[str]) -> int:
+        """Permanently DELETE memories by id and return the rows removed.
+
+        Safety-guarded at the SQL level (defense in depth): the DELETE only
+        affects rows that are ``archived``/``superseded``, **not** pinned, and
+        **not** ``mcp_tool`` captures — so even a misused call can never drop an
+        active, pinned, or owner-deliberate memory. Vector cleanup is the
+        caller's responsibility (see ``retention.run_gc``).
+
+        After the DELETE, any surviving row whose ``supersedes`` or
+        ``corroborated_by`` JSON array references a just-purged id has that id
+        removed (dangling provenance ref scrub). Both the DELETE and the
+        provenance scrub share the same transaction.
+        """
+        if not self._db:
+            raise StorageError("MetadataStore not initialized")
+        if not ids:
+            return 0
+        placeholders = ",".join("?" * len(ids))
+        guard_where = (
+            f"id IN ({placeholders}) "
+            "AND status IN ('archived', 'superseded') "
+            "AND is_pinned = 0 "
+            "AND capture_method != 'mcp_tool'"
+        )
+        # Discover which ids will actually survive the guard before deleting,
+        # so we only scrub ids that are truly purged (not merely rejected by the
+        # SQL safety guard and still alive in the store).
+        pre = await self._db.execute(f"SELECT id FROM memories WHERE {guard_where}", ids)
+        pre_rows = await pre.fetchall()
+        to_purge: set[str] = {row["id"] for row in pre_rows}
+
+        cursor = await self._db.execute(f"DELETE FROM memories WHERE {guard_where}", ids)
+        deleted = cursor.rowcount
+
+        # Scrub provenance arrays on surviving rows — same transaction as DELETE.
+        if to_purge:
+            await self._scrub_provenance_refs(to_purge)
+
+        await self._db.commit()
+        logger.info("metadata_store.hard_deleted", requested=len(ids), deleted=deleted)
+        return deleted
+
+    async def _scrub_provenance_refs(self, purged_ids: set[str]) -> None:
+        """Remove purged ids from ``supersedes`` / ``corroborated_by`` on surviving rows.
+
+        Called within the hard-delete transaction (no separate commit). Only
+        rows that actually reference a purged id are updated.
+        """
+        if not self._db:
+            return
+        cursor = await self._db.execute("SELECT id, supersedes, corroborated_by FROM memories")
+        rows = await cursor.fetchall()
+        for row in rows:
+            sups: list[str] = json.loads(row["supersedes"]) if row["supersedes"] else []
+            corrs: list[str] = json.loads(row["corroborated_by"]) if row["corroborated_by"] else []
+            new_sups = [x for x in sups if x not in purged_ids]
+            new_corrs = [x for x in corrs if x not in purged_ids]
+            if new_sups != sups or new_corrs != corrs:
+                await self._db.execute(
+                    "UPDATE memories SET supersedes = ?, corroborated_by = ? WHERE id = ?",
+                    (json.dumps(new_sups), json.dumps(new_corrs), row["id"]),
+                )
 
     async def update_corroboration(
         self, memory_id: str, platform: str, new_confidence: float
@@ -819,6 +936,11 @@ class MetadataStore:
             placeholders = ",".join("?" for _ in config.include_content_types)
             conditions.append(f"content_type IN ({placeholders})")
             params.extend(ct.value for ct in config.include_content_types)
+
+        if config.exclude_content_types:
+            placeholders = ",".join("?" for _ in config.exclude_content_types)
+            conditions.append(f"content_type NOT IN ({placeholders})")
+            params.extend(ct.value for ct in config.exclude_content_types)
 
         if config.min_confidence > 0:
             conditions.append("confidence >= ?")

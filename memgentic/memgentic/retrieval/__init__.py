@@ -26,6 +26,7 @@ from memgentic.retrieval.reranker import (
     RerankCandidate,
     Reranker,
     RerankResult,
+    maybe_rerank,
 )
 
 __all__ = [
@@ -36,4 +37,5 @@ __all__ = [
     "RerankCandidate",
     "Reranker",
     "RerankResult",
+    "maybe_rerank",
 ]

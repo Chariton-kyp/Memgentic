@@ -414,6 +414,70 @@ class TestPrefixFormatters:
         assert format_document("nomic-embed-text", "d") == "d"
 
 
+class TestOllamaDimensionsParameter:
+    """Verify that _embed_ollama passes the configured dimensions to Ollama
+    (required for qwen3-embedding:4b MRL truncation) and validates the
+    returned vector length.
+    """
+
+    async def test_embed_ollama_sends_dimensions_param(self, tmp_path):
+        """The Ollama /api/embed request body must include ``dimensions``."""
+        captured_bodies: list[dict] = []
+
+        def _capture_handler(request: httpx.Request) -> httpx.Response:
+            import json as _json
+
+            captured_bodies.append(_json.loads(request.content.decode()))
+            return httpx.Response(200, json={"embeddings": [[0.1] * DIMS]})
+
+        settings = _make_settings(tmp_path)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_capture_handler))
+        try:
+            await embedder.embed("test text")
+        finally:
+            await embedder.close()
+
+        assert len(captured_bodies) == 1
+        body = captured_bodies[0]
+        assert "dimensions" in body, "Ollama request must include 'dimensions' for MRL truncation"
+        assert body["dimensions"] == DIMS
+
+    async def test_embed_ollama_raises_on_short_vector(self, tmp_path):
+        """If Ollama returns fewer dims than configured, raise EmbeddingError."""
+        short_vec = [0.1] * (DIMS - 10)  # deliberately under-dimensioned
+
+        def _short_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"embeddings": [short_vec]})
+
+        settings = _make_settings(tmp_path)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_short_handler))
+        try:
+            with pytest.raises(EmbeddingError, match="dimension mismatch"):
+                await embedder.embed("short vector test")
+        finally:
+            await embedder.close()
+
+    async def test_embed_ollama_truncates_overlong_vector_and_passes(self, tmp_path):
+        """If Ollama returns MORE dims than configured (old build ignoring `dimensions`),
+        truncate silently and succeed — no error.
+        """
+        long_vec = [0.1] * (DIMS + 200)
+
+        def _long_handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"embeddings": [long_vec]})
+
+        settings = _make_settings(tmp_path)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_long_handler))
+        try:
+            result = await embedder.embed("overlong vector test")
+            assert len(result) == DIMS
+        finally:
+            await embedder.close()
+
+
 class TestEmbedQueryDocument:
     """Verify the public embed_query / embed_document methods actually
     apply the prefix when calling Ollama (regression for the missing-
@@ -442,8 +506,7 @@ class TestEmbedQueryDocument:
         try:
             await embedder.embed_query("find auth bug")
             assert captured == [
-                "Instruct: Given a search query, retrieve relevant memory passages "
-                "that match the query\nQuery: find auth bug"
+                "Instruct: Retrieve relevant memories and past decisions\nQuery: find auth bug"
             ]
         finally:
             await embedder.close()

@@ -81,6 +81,11 @@ class IntelligenceState(TypedDict, total=False):
 # Heuristic fallbacks (same logic as existing adapters)
 # ---------------------------------------------------------------------------
 
+# DRIFT GUARD (Fix 3, W1 review): the Rust native classifier in
+# memgentic-native/src/textproc/classify.rs maintains a parallel copy of these
+# keyword lists.  Any change here MUST be reflected there (and vice-versa).
+# Do NOT add "from ", "let ", or "return " — they are English-ambiguous and
+# were explicitly removed in W1 (RC6) from both the Python and Rust tables.
 _CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
     "decision": [
         "decided",
@@ -101,15 +106,17 @@ _CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
         "we should use",
     ],
     "code_snippet": [
+        # NOTE: the English-ambiguous triggers "from ", "let ", "return " were
+        # removed in W1 (RC6) — they fired on plain prose. Combined with the
+        # >=2-match rule in _heuristic_classify(), a single stray token no
+        # longer mislabels prose as code.
         "```",
         "def ",
         "class ",
         "function ",
         "import ",
         "const ",
-        "let ",
         "var ",
-        "return ",
         "=>",
         "async ",
         "fn ",
@@ -117,7 +124,6 @@ _CONTENT_TYPE_KEYWORDS: dict[str, list[str]] = {
         "struct ",
         "#include",
         "package ",
-        "from ",
         "export ",
         "require(",
         ".py",
@@ -224,10 +230,12 @@ def _heuristic_classify(text: str) -> tuple[str, float]:
                 best_score = score
                 best_type = ct
 
-    if best_score == 0:
+    # W1 (RC6): require >=2 keyword matches before committing to a non-raw
+    # type, so a single stray keyword in ordinary prose ("version", "rather",
+    # "supports", a lone "import") does not mislabel the memory.
+    if best_score < 2:
         return "raw_exchange", 0.5
-    confidence = 0.85 if best_score >= 2 else 0.7
-    return best_type, confidence
+    return best_type, 0.85
 
 
 _TECH_KEYWORDS = {

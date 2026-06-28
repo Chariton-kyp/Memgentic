@@ -137,6 +137,14 @@ class ClaudeCodeAdapter(BaseAdapter):
         current_exchange: list[str] = []
 
         for turn in turns:
+            # Skip sidechain turns — Claude Code writes sub-agent / Task-tool
+            # side conversations (daily-log summarizers, compaction compressors,
+            # adversarial verifiers, skill loaders) with ``isSidechain: true``.
+            # These are internal task prompts, not user-facing knowledge, and
+            # were ~43% of the store at the memory-quality audit (RC2).
+            if turn.get("isSidechain"):
+                continue
+
             role = turn.get("role", turn.get("type", ""))
 
             # Skip infrastructure turns

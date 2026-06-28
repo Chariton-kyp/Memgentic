@@ -44,19 +44,37 @@ def _sample_chunks():
 
 
 async def test_classify_heuristic_mode():
-    """Without LLM, classify uses heuristics."""
+    """Without LLM, classify uses heuristics.
+
+    W1 (RC6): the heuristic classifier requires >=2 keyword matches before it
+    commits to a non-raw type, so each fixture carries two signals.
+    """
     llm = _mock_llm(available=False)
+    chunks = [
+        {
+            # decision signals: decided / chose / finalized / decision
+            "content": "We decided to use FastAPI; we chose it and finalized that decision.",
+            "content_type": "raw_exchange",
+            "confidence": 0.5,
+            "topics": ["fastapi"],
+        },
+        {
+            # code signals: "import " and "def "
+            "content": "Here's the code: import os\ndef hello(): return 'world'",
+            "content_type": "raw_exchange",
+            "confidence": 0.5,
+            "topics": ["python"],
+        },
+    ]
     state: IntelligenceState = {
-        "chunks": _sample_chunks(),
+        "chunks": chunks,
         "llm_client": llm,
         "errors": [],
     }
     result = await classify_node(state)
     classified = result["classified_chunks"]
     assert len(classified) == 2
-    # "decided" keyword should trigger "decision" classification
     assert classified[0]["content_type"] == "decision"
-    # "def " keyword should trigger "code_snippet"
     assert classified[1]["content_type"] == "code_snippet"
 
 

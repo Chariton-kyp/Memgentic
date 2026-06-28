@@ -29,6 +29,7 @@ Pipeline (LangGraph):
 
 from __future__ import annotations
 
+import contextlib
 import math
 from collections import Counter
 from dataclasses import dataclass, field
@@ -62,6 +63,7 @@ from memgentic.processing.dream_prompts import (
     GATHER_SIGNAL_USER_TEMPLATE,
 )
 from memgentic.processing.llm import LLMClient
+from memgentic.processing.retention import is_protected
 
 logger = structlog.get_logger()
 
@@ -116,6 +118,8 @@ class ApplyReport:
     inserted_memories: list[str] = field(default_factory=list)
     superseded_memories: list[str] = field(default_factory=list)
     archived_memories: list[str] = field(default_factory=list)
+    # Sources left untouched because they are pinned / mcp_tool (W4 safety).
+    skipped_protected: int = 0
     chronograph_triples: int = 0
     errors: list[str] = field(default_factory=list)
 
@@ -916,6 +920,7 @@ async def apply_dream(
     dream_id: str,
     *,
     metadata_store,
+    vector_store=None,
     only_non_destructive: bool = False,
     user_id: str = "",
 ) -> ApplyReport:
@@ -925,6 +930,12 @@ async def apply_dream(
     supersede / archive_stale) are left as ``proposed`` for later explicit
     review. Non-destructive actions (normalize_date / insert_insight /
     update_field) are applied.
+
+    Reductive consolidation (W4): a successful INSERT_INSIGHT now ARCHIVES the
+    source memories it explicitly supersedes, and MERGE / SUPERSEDE /
+    ARCHIVE_STALE drop the consumed rows' vectors when ``vector_store`` is
+    provided — so the active count goes DOWN. Pinned and mcp_tool sources are
+    NEVER archived/superseded (W4 safety, via ``is_protected``).
     """
     report = ApplyReport(dream_id=dream_id)
     run = await metadata_store.get_dream_run(dream_id)
@@ -943,7 +954,13 @@ async def apply_dream(
             continue
 
         try:
-            await _apply_patch(patch, metadata_store=metadata_store, user_id=user_id, report=report)
+            await _apply_patch(
+                patch,
+                metadata_store=metadata_store,
+                vector_store=vector_store,
+                user_id=user_id,
+                report=report,
+            )
             await metadata_store.update_dream_patch_status(
                 patch.id, DreamPatchStatus.APPLIED, applied_at=now
             )
@@ -967,10 +984,21 @@ async def apply_dream(
     return report
 
 
+async def _drop_vector(vector_store, memory_id: str) -> None:
+    """Best-effort removal of a memory's vector (keeps soft-deleted rows out of
+    recall). A None store or any backend error is swallowed — vector cleanup
+    must never block a metadata mutation."""
+    if vector_store is None:
+        return
+    with contextlib.suppress(Exception):
+        await vector_store.delete_memory(memory_id)
+
+
 async def _apply_patch(
     patch: DreamPatch,
     *,
     metadata_store,
+    vector_store=None,
     user_id: str,
     report: ApplyReport,
 ) -> None:
@@ -1002,8 +1030,19 @@ async def _apply_patch(
         for other in loaded:
             if other.id == canonical.id:
                 continue
+            # W4 safety: a pinned / mcp_tool source is never superseded.
+            if is_protected(other):
+                report.skipped_protected += 1
+                logger.info(
+                    "dream.apply.skip_protected_merge",
+                    memory_id=other.id[:8],
+                    pinned=other.is_pinned,
+                    capture_method=other.source.capture_method.value,
+                )
+                continue
             other.status = MemoryStatus.SUPERSEDED
             await metadata_store.save_memory(other)
+            await _drop_vector(vector_store, other.id)
             if other.id not in canonical.supersedes:
                 canonical.supersedes.append(other.id)
             report.superseded_memories.append(other.id)
@@ -1012,9 +1051,15 @@ async def _apply_patch(
 
     if action == DreamPatchAction.ARCHIVE_STALE:
         for mid in targets:
+            src = await metadata_store.get_memory(mid, user_id=user_id)
+            if src is not None and is_protected(src):
+                report.skipped_protected += 1
+                logger.info("dream.apply.skip_protected_archive", memory_id=mid[:8])
+                continue
             await metadata_store.update_memory_status(
                 mid, MemoryStatus.ARCHIVED.value, user_id=user_id
             )
+            await _drop_vector(vector_store, mid)
             report.archived_memories.append(mid)
         return
 
@@ -1058,6 +1103,29 @@ async def _apply_patch(
         )
         await metadata_store.save_memory(memory)
         report.inserted_memories.append(memory.id)
+
+        # Reductive consolidation (W4): the insight explicitly declares which
+        # source memories it replaces via ``new_metadata.supersedes`` (NOT the
+        # citation ``target_memory_ids``, which stay active as evidence). Archive
+        # those sources so the active count drops — honoring the safety rules.
+        for sid in memory.supersedes:
+            src = await metadata_store.get_memory(sid, user_id=user_id)
+            if src is None or src.status != MemoryStatus.ACTIVE:
+                continue
+            if is_protected(src):
+                report.skipped_protected += 1
+                logger.info(
+                    "dream.apply.skip_protected_source",
+                    memory_id=sid[:8],
+                    pinned=src.is_pinned,
+                    capture_method=src.source.capture_method.value,
+                )
+                continue
+            await metadata_store.update_memory_status(
+                sid, MemoryStatus.ARCHIVED.value, user_id=user_id
+            )
+            await _drop_vector(vector_store, sid)
+            report.archived_memories.append(sid)
         return
 
     if action == DreamPatchAction.UPDATE_FIELD:

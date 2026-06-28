@@ -1,46 +1,59 @@
 """Cross-encoder reranking for the retrieval cascade.
 
-Reranking takes a query and a candidate list (typically top-20 from the
+Reranking takes a query and a candidate list (typically the top-20 from the
 hybrid retriever) and re-scores each candidate against the query with a
-cross-encoder. Cross-encoders see the query and candidate together and
-attend across both, so they catch fine-grained matches that bi-encoders
-(our embedder) cannot.
+cross-encoder. Cross-encoders see the query and candidate together and attend
+across both, so they catch fine-grained matches that bi-encoders (our embedder)
+cannot. Crucially for Memgentic, the rerank score is an **absolute** relevance
+signal in [0, 1] — unlike the relative min-max ``relevance`` produced by RRF
+fusion — so it doubles as a "drop clearly-weak results" gate.
 
-Why Qwen3-Reranker-0.6B specifically:
-- Same family as our Qwen3-Embedding-0.6B, so vocabulary, tokenizer,
-  language coverage, and instruction format are aligned.
-- Apache 2.0, 1.2 GB BF16 (370 MB at Q4_K_M).
-- MTEB-R 65.80 — beats BGE-reranker-v2-m3 (~9 nDCG points) at the same
-  size class.
-- Targets ~40-80 ms for 20 candidates × ~512 tokens on consumer GPU.
+Serving: llama-server, NOT Ollama
+---------------------------------
+Ollama cannot serve rerankers (llama.cpp issue #16076 — no rank pooling). The
+reranker therefore runs on llama.cpp's ``llama-server``::
 
-Why pin to ggml-org / Voodisss GGUFs:
-Many community Qwen3-Reranker GGUF conversions silently drop the
-classifier head tensors and produce score values like 4.5e-23 instead of
-real relevance scores. Use ``ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF`` or
-``Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp`` only.
+    llama-server -m Qwen3-Reranker-0.6B-Q4_K_M.gguf \\
+        --reranking --pooling rank --embedding --port 8081
 
-Provider strategy:
-- Default: llama-cpp-python loading the GGUF (fastest local path, runs
-  on CPU + GPU, integrates with existing Memgentic stack)
-- Fallback: HuggingFace ``transformers`` + ``sentence-transformers``
-  (heavier but more portable for environments without llama-cpp)
-- Production may swap in Ollama once Ollama gains native reranker
-  support (roadmap)
+That exposes a Jina/Cohere-style ``/v1/rerank`` endpoint. ``LlamaCppReranker``
+is a thin async HTTP client over that endpoint: it POSTs ``{query, documents}``
+and reads back per-document ``relevance_score`` values (the Qwen3-Reranker
+yes/no logit ratio, already squashed to [0, 1] by the server).
 
-This module defines the abstract ``Reranker`` interface plus a
-``LlamaCppReranker`` implementation. The harness and the cascade both
-consume the interface, so swapping implementations later is one
-constructor call.
+Pin to the verified-working GGUFs
+---------------------------------
+Many community Qwen3-Reranker GGUF conversions silently drop the classifier
+head and emit garbage scores (e.g. 4.5e-23). Use the **Voodisss** repos —
+``Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp`` (default, light, ~396 MB Q4_K_M)
+or the 4B variant for maximum quality. See ``docs/reranker-setup.md``.
+
+Graceful degradation
+---------------------
+The reranker is OFF by default and entirely optional. When it is disabled, or
+the llama-server is unreachable / errors / times out, recall MUST fall back to
+the fused order unchanged — it can never break because a reranker is off or
+down. ``LlamaCppReranker`` enforces a short timeout and caches a "down" state
+for a short window so that one outage does not make every subsequent query pay
+the full connect timeout. ``maybe_rerank`` is the single integration point both
+search paths call, and it is a no-op on any failure.
+
+This module defines the abstract ``Reranker`` interface, the ``MockReranker``
+(tests), the ``LlamaCppReranker`` HTTP client, and the ``maybe_rerank`` helper.
 """
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
+import httpx
 import structlog
+
+if TYPE_CHECKING:
+    from memgentic.config import MemgenticSettings
 
 logger = structlog.get_logger()
 
@@ -51,8 +64,9 @@ class RerankCandidate:
     cross-encoder will read.
 
     Carries an optional ``payload`` so callers (the harness, MCP tools,
-    cascade orchestrator) can attach session_id, content_type, etc., and
-    get them back on the rerank result without a second lookup.
+    cascade orchestrator) can attach session_id, content_type, the full
+    fused-result dict, etc., and get them back on the rerank result without a
+    second lookup.
     """
 
     id: str
@@ -62,7 +76,7 @@ class RerankCandidate:
 
 @dataclass
 class RerankResult:
-    """One reranked candidate with its cross-encoder score."""
+    """One reranked candidate with its cross-encoder score (absolute, [0, 1])."""
 
     id: str
     score: float
@@ -70,8 +84,8 @@ class RerankResult:
 
 
 class Reranker(Protocol):
-    """Reranker interface. Implementations: ``LlamaCppReranker``,
-    ``HuggingFaceReranker`` (future), ``MockReranker`` (tests).
+    """Reranker interface. Implementations: ``LlamaCppReranker`` (llama-server
+    HTTP), ``MockReranker`` (tests).
     """
 
     async def rerank(
@@ -80,19 +94,22 @@ class Reranker(Protocol):
         candidates: Sequence[RerankCandidate],
         top_k: int | None = None,
     ) -> list[RerankResult]:
-        """Re-score ``candidates`` against ``query`` and return them
-        sorted descending by score. ``top_k`` truncates the output;
-        ``None`` returns all candidates.
+        """Re-score ``candidates`` against ``query`` and return them sorted
+        descending by score. ``top_k`` truncates the output; ``None`` returns
+        all candidates.
+
+        Implementations MUST NOT raise on a transport/server failure — they
+        return ``[]`` so the caller can fall back to the un-reranked order.
         """
         ...
 
 
 class MockReranker:
-    """Test/dev reranker — deterministic scoring based on substring
-    overlap. Lets harness/cascade tests run without loading a real model.
+    """Test/dev reranker — deterministic scoring based on substring overlap.
+    Lets harness/cascade tests run without a real llama-server.
 
-    Score: number of unique whitespace-separated tokens shared between
-    query and candidate text, normalised by log(1 + |query tokens|).
+    Score: number of unique whitespace-separated tokens shared between query
+    and candidate text, normalised by log(1 + |query tokens|).
     """
 
     async def rerank(
@@ -120,80 +137,81 @@ class MockReranker:
 
 
 class LlamaCppReranker:
-    """Qwen3-Reranker-0.6B via llama-cpp-python.
+    """Qwen3-Reranker served by ``llama-server`` over HTTP (``/v1/rerank``).
 
-    Loads the GGUF on first ``rerank`` call (lazy) so importing the
-    module does not pay model-load cost. Subsequent calls reuse the
-    loaded model.
+    Thin async HTTP client. POSTs the query + candidate documents to
+    ``{url}/v1/rerank`` and reads back per-document relevance scores. The server
+    applies the Qwen3-Reranker prompt template and rank pooling internally, so
+    no prompt construction happens here — that avoids the silent-broken-GGUF
+    trap entirely (a broken conversion fails loudly at server start, not here).
 
     Args:
-        model_path: Path to a Qwen3-Reranker GGUF file from one of the
-            verified-working sources. Default reads ``MEMGENTIC_RERANKER_GGUF``
-            env var if set, else falls back to a sensible HuggingFace
-            cache path.
-        n_ctx: Context window the model is loaded with. 8192 is plenty
-            for one query + top-20 candidates × ~512 tokens each.
-        n_gpu_layers: Number of layers offloaded to GPU. -1 = all layers
-            (fastest if you have VRAM); 0 = pure CPU.
-        verbose: Pass-through to llama-cpp.
+        url: Base URL of the llama-server (default ``http://localhost:8081``).
+        model: Informational model name sent in the request body. Most local
+            servers ignore it and use whatever GGUF they loaded.
+        timeout_s: Per-request timeout. Kept short (default 2 s) so a slow or
+            wedged server cannot stall recall.
+        down_cache_s: After a failure the server is treated as "down" for this
+            many seconds; ``rerank`` short-circuits to ``[]`` during the window
+            so every query does not re-pay the connect timeout.
+        client: Optional injected ``httpx.AsyncClient`` (tests pass a
+            ``MockTransport`` client). When omitted, one is created lazily and
+            owned by this instance.
 
-    Notes:
-        - Uses ``Llama.create_chat_completion`` with the Qwen3-Reranker
-          prompt template (chat-completion style), parses the
-          yes/no logit ratio, returns it as the score.
-        - The Qwen3-Reranker prompt template is documented in the model
-          card; we follow it exactly to avoid the silent-broken-conversion
-          trap.
+    Graceful degradation: any transport error, non-2xx status, timeout, or
+    malformed body marks the server down, logs a single throttled warning, and
+    returns ``[]`` — never raises.
     """
 
     def __init__(
         self,
-        model_path: str | None = None,
+        url: str = "http://localhost:8081",
         *,
-        n_ctx: int = 8192,
-        n_gpu_layers: int = -1,
-        verbose: bool = False,
+        model: str | None = None,
+        timeout_s: float = 2.0,
+        down_cache_s: float = 30.0,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
-        self.model_path = model_path
-        self.n_ctx = n_ctx
-        self.n_gpu_layers = n_gpu_layers
-        self.verbose = verbose
-        self._llm: Any = None  # Llama instance, lazy-loaded
+        self.url = url.rstrip("/")
+        self.model = model or None
+        self.timeout_s = timeout_s
+        self.down_cache_s = down_cache_s
+        self._client = client
+        self._owns_client = client is None
+        # monotonic deadline until which the server is presumed unreachable
+        self._down_until = 0.0
 
-    def _load(self) -> None:
-        if self._llm is not None:
-            return
-        try:
-            from llama_cpp import Llama  # type: ignore[import-not-found]
-        except ImportError as exc:
-            raise RuntimeError(
-                "LlamaCppReranker requires the llama-cpp-python optional "
-                "dependency. Install with: pip install llama-cpp-python "
-                "(or `uv pip install llama-cpp-python`)."
-            ) from exc
+    @classmethod
+    def from_settings(
+        cls,
+        settings: MemgenticSettings,
+        *,
+        client: httpx.AsyncClient | None = None,
+    ) -> LlamaCppReranker:
+        """Build a reranker from ``MemgenticSettings`` (reads the W5 knobs)."""
+        return cls(
+            url=settings.reranker_url,
+            model=settings.reranker_model,
+            timeout_s=settings.reranker_timeout_s,
+            client=client,
+        )
 
-        if self.model_path is None:
-            import os
-
-            self.model_path = os.environ.get(
-                "MEMGENTIC_RERANKER_GGUF",
-                str(_default_reranker_path()),
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(self.timeout_s, connect=min(self.timeout_s, 1.0))
             )
+            self._owns_client = True
+        return self._client
 
-        logger.info(
-            "reranker.loading",
-            model_path=self.model_path,
-            n_ctx=self.n_ctx,
-            n_gpu_layers=self.n_gpu_layers,
-        )
-        self._llm = Llama(
-            model_path=self.model_path,
-            n_ctx=self.n_ctx,
-            n_gpu_layers=self.n_gpu_layers,
-            verbose=self.verbose,
-            logits_all=True,  # Required for token-probability extraction
-        )
-        logger.info("reranker.loaded")
+    async def aclose(self) -> None:
+        """Close the owned HTTP client (no-op for an injected client)."""
+        if self._client is not None and self._owns_client:
+            await self._client.aclose()
+            self._client = None
+
+    def _mark_down(self) -> None:
+        self._down_until = time.monotonic() + self.down_cache_s
 
     async def rerank(
         self,
@@ -201,80 +219,154 @@ class LlamaCppReranker:
         candidates: Sequence[RerankCandidate],
         top_k: int | None = None,
     ) -> list[RerankResult]:
-        """Score each candidate against query, return sorted descending."""
+        """Score each candidate via llama-server; return sorted descending.
+
+        Returns ``[]`` (never raises) when there are no candidates, the server
+        is in its cached-down window, or the request fails for any reason.
+        """
         if not candidates:
             return []
-        self._load()
 
-        scored: list[RerankResult] = []
-        for candidate in candidates:
-            score = self._score_one(query, candidate.text)
-            scored.append(RerankResult(id=candidate.id, score=score, payload=candidate.payload))
-        scored.sort(key=lambda r: r.score, reverse=True)
+        # Short-circuit while the server is known-down to avoid per-query hangs.
+        if time.monotonic() < self._down_until:
+            return []
+
+        documents = [c.text for c in candidates]
+        payload: dict[str, Any] = {"query": query, "documents": documents}
+        if self.model:
+            payload["model"] = self.model
         if top_k is not None:
-            scored = scored[:top_k]
-        return scored
+            payload["top_n"] = top_k
 
-    def _score_one(self, query: str, candidate_text: str) -> float:
-        """Run one cross-encoder pass; return the relevance probability."""
-        prompt = _qwen3_reranker_prompt(query, candidate_text)
-        # Qwen3-Reranker outputs a single token: "yes" (relevant) or "no".
-        # Extract the logit for "yes" vs "no" and convert to probability.
-        out = self._llm(
-            prompt,
-            max_tokens=1,
-            temperature=0.0,
-            logprobs=2,  # Top-2 token logprobs
-            echo=False,
-        )
-        # llama-cpp returns logprobs of completion tokens. Find "yes" prob;
-        # fall back to 0 if model emitted something unexpected.
         try:
-            top_logprobs = out["choices"][0]["logprobs"]["top_logprobs"][0]
-            yes_logprob = top_logprobs.get("yes", top_logprobs.get(" yes", -1e9))
-            import math
+            client = self._get_client()
+            resp = await client.post(f"{self.url}/v1/rerank", json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as exc:  # transport / status / decode — all non-fatal
+            self._mark_down()
+            logger.warning("reranker.request_failed", url=self.url, error=str(exc))
+            return []
 
-            return math.exp(yes_logprob)
-        except (KeyError, IndexError, TypeError):
-            return 0.0
+        results = _parse_rerank_response(data, list(candidates))
+        if results is None:
+            self._mark_down()
+            logger.warning("reranker.bad_response", url=self.url)
+            return []
+
+        results.sort(key=lambda r: r.score, reverse=True)
+        if top_k is not None:
+            results = results[:top_k]
+        return results
 
 
-def _default_reranker_path() -> str:
-    """Best-guess default path for a downloaded Qwen3-Reranker GGUF.
+def _parse_rerank_response(
+    data: Any, candidates: list[RerankCandidate]
+) -> list[RerankResult] | None:
+    """Parse a Jina/Cohere/llama-server ``/v1/rerank`` body into results.
 
-    Looks at the standard HuggingFace cache layout. Returns the expected
-    path even if the file isn't downloaded yet — let the real load call
-    raise the FileNotFoundError so the user gets a clear actionable error.
+    Expected shape::
+
+        {"results": [{"index": 0, "relevance_score": 0.98}, ...]}
+
+    Returns ``None`` when the body is unparseable (so the caller can mark the
+    server down). ``index`` maps back to the submitted candidate order.
     """
-    from pathlib import Path
+    rows = data.get("results") if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return None
+    out: list[RerankResult] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        try:
+            idx = int(row["index"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        raw_score = row.get("relevance_score", row.get("score"))
+        if raw_score is None:
+            continue
+        try:
+            score = float(raw_score)
+        except (TypeError, ValueError):
+            continue
+        if 0 <= idx < len(candidates):
+            cand = candidates[idx]
+            out.append(RerankResult(id=cand.id, score=score, payload=cand.payload))
+    return out or None
 
-    hf_home = Path.home() / ".cache" / "huggingface" / "hub"
-    return str(
-        hf_home
-        / "models--ggml-org--Qwen3-Reranker-0.6B-Q8_0-GGUF"
-        / "snapshots"
-        / "main"
-        / "qwen3-reranker-0.6b-q8_0.gguf"
-    )
 
+async def maybe_rerank(
+    query: str,
+    results: list[dict],
+    *,
+    reranker: Reranker | None,
+    settings: MemgenticSettings | None,
+    limit: int | None = None,
+) -> list[dict]:
+    """Optionally re-score fused search results with a cross-encoder reranker.
 
-def _qwen3_reranker_prompt(query: str, document: str) -> str:
-    """Qwen3-Reranker chat-completion prompt template per official model card.
+    This is the single integration point both search paths (hybrid + basic)
+    call AFTER fusion / weighting / boosts. When reranking is enabled and the
+    server is reachable it acts as an **absolute relevance gate**:
 
-    The reranker is trained to answer 'yes' or 'no' to whether ``document``
-    is relevant to ``query``. We extract the 'yes' token probability as
-    the relevance score.
+    - the top ``reranker_top_k`` fused candidates are re-scored,
+    - they are REORDERED by the rerank score,
+    - that score is written back as each result's ``relevance`` (now an
+      absolute [0, 1] value, not the relative min-max from RRF),
+    - any candidate whose rerank score is below ``reranker_min_score`` is
+      DROPPED.
+
+    Candidates beyond the rerank window keep their fused order and relevance,
+    appended after the reranked head so recall to ``limit`` is never lost.
+
+    Graceful no-op — returns ``results`` (truncated to ``limit``) unchanged
+    when: reranking is disabled, no reranker is wired, there are no results, or
+    the reranker reports a failure (``rerank`` returns ``[]`` / raises). Recall
+    NEVER breaks because the reranker is off or the server is down.
     """
-    instruction = "Given a web search query, retrieve relevant passages that answer the query."
-    return (
-        "<|im_start|>system\n"
-        "Judge whether the Document meets the requirements based on the Query "
-        'and the Instruction provided. Note that the answer can only be "yes" or "no".\n'
-        "<|im_end|>\n"
-        "<|im_start|>user\n"
-        f"<Instruct>: {instruction}\n"
-        f"<Query>: {query}\n"
-        f"<Document>: {document}\n"
-        "<|im_end|>\n"
-        "<|im_start|>assistant\n"
-    )
+
+    def _truncated() -> list[dict]:
+        return results[:limit] if limit is not None else results
+
+    if settings is None or not settings.enable_reranker or reranker is None or not results:
+        return _truncated()
+
+    top_k = max(1, settings.reranker_top_k)
+    head = results[:top_k]
+    tail = results[top_k:]
+
+    candidates = [
+        RerankCandidate(
+            id=str(r.get("id", "")),
+            text=str((r.get("payload") or {}).get("content", "")),
+            payload=r,
+        )
+        for r in head
+    ]
+
+    try:
+        reranked = await reranker.rerank(query, candidates)
+    except Exception as exc:  # defensive — a conformant reranker returns []
+        logger.warning("reranker.fallback_fused_order", error=str(exc))
+        return _truncated()
+
+    # Empty result ⇒ disabled/down/no-candidates ⇒ keep the fused order intact.
+    if not reranked:
+        return _truncated()
+
+    min_score = settings.reranker_min_score
+    out: list[dict] = []
+    for rr in reranked:
+        if rr.score < min_score:
+            continue
+        item: dict[str, Any] = dict(rr.payload) if isinstance(rr.payload, dict) else {"id": rr.id}
+        item["relevance"] = round(float(rr.score), 4)
+        item["rerank_score"] = round(float(rr.score), 4)
+        item["reranked"] = True
+        out.append(item)
+
+    # Backfill from the un-reranked tail so dropping sub-threshold head items
+    # (the absolute floor) never shrinks recall below what fusion already found.
+    out.extend(tail)
+    return out[:limit] if limit is not None else out

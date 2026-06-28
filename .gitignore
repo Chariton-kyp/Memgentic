@@ -80,3 +80,8 @@ benchmarks/datasets/convomem*.json
 benchmarks/datasets/membench*.jsonl
 benchmarks/results/
 !benchmarks/results/.gitkeep
+
+# Internal remediation scratch (not for the public package)
+.audit/
+.superpowers/
+.memgentic-context.md

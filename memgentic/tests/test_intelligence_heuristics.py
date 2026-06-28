@@ -20,7 +20,11 @@ from memgentic.processing.utils import text_overlap
 
 
 def test_classify_decision():
-    ct, conf = _heuristic_classify("We decided to use PostgreSQL for our database")
+    # W1 (RC6): the classifier now needs >=2 keyword matches to commit to a
+    # non-raw type, so a real decision carries multiple decision signals.
+    ct, conf = _heuristic_classify(
+        "We decided to use PostgreSQL; the team chose it and finalized the decision."
+    )
     assert ct == "decision"
 
 
@@ -30,7 +34,11 @@ def test_classify_decision():
 
 
 def test_classify_code_snippet_backticks():
-    ct, conf = _heuristic_classify("Here is the code:\n```python\nprint('hello')\n```")
+    # W1 (RC6): >=2 code markers (fenced block + import + def) — a single
+    # marker no longer classifies, to keep stray prose out of code_snippet.
+    ct, conf = _heuristic_classify(
+        "Here is the code:\n```python\nimport os\ndef greet():\n    print('hello')\n```"
+    )
     assert ct == "code_snippet"
 
 
@@ -40,7 +48,10 @@ def test_classify_code_snippet_backticks():
 
 
 def test_classify_fact():
-    ct, conf = _heuristic_classify("Python 3.12 supports the new type syntax")
+    # W1 (RC6): >=2 fact signals (supports / requires / version).
+    ct, conf = _heuristic_classify(
+        "Python 3.12 supports the new type syntax and requires a recent version."
+    )
     assert ct == "fact"
 
 

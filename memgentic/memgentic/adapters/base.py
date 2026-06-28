@@ -11,17 +11,31 @@ from memgentic.models import ContentType, ConversationChunk, Platform
 
 # Directories whose *name* matches one of these glob patterns are skipped
 # across all adapters. These are meta-tooling conversations (other memory
-# projects, observer sessions, synthetic test fixtures) that pollute
-# semantic search ranking without adding user-relevant context.
+# projects, observer sessions, synthetic test fixtures) and Claude Code
+# internal task scratch dirs that pollute semantic search ranking without
+# adding user-relevant context.
 #
 # Extend at runtime via `MEMGENTIC_EXCLUDE_PATHS` (comma-separated globs).
 # Matching is done against any path segment, not just the leaf, so e.g.
 # `*observer-sessions*` catches
-# `~/.claude/projects/C--Users-harit--claude-mem-observer-sessions/foo.jsonl`.
+# `~/.claude/projects/C--Users-harit--claude-mem-observer-sessions/foo.jsonl`
+# and `*AppData-Local-Temp*` catches the slugified
+# `~/.claude/projects/C--Users-harit-AppData-Local-Temp/...` task dirs where
+# Claude Code writes summarizer / compaction / suggestion-mode / adversarial
+# -verifier / skill-loader prompts as throwaway sessions (RC2 of the
+# memory-quality audit: ~43% of the store was this junk).
 _DEFAULT_EXCLUDE_DIR_GLOBS: tuple[str, ...] = (
     "*claude-mem-observer-sessions*",
     "*claude-mem*observer*",
     "*memgentic-observer*",
+    # Claude Code internal task / temp scratch directories. The leaf segment
+    # in ~/.claude/projects is a slug of the cwd, so Windows OS temp paths
+    # surface as "...-AppData-Local-Temp-..." in the project dir name.
+    # Fix 4 (W1 review): the bare "*-Local-Temp*" glob was too broad — it
+    # matched legitimate project dirs whose name happened to contain
+    # "-Local-Temp" (e.g. a project called "local-template-*").  Keep only
+    # the Windows-AppData-specific prefix which is unambiguous.
+    "*AppData-Local-Temp*",
 )
 
 
