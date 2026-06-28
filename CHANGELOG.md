@@ -4,6 +4,31 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-06-28 — Recall Overhaul: Signal Over Noise
+
+Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`). A six-part overhaul of capture, recall, and storage quality after a forensic audit found ~40% of memories were unsearchable orphaned vectors and ~43% were captured noise.
+
+### Added
+
+- **Per-project / per-repository recall scoping** — recall scopes to the current project by default (repo-aware, correct across git worktrees) with a graceful global fallback and a `global` escape; capture stamps the originating project. Controlled by `MEMGENTIC_RECALL_SCOPE` / `MEMGENTIC_RECALL_SCOPE_STRICT`.
+- **Reranker as an absolute relevance gate** — optional cross-encoder reranking (Qwen3-Reranker via `llama-server` `/v1/rerank`) reorders the top candidates by absolute score and drops sub-threshold results, with bulletproof graceful degradation (disabled or unreachable → original fused order; recall never breaks).
+- **Self-cleaning & retention** — write-time dedup for `memgentic_remember`, a reductive dream that archives the sources it consolidates, and `memgentic gc` + `memgentic clean` (dry-run by default; SQL+Python guards that never touch pinned, `mcp_tool`, or active rows).
+
+### Changed
+
+- **Defaults: `qwen3-embedding:4b` @ 1024 dims + Qdrant backend + Qwen3-Reranker** — the recommended high-quality stack (see `docs/recommended-setup.md`). Override via `MEMGENTIC_EMBEDDING_MODEL` / `MEMGENTIC_EMBEDDING_DIMENSIONS` / `MEMGENTIC_STORAGE_BACKEND` to keep the lighter 0.6b / 768 / sqlite-vec setup.
+- **Recall ranking** — normalized [0,1] relevance with a configurable floor, per-content-type weighting, query-feature boosts (proper nouns / quoted phrases / recency), and a curated SessionStart briefing that surfaces decisions and facts over raw exchanges.
+- **Embedding requests** now pass the MRL `dimensions` parameter so a truncated model returns vectors of exactly the configured size.
+
+### Fixed
+
+- **Capture hygiene** — internal tool task-files, sidechain turns, and meta-prompts (daily-log summarizers, compaction prompts, suggestion-mode) are no longer stored as memories; a value-gate drops worthless chunks and oversized blobs are capped. Conservative — verified with keep-tests so real knowledge is never dropped.
+- **Recall no longer surfaces raw-exchange noise by default**, and the legacy-Qdrant migration warning no longer silences itself on an established store.
+
+### ⚠ Breaking
+
+- The default embedding model (`qwen3-embedding:4b`), dimensions (`1024`), and vector backend (`qdrant`) changed. Existing installs must run a Qdrant server, `ollama pull qwen3-embedding:4b`, and `memgentic re-embed` (which also restores any historically orphaned vectors). See `docs/recommended-setup.md`.
+
 ## [0.11.0] — 2026-06-12 — Guard Goes Polyglot: C# Support, LLM Rule Discovery, First-Run UX
 
 Linked release across all three packages (`memgentic` / `memgentic-api` / `memgentic-native`).
