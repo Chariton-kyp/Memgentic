@@ -1,5 +1,28 @@
 # Changelog
 
+## [2.0.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v1.1.0...api-v2.0.0) (2026-06-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* the default embedding model (qwen3-embedding:4b), embedding dimensions (1024) and vector backend (qdrant) changed. Existing installs must run a Qdrant server, `ollama pull qwen3-embedding:4b`, and `memgentic re-embed` (which also restores any historically orphaned vectors). See docs/recommended-setup.md.
+
+### Features
+
+* **briefing:** add Recall Tiers (T0–T4) progressive context loader ([#69](https://github.com/Chariton-kyp/Memgentic/issues/69)) ([08df67d](https://github.com/Chariton-kyp/Memgentic/commit/08df67dd903ed0b0f900ed450c6d72bbe71e471a))
+* **daemon:** add Watchers umbrella for cross-tool automatic capture ([#70](https://github.com/Chariton-kyp/Memgentic/issues/70)) ([f56d68d](https://github.com/Chariton-kyp/Memgentic/commit/f56d68d89c2e184943cc242e9888970ea1efdab3))
+* **graph:** add Chronograph (bitemporal entity-relationship graph) ([#67](https://github.com/Chariton-kyp/Memgentic/issues/67)) ([eba0fd3](https://github.com/Chariton-kyp/Memgentic/commit/eba0fd3290da159ec2b87121c15f15fa22c5bc74))
+* memory-quality overhaul (recall, scope, self-cleaning, reranker, 4b@1024+Qdrant) ([#157](https://github.com/Chariton-kyp/Memgentic/issues/157)) ([ea23a0d](https://github.com/Chariton-kyp/Memgentic/commit/ea23a0db1ad8ef362d99ed707324542dcd25ef5f))
+* **persona:** add structured persona with LLM bootstrap and dashboard editor ([#63](https://github.com/Chariton-kyp/Memgentic/issues/63)) ([207ce28](https://github.com/Chariton-kyp/Memgentic/commit/207ce28c6c1d025c35bb8f2da7a3bef5978e4ade))
+* **pipeline:** add capture profiles (raw / enriched / dual) ([#65](https://github.com/Chariton-kyp/Memgentic/issues/65)) ([6668e7c](https://github.com/Chariton-kyp/Memgentic/commit/6668e7cf4856235bb9cc931d6eb5f11ad0f96b36))
+* project-filter foundation + auto-dream pipeline (local baseline) ([#141](https://github.com/Chariton-kyp/Memgentic/issues/141)) ([592e484](https://github.com/Chariton-kyp/Memgentic/commit/592e484242163c37cf50b7c4ad2cbc7056826195))
+* retrieval wins (R@5 +6.7pp) + cross-tool continuation ([#110](https://github.com/Chariton-kyp/Memgentic/issues/110)) ([2fb1011](https://github.com/Chariton-kyp/Memgentic/commit/2fb1011afb0923a73b54d3f9ce3c1b661f24966a))
+
+
+### Bug Fixes
+
+* **ci:** unblock Release Please, Scorecard, and Dependabot Rust updates ([#86](https://github.com/Chariton-kyp/Memgentic/issues/86)) ([e2aaed9](https://github.com/Chariton-kyp/Memgentic/commit/e2aaed9c0a38468f52eb9a5ff6f79a7b8c9fce3e))
+
 ## [1.0.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v0.11.0...api-v1.0.0) (2026-06-28)
 
 
