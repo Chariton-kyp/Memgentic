@@ -57,6 +57,17 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger()
 
+# Cross-encoders score one query+document pair in a single forward pass, so the
+# whole pair must fit the server's batch / context window AND a long document
+# costs proportionally more compute. An untruncated memory (or an oversized
+# auto-captured blob) otherwise either makes llama-server reject the *entire*
+# rerank request ("input too large to process") or blows the per-request
+# timeout — either way dropping every candidate to a graceful no-op. A short
+# prefix is enough for the cross-encoder to judge topical relevance and keeps
+# reranking fast and robust; proper semantic chunking (scoring chunks, not
+# whole memories) is the longer-term quality improvement.
+_RERANK_MAX_DOC_CHARS = 1500
+
 
 @dataclass
 class RerankCandidate:
@@ -339,7 +350,7 @@ async def maybe_rerank(
     candidates = [
         RerankCandidate(
             id=str(r.get("id", "")),
-            text=str((r.get("payload") or {}).get("content", "")),
+            text=str((r.get("payload") or {}).get("content", ""))[:_RERANK_MAX_DOC_CHARS],
             payload=r,
         )
         for r in head

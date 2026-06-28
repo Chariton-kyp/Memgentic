@@ -125,6 +125,17 @@ class _RaisingReranker:
         raise RuntimeError("boom")
 
 
+class _CapturingReranker:
+    """Records the candidate texts it is handed; scores everything 1.0."""
+
+    def __init__(self) -> None:
+        self.seen_texts: list[str] = []
+
+    async def rerank(self, query, candidates, top_k=None):
+        self.seen_texts = [c.text for c in candidates]
+        return [RerankResult(id=c.id, score=1.0, payload=c.payload) for c in candidates]
+
+
 # ---------------------------------------------------------------------------
 # Dataclass shape
 # ---------------------------------------------------------------------------
@@ -320,6 +331,18 @@ class TestMaybeRerank:
         assert [r["id"] for r in out] == ["m2", "m1"]  # reranker flipped order
         assert out[0]["relevance"] == pytest.approx(0.8)  # absolute score written back
         assert out[0]["reranked"] is True
+
+    @pytest.mark.asyncio
+    async def test_long_documents_truncated_before_rerank(self, tmp_path) -> None:
+        from memgentic.retrieval.reranker import _RERANK_MAX_DOC_CHARS
+
+        settings = _settings(tmp_path)
+        long_content = "x" * (_RERANK_MAX_DOC_CHARS + 5000)
+        fused = _fused(("m1", 0.9, long_content))
+        reranker = _CapturingReranker()
+        await maybe_rerank("q", fused, reranker=reranker, settings=settings, limit=10)
+        # The cross-encoder must receive a bounded prefix, not the whole blob.
+        assert len(reranker.seen_texts[0]) == _RERANK_MAX_DOC_CHARS
 
     @pytest.mark.asyncio
     async def test_min_score_drops_subthreshold(self, tmp_path) -> None:

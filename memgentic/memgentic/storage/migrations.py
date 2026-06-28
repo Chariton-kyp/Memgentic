@@ -253,7 +253,7 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
         ],
     ),
     (
-        11,
+        12,
         "retention — updated_at bookkeeping for GC",
         [
             # Last-modified timestamp, stamped by save_memory / save_memories_batch

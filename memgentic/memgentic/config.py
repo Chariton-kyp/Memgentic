@@ -30,7 +30,13 @@ class MemgenticSettings(BaseSettings):
 
     model_config = SettingsConfigDict(
         env_prefix="MEMGENTIC_",
-        env_file=".env",
+        # A user-wide ``~/.memgentic/.env`` is read first as the base config, so
+        # a single file pins the embedding model / vector backend for EVERY
+        # tool's MCP ``serve`` regardless of the working directory it is spawned
+        # in (MCP clients launch ``serve`` from arbitrary CWDs and do not pass
+        # env through). A project-local ``.env`` in the CWD overrides it, and
+        # real ``MEMGENTIC_*`` environment variables override both.
+        env_file=(str(Path.home() / ".memgentic" / ".env"), ".env"),
         env_file_encoding="utf-8",
         extra="ignore",
     )
