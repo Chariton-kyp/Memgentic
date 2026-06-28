@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.0.0...v1.1.0) (2026-06-28)
+
+
+### Features
+
+* bge-m3 selectable + user-wide .env + re-embed rebuild + fix updated_at migration ([#162](https://github.com/Chariton-kyp/Memgentic/issues/162)) ([7dfde08](https://github.com/Chariton-kyp/Memgentic/commit/7dfde088c700732973fce6743edd3b49f17ed649))
+
 ## [1.0.0](https://github.com/Chariton-kyp/Memgentic/compare/v0.11.0...v1.0.0) (2026-06-28)
 
 
