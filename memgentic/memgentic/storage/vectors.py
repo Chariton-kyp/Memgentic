@@ -92,12 +92,18 @@ class VectorStore:
         self._client: AsyncQdrantClient | None = None
         self._backend: VectorBackend | None = None
 
-    async def initialize(self, metadata_store: MetadataStore | None = None) -> None:
+    async def initialize(
+        self, metadata_store: MetadataStore | None = None, *, force_recreate: bool = False
+    ) -> None:
         """Initialize backend — Qdrant client + safety-pin, or sqlite-vec.
 
         When storage_backend is LOCAL, first probes the Qdrant server URL.
         If a server is already running (e.g. via Docker), it is used
         transparently — avoiding file-lock conflicts between CLI and API.
+
+        ``force_recreate=True`` (used by ``re-embed`` when the embedding model
+        changes) drops any existing collection so it is rebuilt at the new
+        model's dimension, instead of tripping the compatibility guard.
         """
         if self._settings.storage_backend == StorageBackend.SQLITE_VEC:
             from memgentic.storage.backends.sqlite_vec import SqliteVecBackend
@@ -131,6 +137,17 @@ class VectorStore:
         # Create collection if it doesn't exist
         collections = await self._client.get_collections()
         collection_names = [c.name for c in collections.collections]
+
+        # Re-embed with an explicit model change asks us to rebuild from scratch:
+        # drop the existing collection so it is recreated at the new model's
+        # dimension instead of tripping the compatibility guard below.
+        if force_recreate and self._settings.collection_name in collection_names:
+            await self._client.delete_collection(collection_name=self._settings.collection_name)
+            collection_names = [n for n in collection_names if n != self._settings.collection_name]
+            logger.info(
+                "vector_store.collection_dropped_for_rebuild",
+                name=self._settings.collection_name,
+            )
 
         current_model = self._settings.embedding_model
         current_dim = self._settings.embedding_dimensions

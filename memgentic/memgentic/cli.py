@@ -2545,6 +2545,12 @@ EMBEDDING_PRESETS = {
         "dims": 768,
         "size": "5GB",
     },
+    "6": {
+        "name": "bge-m3",
+        "label": "BGE-M3 (multilingual incl. Greek, 1024-dim, fast — best for non-English)",
+        "dims": 1024,
+        "size": "1.2GB",
+    },
 }
 
 
@@ -2655,7 +2661,10 @@ def re_embed(model_name: str | None, reembed_all: bool, batch_size: int):
         if model_name:
             await metadata_store.clear_embedding_config()
 
-        await vector_store.initialize(metadata_store)
+        # A model change means existing vectors are incomparable — rebuild the
+        # collection from scratch (drop + recreate) rather than aborting on the
+        # dimension/model compatibility guard.
+        await vector_store.initialize(metadata_store, force_recreate=bool(model_name))
 
         success_count = 0
         failure_count = 0
