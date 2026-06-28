@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v0.11.0...api-v1.0.0) (2026-06-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* the default embedding model (qwen3-embedding:4b), embedding dimensions (1024) and vector backend (qdrant) changed. Existing installs must run a Qdrant server, `ollama pull qwen3-embedding:4b`, and `memgentic re-embed` (which also restores any historically orphaned vectors). See docs/recommended-setup.md.
+
+### Features
+
+* memory-quality overhaul (recall, scope, self-cleaning, reranker, 4b@1024+Qdrant) ([#157](https://github.com/Chariton-kyp/Memgentic/issues/157)) ([ea23a0d](https://github.com/Chariton-kyp/Memgentic/commit/ea23a0db1ad8ef362d99ed707324542dcd25ef5f))
+
 ## [0.10.0](https://github.com/Chariton-kyp/Memgentic/compare/api-v0.9.0...api-v0.10.0) (2026-06-11)
 
 
