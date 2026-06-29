@@ -4,4 +4,4 @@ Zero-effort knowledge capture across all AI tools.
 Source-aware memory with semantic search, filtering, and knowledge graphs.
 """
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"

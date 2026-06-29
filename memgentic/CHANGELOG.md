@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.2.0...v1.3.0) (2026-06-29)
+
+
+### Features
+
+* **cli:** surface openai_compat embeddings in setup + doctor ([#171](https://github.com/Chariton-kyp/Memgentic/issues/171)) ([f3479d6](https://github.com/Chariton-kyp/Memgentic/commit/f3479d61c2dc00cf2cc7f33b4f069c39b3f6b62f))
+
 ## [1.2.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.1.0...v1.2.0) (2026-06-29)
 
 
