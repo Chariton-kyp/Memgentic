@@ -79,12 +79,16 @@ intelligence = [
     # (falls back to stdlib difflib when this is not installed).
     "rapidfuzz>=3.9",
 ]
-# Reranker — Qwen3-Reranker-0.6B via llama-cpp-python.
-# Pin to ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF or Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp;
-# random community GGUFs silently drop the classifier head and produce garbage scores.
-reranker = [
-    "llama-cpp-python>=0.3.5",
-]
+# Reranker — Qwen3-Reranker-0.6B. NO Python dependency / pip extra: the
+# reranker is served by llama.cpp's `llama-server` binary (run separately
+# with --reranking --pooling rank --embedding) and reached over HTTP via
+# MEMGENTIC_RERANKER_URL. memgentic/retrieval/reranker.py is a thin httpx
+# client and never imports llama_cpp, so there is nothing to install here.
+# (The `llama-cpp-python` pip package would NOT provide that server anyway.)
+# Pin the GGUF to ggml-org/Qwen3-Reranker-0.6B-Q8_0-GGUF or
+# Voodisss/Qwen3-Reranker-0.6B-GGUF-llama_cpp — random community GGUFs
+# silently drop the classifier head and produce garbage scores. See
+# docs/reranker-setup.md.
 # Observability — OpenTelemetry tracing + metrics (opt-in)
 observability = [
     "opentelemetry-api>=1.28",
