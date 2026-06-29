@@ -56,6 +56,44 @@ export MEMGENTIC_EMBEDDING_DIMENSIONS=768
 
 ---
 
+## 2b. Embeddings via an OpenAI-compatible server (drop Ollama)
+
+Embeddings don't have to come from Ollama. Any server that speaks the OpenAI
+`/v1/embeddings` API works — llama.cpp's `llama-server`, vLLM, LM Studio, or
+Text-Embeddings-Inference — so you can run **one** inference engine (e.g.
+llama.cpp) for both embeddings and the reranker and skip Ollama entirely.
+
+Set the provider + base URL (treat the base URL like the OpenAI SDK `base_url` —
+include the `/v1`; `/embeddings` is appended automatically):
+
+```bash
+export MEMGENTIC_EMBEDDING_PROVIDER=openai_compat
+export MEMGENTIC_EMBEDDING_BASE_URL=http://localhost:8082/v1
+export MEMGENTIC_EMBEDDING_API_KEY=         # optional; most local servers need none
+export MEMGENTIC_EMBEDDING_MODEL=bge-m3     # informational for most local servers
+export MEMGENTIC_EMBEDDING_DIMENSIONS=1024  # MUST match what the server returns
+```
+
+### Example: bge-m3 on llama.cpp's llama-server
+
+```bash
+llama-server -m bge-m3-Q8_0.gguf --embedding --pooling cls --port 8082
+```
+
+### Example: vLLM
+
+```bash
+vllm serve BAAI/bge-m3 --task embed --port 8082
+# then: MEMGENTIC_EMBEDDING_BASE_URL=http://localhost:8082/v1
+```
+
+> **Switching engines for an existing store:** the same model on a different
+> engine (Ollama → llama.cpp/vLLM) can produce subtly different vectors
+> (quantisation, pooling). If recall quality drops after switching, run
+> `memgentic re-embed` to rebuild the collection on the new engine.
+
+---
+
 ## 3. Reranker (optional) — Qwen3-Reranker-0.6B via llama-server
 
 The reranker is **off by default** (`MEMGENTIC_ENABLE_RERANKER=false`).
@@ -115,9 +153,13 @@ MEMGENTIC_QDRANT_URL=http://localhost:6333
 MEMGENTIC_QDRANT_API_KEY=                 # leave unset for local Docker
 
 # Embedding
+MEMGENTIC_EMBEDDING_PROVIDER=ollama        # ollama (default) | openai | openai_compat
 MEMGENTIC_EMBEDDING_MODEL=qwen3-embedding:4b
 MEMGENTIC_EMBEDDING_DIMENSIONS=1024
 MEMGENTIC_OLLAMA_URL=http://localhost:11434
+# For provider=openai_compat (llama.cpp / vLLM / LM Studio / TEI — no Ollama):
+MEMGENTIC_EMBEDDING_BASE_URL=              # e.g. http://localhost:8082/v1 ('/embeddings' appended)
+MEMGENTIC_EMBEDDING_API_KEY=               # optional bearer token; local servers usually need none
 
 # Reranker (optional)
 MEMGENTIC_ENABLE_RERANKER=false           # set true to activate

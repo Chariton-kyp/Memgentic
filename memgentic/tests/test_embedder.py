@@ -347,6 +347,153 @@ class TestOpenAIProvider:
             await embedder.close()
 
 
+class TestOpenAICompatProvider:
+    """OpenAI-compatible embedding endpoint (llama.cpp llama-server, vLLM,
+    LM Studio, TEI, …) — configurable base URL, optional API key, no Ollama."""
+
+    def _make_compat_settings(
+        self, tmp_path, *, base_url="http://local-llm:8082/v1", api_key=None
+    ) -> MemgenticSettings:
+        return MemgenticSettings(
+            data_dir=tmp_path / "data",
+            storage_backend=StorageBackend.LOCAL,
+            embedding_provider=EmbeddingProvider.OPENAI_COMPAT,
+            embedding_dimensions=DIMS,
+            embedding_base_url=base_url,
+            embedding_api_key=api_key,
+        )
+
+    async def test_embed_compat_success(self, tmp_path):
+        def _handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(200, json={"data": [{"embedding": _fake_vector(), "index": 0}]})
+
+        settings = self._make_compat_settings(tmp_path)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            result = await embedder.embed("compat test")
+            assert len(result) == DIMS
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_hits_v1_embeddings_url(self, tmp_path):
+        captured: list[str] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured.append(str(request.url))
+            return httpx.Response(200, json={"data": [{"embedding": _fake_vector(), "index": 0}]})
+
+        settings = self._make_compat_settings(tmp_path, base_url="http://local-llm:8082/v1")
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            await embedder.embed("x")
+            assert captured == ["http://local-llm:8082/v1/embeddings"]
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_strips_trailing_slash(self, tmp_path):
+        captured: list[str] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured.append(str(request.url))
+            return httpx.Response(200, json={"data": [{"embedding": _fake_vector(), "index": 0}]})
+
+        settings = self._make_compat_settings(tmp_path, base_url="http://local-llm:8082/v1/")
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            await embedder.embed("x")
+            assert captured == ["http://local-llm:8082/v1/embeddings"]
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_sends_auth_header_when_key_set(self, tmp_path):
+        captured: list[str | None] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [{"embedding": _fake_vector(), "index": 0}]})
+
+        settings = self._make_compat_settings(tmp_path, api_key="sk-local-xyz")
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            await embedder.embed("x")
+            assert captured == ["Bearer sk-local-xyz"]
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_no_auth_header_without_key(self, tmp_path):
+        captured: list[str | None] = []
+
+        def _handler(request: httpx.Request) -> httpx.Response:
+            captured.append(request.headers.get("authorization"))
+            return httpx.Response(200, json={"data": [{"embedding": _fake_vector(), "index": 0}]})
+
+        settings = self._make_compat_settings(tmp_path, api_key=None)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            await embedder.embed("x")
+            assert captured == [None]
+        finally:
+            await embedder.close()
+
+    async def test_embed_batch_compat_sorted_by_index(self, tmp_path):
+        def _handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"embedding": _fake_vector(0.2), "index": 1},
+                        {"embedding": _fake_vector(0.1), "index": 0},
+                    ]
+                },
+            )
+
+        settings = self._make_compat_settings(tmp_path)
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=httpx.MockTransport(_handler))
+        try:
+            results = await embedder.embed_batch(["a", "b"])
+            assert len(results) == 2
+            assert results[0][0] == pytest.approx(0.1, abs=0.001)
+            assert results[1][0] == pytest.approx(0.2, abs=0.001)
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_connect_error_names_endpoint_not_ollama(self, tmp_path):
+        """A connect failure on the compat provider must point at the configured
+        endpoint, not the misleading hardcoded 'Cannot connect to Ollama'."""
+        settings = self._make_compat_settings(tmp_path, base_url="http://local-llm:8082/v1")
+        embedder = Embedder(settings)
+        embedder._client = httpx.AsyncClient(transport=_AlwaysFailTransport())
+        try:
+            with pytest.raises(EmbeddingError) as exc:
+                await embedder.embed("x")
+            msg = str(exc.value)
+            assert "Ollama" not in msg
+            assert "local-llm:8082" in msg
+        finally:
+            await embedder.close()
+
+    async def test_embed_compat_requires_base_url(self, tmp_path):
+        settings = MemgenticSettings(
+            data_dir=tmp_path / "data",
+            storage_backend=StorageBackend.LOCAL,
+            embedding_provider=EmbeddingProvider.OPENAI_COMPAT,
+            embedding_dimensions=DIMS,
+            embedding_base_url=None,
+        )
+        embedder = Embedder(settings)
+        try:
+            with pytest.raises(EmbeddingError, match="base URL"):
+                await embedder.embed("no url")
+        finally:
+            await embedder.close()
+
+
 class TestRetryBatchBehaviour:
     async def test_batch_retry_on_connect_error(self, tmp_path):
         """embed_batch retries on transient ConnectError (Ollama)."""

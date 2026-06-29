@@ -23,6 +23,7 @@ class EmbeddingProvider(StrEnum):
 
     OLLAMA = "ollama"  # Local Ollama (default)
     OPENAI = "openai"  # OpenAI API
+    OPENAI_COMPAT = "openai_compat"  # OpenAI-compatible server (llama.cpp, vLLM, LM Studio, TEI)
 
 
 class MemgenticSettings(BaseSettings):
@@ -72,7 +73,12 @@ class MemgenticSettings(BaseSettings):
     # --- Embeddings ---
     embedding_provider: EmbeddingProvider = Field(
         default=EmbeddingProvider.OLLAMA,
-        description="Embedding provider: 'ollama' (local) or 'openai'",
+        description=(
+            "Embedding provider: 'ollama' (local Ollama, default), 'openai' "
+            "(api.openai.com), or 'openai_compat' (any OpenAI-compatible /v1 "
+            "endpoint — llama.cpp's llama-server, vLLM, LM Studio, TEI — set "
+            "embedding_base_url). Override via MEMGENTIC_EMBEDDING_PROVIDER."
+        ),
     )
     embedding_model: str = Field(
         default="qwen3-embedding:4b",
@@ -105,6 +111,25 @@ class MemgenticSettings(BaseSettings):
     openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API key (when using openai embeddings)",
+    )
+    embedding_base_url: str | None = Field(
+        default=None,
+        description=(
+            "Base URL of an OpenAI-compatible /v1/embeddings endpoint, used when "
+            "embedding_provider='openai_compat'. Lets you serve embeddings from any "
+            "fast local engine — llama.cpp's llama-server, vLLM, LM Studio, "
+            "Text-Embeddings-Inference — instead of Ollama. Include the version path "
+            "like the OpenAI SDK base_url (e.g. http://localhost:8082/v1); "
+            "'/embeddings' is appended. Override via MEMGENTIC_EMBEDDING_BASE_URL."
+        ),
+    )
+    embedding_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Optional bearer token for the openai_compat embedding endpoint. Most "
+            "local servers need none; sent as 'Authorization: Bearer <key>' only when "
+            "set. Override via MEMGENTIC_EMBEDDING_API_KEY."
+        ),
     )
     embedding_batch_size: int = Field(
         default=8,
