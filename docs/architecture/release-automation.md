@@ -156,16 +156,18 @@ On merge of a Release PR:
    - `api-vX.Y.Z`
    - `native-vX.Y.Z`
 
-   A component that was only *version-aligned* by
-   `linked-version-align.yml` (bumped to keep the linked group in
-   lockstep, but with no releasable commit of its own) does **not** get a
-   tag here. A reconcile step in `release-please.yml` then runs
-   `scripts/reconcile_release_tags.py`, derives each component's expected
-   tag from `.release-please-manifest.json`, and tags + pushes any that
-   are missing on `origin` (via the PAT, so the publish workflow fires).
-   Without this, the aligned-but-untagged component leaves the manifest
-   ahead of reality and release-please re-scans it from `bootstrap-sha`
-   on the next run, proposing a bogus major bump. See
+   release-please does **not** always tag every component here — a
+   component only *version-aligned* by `linked-version-align.yml` gets no
+   tag, and release-please sometimes **aborts release creation entirely**
+   on merge (`untagged, merged release PRs outstanding`), tagging nothing.
+   A standalone safety-net workflow — **`reconcile-release-tags.yml`**,
+   which runs on every push to `main` independently of release-please's
+   outcome — runs `scripts/reconcile_release_tags.py` to find any manifest
+   version lacking a tag and creates it at the commit that last changed
+   `.release-please-manifest.json` (the release commit), pushed via the PAT
+   so the publish workflow fires. Without this, an untagged-but-bumped
+   component leaves the manifest ahead of reality and release-please
+   re-scans it from `bootstrap-sha`, proposing a bogus major bump. See
    [CLAUDE.md → Release-tag reconciliation](../../CLAUDE.md).
 2. Each tag triggers its existing tag-push workflow (kept as-is):
    - `release.yml` on `v*` → build + publish `memgentic` to PyPI

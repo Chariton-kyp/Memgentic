@@ -1,0 +1,79 @@
+name: Reconcile release tags
+
+# Safety net that makes linked releases bulletproof — INDEPENDENT of whether
+# release-please created the tags on a Release PR merge.
+#
+# release-please can leave `main` version-bumped but UNTAGGED in two ways:
+#   1. linked-version-align.yml bumps a quiet component's version *files*
+#      (to keep the linked group in lockstep) without release-please ever
+#      releasing it — no tag, no GitHub Release, no PyPI publish; or
+#   2. release-please aborts release creation entirely on merge
+#      ("There are untagged, merged release PRs outstanding - aborting" /
+#      "Expected N releases, only found 0") -> releases_created=false, zero
+#      tags created.
+# Either way the manifest says X.Y.Z but no `<comp>-vX.Y.Z` tag exists, and
+# the next release-please run re-scans the laggard from bootstrap-sha and
+# proposes a bogus major bump (this is what produced the memgentic-api
+# phantom 2.0.0 and left native/api/core untagged at various releases).
+#
+# This job runs on every push to main: for each component whose manifest
+# version has no tag, it creates the tag at the commit that LAST changed the
+# manifest (the release commit — not blindly HEAD, so a later push still tags
+# the right commit) and pushes it via the PAT, firing the matching
+# release*.yml publish workflow (PyPI + GitHub Release). Idempotent — a no-op
+# in the normal steady state where every manifest version is already tagged.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: reconcile-release-tags
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Backfill missing release tags
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Full history so we can locate the commit that set each manifest
+          # version; PAT so the tag push fires the release*.yml publish
+          # workflows (GITHUB_TOKEN pushes are suppressed by GitHub's
+          # recursive-workflow guard — see release-please.yml).
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
+          persist-credentials: true
+
+      # python3 (3.12) ships on ubuntu-24.04; the reconcile script is stdlib-only.
+      - name: Backfill missing tags
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          MISSING="$(python3 scripts/reconcile_release_tags.py)"
+          if [ -z "$MISSING" ]; then
+            echo "All linked-version tags present — nothing to reconcile."
+            exit 0
+          fi
+
+          # Tag at the commit that last set the manifest (the release commit),
+          # NOT HEAD — so reconciliation tags the right commit even if it runs
+          # on a later push than the release merge.
+          SHA="$(git log -1 --format=%H -- .release-please-manifest.json)"
+          echo "Backfilling missing release tags at ${SHA}:"
+          for tag in $MISSING; do
+            # Re-check on origin to close the race with release-please's own
+            # tagging (if it ever succeeds for some components in the same push).
+            if git ls-remote --tags --exit-code origin "refs/tags/${tag}" >/dev/null 2>&1; then
+              echo "  = ${tag} already on origin — skipping"
+              continue
+            fi
+            echo "  + ${tag}"
+            git tag "$tag" "$SHA"
+            git push origin "$tag" || echo "  ! ${tag} push failed (likely a race) — continuing"
+          done
