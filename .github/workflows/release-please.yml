@@ -40,45 +40,11 @@ jobs:
           config-file: .release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      # ── Reconcile linked-version tags ──────────────────────────────
-      # release-please tags + publishes ONLY a component that had a
-      # releasable commit in the window. linked-version-align.yml bumps a
-      # quiet component's version *files* to keep the linked group in
-      # lockstep, but that component gets no tag / GitHub Release / PyPI
-      # publish — so the manifest runs ahead of reality. On the NEXT run
-      # release-please then re-scans that component from bootstrap-sha,
-      # re-counts an already-shipped breaking change, and proposes a bogus
-      # major (this is what pushed memgentic-api to a phantom 2.0.0).
-      # This closes the gap: for every component whose manifest version
-      # has no matching tag, create the tag at the release commit and push
-      # it via the PAT, firing the matching release*.yml publish workflow.
-      - name: Checkout for tag reconciliation
-        if: steps.release.outputs.releases_created == 'true'
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          # PAT so the tag push fires the downstream release*.yml publish
-          # workflows — GITHUB_TOKEN pushes are blocked by the same
-          # recursive-workflow guard documented above.
-          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
-          persist-credentials: true
-
-      - name: Reconcile linked-version tags
-        if: steps.release.outputs.releases_created == 'true'
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          SHA="$(git rev-parse HEAD)"
-          MISSING="$(python3 scripts/reconcile_release_tags.py)"
-          if [ -z "$MISSING" ]; then
-            echo "All linked-version tags present — nothing to reconcile."
-            exit 0
-          fi
-          echo "Backfilling missing release tags at ${SHA}:"
-          for tag in $MISSING; do
-            echo "  + ${tag}"
-            git tag "$tag" "$SHA"
-            git push origin "$tag"
-          done
+      # Tag reconciliation lives in its own workflow (reconcile-release-tags.yml)
+      # so it runs INDEPENDENTLY of release-please's outcome — release-please
+      # sometimes aborts release creation on merge ("untagged, merged release
+      # PRs outstanding"), leaving zero tags, which an in-job step gated on
+      # `releases_created` would miss.
 
       - name: Summary
         if: always()

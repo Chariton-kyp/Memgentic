@@ -1,22 +1,24 @@
 #!/usr/bin/env python3
 """Backfill release tags the manifest declares but git is missing.
 
-release-please tags + publishes ONLY a component that had a releasable
-commit in the release window. ``linked-version-align.yml`` bumps a quiet
-component's version *files* (so the linked group ships one number), but
-that component never gets a tag, GitHub Release, or PyPI publish. The
-manifest then runs ahead of reality, and on its next run release-please
-re-scans the lagging component from ``bootstrap-sha``, re-counts an
-already-shipped breaking change, and proposes a bogus major bump (this is
-exactly what pushed ``memgentic-api`` to a phantom 2.0.0 in 2026-06).
+``main`` can end up version-bumped but UNTAGGED two ways: (1)
+``linked-version-align.yml`` bumps a quiet component's version *files*
+without release-please releasing it, or (2) release-please aborts release
+creation on merge entirely ("untagged, merged release PRs outstanding")
+and creates zero tags. Either way the manifest runs ahead of reality, and
+on its next run release-please re-scans the lagging component from
+``bootstrap-sha``, re-counts an already-shipped breaking change, and
+proposes a bogus major bump (this is what pushed ``memgentic-api`` to a
+phantom 2.0.0 in 2026-06).
 
 This script reads ``.release-please-manifest.json``, derives each
 component's expected git tag (mirroring the tag rules in
 ``.release-please-config.json``), and prints — one per line on stdout —
 the tags that do not yet exist on ``origin``. The calling workflow
-(``release-please.yml``) creates and pushes them at the release commit,
-which fires the matching ``release*.yml`` publish workflow (PyPI + GitHub
-Release).
+(``reconcile-release-tags.yml``, which runs on every push to main
+independently of release-please's outcome) creates and pushes them at the
+commit that last changed the manifest (the release commit), firing the
+matching ``release*.yml`` publish workflow (PyPI + GitHub Release).
 
 Mirrors ``scripts/align_linked_versions.py``: pure detection, no git
 side effects beyond the read-only ``ls-remote`` probe — the workflow owns
