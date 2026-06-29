@@ -4,6 +4,18 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.2.0] — 2026-06-29 — Bring Your Own Embedding Engine
+
+Embeddings are no longer tied to Ollama — point Memgentic at any OpenAI-compatible embedding server and run whichever engine is fastest on your hardware, with one engine (e.g. llama.cpp) covering both embeddings and the reranker.
+
+### Added
+
+- **OpenAI-compatible embedding provider (`openai_compat`).** Serve embeddings from llama.cpp's `llama-server`, vLLM, LM Studio, or Text-Embeddings-Inference via a configurable `/v1/embeddings` endpoint: set `MEMGENTIC_EMBEDDING_PROVIDER=openai_compat` + `MEMGENTIC_EMBEDDING_BASE_URL` (optional `MEMGENTIC_EMBEDDING_API_KEY` — local servers need none). This lets a single inference engine cover both embeddings and the reranker, dropping the Ollama dependency. Ollama remains the default; existing installs are unaffected. See `docs/recommended-setup.md`.
+
+### Changed
+
+- Embedding connection failures now name the configured endpoint (Ollama / OpenAI-compatible server / OpenAI) instead of always reporting "Cannot connect to Ollama".
+
 ## [1.1.0] — 2026-06-28 — BGE-M3, One Stack, One Config
 
 Follow-up to the 1.0.0 recall overhaul, hardening it for real multi-tool installs. Surfaced while activating the high-quality stack on a live store.

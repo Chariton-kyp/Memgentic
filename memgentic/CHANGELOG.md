@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.1.0...v1.2.0) (2026-06-29)
+
+
+### Features
+
+* **embedder:** add OpenAI-compatible embedding provider (llama.cpp, vLLM, …) ([#168](https://github.com/Chariton-kyp/Memgentic/issues/168)) ([376294e](https://github.com/Chariton-kyp/Memgentic/commit/376294eb2e1957e44a442ac167b18cca4a08824a))
+
 ## [1.1.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.0.0...v1.1.0) (2026-06-28)
 
 
