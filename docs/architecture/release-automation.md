@@ -149,10 +149,24 @@ The single manual step. Review the diff if desired, then merge.
 
 On merge of a Release PR:
 
-1. release-please creates three git tags pointing at the merge commit:
+1. release-please creates a git tag at the merge commit **for each
+   component it actually released** — i.e. every component that had a
+   releasable commit in the window:
    - `vX.Y.Z` (core)
    - `api-vX.Y.Z`
    - `native-vX.Y.Z`
+
+   A component that was only *version-aligned* by
+   `linked-version-align.yml` (bumped to keep the linked group in
+   lockstep, but with no releasable commit of its own) does **not** get a
+   tag here. A reconcile step in `release-please.yml` then runs
+   `scripts/reconcile_release_tags.py`, derives each component's expected
+   tag from `.release-please-manifest.json`, and tags + pushes any that
+   are missing on `origin` (via the PAT, so the publish workflow fires).
+   Without this, the aligned-but-untagged component leaves the manifest
+   ahead of reality and release-please re-scans it from `bootstrap-sha`
+   on the next run, proposing a bogus major bump. See
+   [CLAUDE.md → Release-tag reconciliation](../../CLAUDE.md).
 2. Each tag triggers its existing tag-push workflow (kept as-is):
    - `release.yml` on `v*` → build + publish `memgentic` to PyPI
    - `release-api.yml` on `api-v*` → build + publish `memgentic-api`
