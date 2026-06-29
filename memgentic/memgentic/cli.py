@@ -24,7 +24,7 @@ if sys.platform == "win32":
             _stream.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
 from memgentic.__version__ import __version__
-from memgentic.config import StorageBackend, settings
+from memgentic.config import EmbeddingProvider, StorageBackend, settings
 
 console = Console()
 logger = structlog.get_logger()
@@ -1987,22 +1987,25 @@ async def _doctor() -> None:
     else:
         checks.append(("RAM", "pass", "Could not detect (OK)"))
 
-    # 3. Ollama & models
+    # 3. Embedding provider + Ollama (local LLM, and Ollama-served embeddings)
+    emb_is_ollama = settings.embedding_provider == EmbeddingProvider.OLLAMA
+    ollama_needed = emb_is_ollama or settings.enable_local_llm
     try:
         async with httpx.AsyncClient(timeout=3.0) as client:
             r = await client.get(f"{settings.ollama_url}/api/tags")
             models = r.json().get("models", [])
             model_names = [m["name"] for m in models]
-            has_emb = any(settings.embedding_model in n for n in model_names)
             has_llm = any(settings.local_llm_model in n for n in model_names)
             checks.append(("Ollama running", "pass", settings.ollama_url))
-            checks.append(
-                (
-                    f"Embedding: {settings.embedding_model}",
-                    "pass" if has_emb else "fail",
-                    "pulled" if has_emb else "not pulled",
+            if emb_is_ollama:
+                has_emb = any(settings.embedding_model in n for n in model_names)
+                checks.append(
+                    (
+                        f"Embedding: {settings.embedding_model}",
+                        "pass" if has_emb else "fail",
+                        "pulled" if has_emb else "not pulled",
+                    )
                 )
-            )
             checks.append(
                 (
                     f"LLM: {settings.local_llm_model}",
@@ -2024,9 +2027,54 @@ async def _doctor() -> None:
                         )
                     )
     except Exception:
-        checks.append(("Ollama running", "fail", f"Not responding at {settings.ollama_url}"))
-        checks.append((f"Embedding: {settings.embedding_model}", "fail", "Ollama not available"))
-        checks.append((f"LLM: {settings.local_llm_model}", "fail", "Ollama not available"))
+        # Ollama down is a hard failure only when it actually serves embeddings
+        # or the local LLM is enabled; with openai_compat embeddings + a cloud /
+        # heuristics LLM, Ollama isn't required.
+        checks.append(
+            (
+                "Ollama running",
+                "fail" if ollama_needed else "warn",
+                f"Not responding at {settings.ollama_url}",
+            )
+        )
+        if emb_is_ollama:
+            checks.append(
+                (f"Embedding: {settings.embedding_model}", "fail", "Ollama not available")
+            )
+        checks.append(
+            (
+                f"LLM: {settings.local_llm_model}",
+                "fail" if settings.enable_local_llm else "warn",
+                "Ollama not available",
+            )
+        )
+
+    # 3b. OpenAI-compatible embedding endpoint (llama.cpp / vLLM / LM Studio / TEI)
+    if settings.embedding_provider == EmbeddingProvider.OPENAI_COMPAT:
+        base = settings.embedding_base_url
+        if not base:
+            checks.append(
+                (
+                    "Embedding endpoint (openai_compat)",
+                    "fail",
+                    "MEMGENTIC_EMBEDDING_BASE_URL not set",
+                )
+            )
+        else:
+            reachable = False
+            try:
+                async with httpx.AsyncClient(timeout=3.0) as client:
+                    rr = await client.get(f"{base.rstrip('/')}/models")
+                    reachable = rr.status_code < 500
+            except Exception:
+                reachable = False
+            checks.append(
+                (
+                    f"Embedding: {settings.embedding_model} (openai_compat)",
+                    "pass" if reachable else "fail",
+                    base if reachable else f"Not responding at {base}",
+                )
+            )
 
     # 4. Vector backend — skip Qdrant probe when using sqlite-vec
     if settings.storage_backend == StorageBackend.SQLITE_VEC:
@@ -3093,10 +3141,15 @@ def _run_setup_steps() -> bool:
         marker = " [green](current)[/]" if preset["name"] == settings.embedding_model else ""
         console.print(f"  [bold]{key})[/] {preset['label']} [{preset['size']}]{marker}")
     console.print("\n  [bold]6)[/] Custom model (enter Ollama model name)")
+    console.print(
+        "  [bold]7)[/] OpenAI-compatible server (llama.cpp / vLLM / LM Studio — no Ollama)"
+    )
     console.print()
 
     emb_choice = click.prompt("Select embedding model", type=str, default="1")
 
+    emb_provider: str | None = None
+    emb_base_url: str | None = None
     if emb_choice in EMBEDDING_PRESETS:
         emb_preset = EMBEDDING_PRESETS[emb_choice]
         emb_model = emb_preset["name"]
@@ -3104,6 +3157,16 @@ def _run_setup_steps() -> bool:
     elif emb_choice == "6":
         emb_model = click.prompt("Enter Ollama embedding model name")
         emb_dims = click.prompt("Enter embedding dimensions", type=int, default=768)
+    elif emb_choice == "7":
+        # Embeddings from any OpenAI-compatible /v1/embeddings server — run
+        # whichever engine is fastest locally and drop the Ollama dependency.
+        emb_provider = "openai_compat"
+        emb_base_url = click.prompt(
+            "Embedding server base URL (OpenAI-compatible, include /v1)",
+            default="http://localhost:8082/v1",
+        )
+        emb_model = click.prompt("Embedding model name", default="bge-m3")
+        emb_dims = click.prompt("Enter embedding dimensions", type=int, default=1024)
     else:
         console.print("[red]Invalid choice.[/]")
         return False
@@ -3175,6 +3238,12 @@ def _run_setup_steps() -> bool:
     _update_env("MEMGENTIC_STORAGE_BACKEND", backend_value, env_lines)
     _update_env("MEMGENTIC_EMBEDDING_MODEL", emb_model, env_lines)
     _update_env("MEMGENTIC_EMBEDDING_DIMENSIONS", str(emb_dims), env_lines)
+    if emb_provider == "openai_compat":
+        _update_env("MEMGENTIC_EMBEDDING_PROVIDER", "openai_compat", env_lines)
+        _update_env("MEMGENTIC_EMBEDDING_BASE_URL", emb_base_url or "", env_lines)
+    else:
+        # Reset to the Ollama default (in case a prior run set openai_compat).
+        _update_env("MEMGENTIC_EMBEDDING_PROVIDER", "ollama", env_lines)
 
     if llm_model:
         _update_env("MEMGENTIC_LOCAL_LLM_MODEL", llm_model, env_lines)
@@ -3191,7 +3260,10 @@ def _run_setup_steps() -> bool:
 
     console.print("\n[green]Saved to .env:[/]")
     console.print(f"  Storage backend: {backend_value}")
-    console.print(f"  Embedding: {emb_model} ({emb_dims}d)")
+    if emb_provider == "openai_compat":
+        console.print(f"  Embedding: {emb_model} ({emb_dims}d) via {emb_base_url} [openai_compat]")
+    else:
+        console.print(f"  Embedding: {emb_model} ({emb_dims}d)")
     if llm_model:
         console.print(f"  Intelligence LLM: {llm_model}")
     elif enable_local_llm:
@@ -3218,11 +3290,17 @@ def _run_setup_steps() -> bool:
                 _install_sqlite_vec_extra()
 
     # --- Pull models ---
-    models_to_pull = [emb_model]
+    # An openai_compat embedding model is served by a separate engine, not
+    # Ollama — never try to pull it here.
+    models_to_pull = []
+    if emb_provider != "openai_compat":
+        models_to_pull.append(emb_model)
     if llm_model:
         models_to_pull.append(llm_model)
 
-    if click.confirm(f"\nPull {len(models_to_pull)} model(s) now via Ollama?", default=True):
+    if models_to_pull and click.confirm(
+        f"\nPull {len(models_to_pull)} model(s) now via Ollama?", default=True
+    ):
         for m in models_to_pull:
             _pull_ollama_model(m)
 
