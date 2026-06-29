@@ -342,6 +342,12 @@ Only `feat` / `fix` / `perf` / `security` / `revert` move the version and surfac
 
 When `release-please` opens a Release PR: the align workflow detects version drift across the three manifest entries, picks the max as target, bumps the lagging component's `__version__.py` / `__init__.py` / `pyproject.toml` / `Cargo.toml` / `Cargo.lock`, updates the manifest, commits as `github-actions[bot]`, and pushes via PAT (re-triggers CI).
 
+### Release-tag reconciliation (closes the align-workflow gap)
+
+The align workflow fixes a quiet component's version *numbers* but NOT its *release*: release-please only tags + publishes components that had a releasable commit in the window, so an aligned-but-quiet package gets no tag, no GitHub Release, and no PyPI publish. The manifest then runs ahead of reality, and the **next** release-please run re-scans that component from `bootstrap-sha`, re-counts an already-shipped breaking change, and proposes a **bogus major bump**. This bit `memgentic-native` at 1.0.0 (no `native-v1.0.0` was ever cut) and `memgentic-api` at 1.1.0 (no `api-v1.1.0` → release-please proposed a phantom `api 2.0.0`; fixed 2026-06 by manually tagging + publishing `api-v1.1.0`).
+
+`release-please.yml` now closes this gap automatically: after the release-please action runs with `releases_created == true`, a reconcile step runs `scripts/reconcile_release_tags.py`, which derives each component's expected tag from the manifest (`v*` / `api-v*` / `native-v*`) and lists any missing on `origin`. The workflow tags those at the release commit and pushes via PAT, firing the matching `release*.yml` publish workflow. Net effect: whenever the manifest says a component is at version X, a `…-vX` tag + GitHub Release + PyPI publish always exist — so release-please never re-scans a phantom backlog. The reconcile script is detection-only (no git side effects); the workflow owns tag creation.
+
 ### Branch protection
 
 `main` requires 1 **code-owner** review per `.github/CODEOWNERS` (every path → `@Chariton-kyp`). 7 required status checks. Linear history. `enforce_admins: false` so the solo maintainer can admin-bypass when urgent; other contributors cannot.
