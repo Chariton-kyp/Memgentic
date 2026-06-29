@@ -172,6 +172,8 @@ class Embedder:
             try:
                 if self._settings.embedding_provider == EmbeddingProvider.OLLAMA:
                     result = await self._embed_ollama(text)
+                elif self._settings.embedding_provider == EmbeddingProvider.OPENAI_COMPAT:
+                    result = await self._embed_openai_compat(text)
                 else:
                     result = await self._embed_openai(text)
                 record_histogram(
@@ -181,13 +183,7 @@ class Embedder:
                 )
                 return result
             except httpx.ConnectError as exc:
-                raise EmbeddingError(
-                    f"Cannot connect to Ollama at {self._settings.ollama_url}. "
-                    f"Is Ollama running? Start it with: ollama serve\n"
-                    f"Or via Docker: docker compose up ollama -d\n"
-                    f"Run 'memgentic doctor' to check your setup.\n"
-                    f"Original error: {exc}"
-                ) from exc
+                raise self._connect_error(exc) from exc
             except httpx.TimeoutException as exc:
                 raise EmbeddingError(f"Embedding request timed out after retries: {exc}") from exc
             except httpx.HTTPStatusError as exc:
@@ -213,16 +209,12 @@ class Embedder:
         try:
             if self._settings.embedding_provider == EmbeddingProvider.OPENAI:
                 result = await self._embed_openai_batch(texts)
+            elif self._settings.embedding_provider == EmbeddingProvider.OPENAI_COMPAT:
+                result = await self._embed_openai_compat_batch(texts)
             else:
                 result = await self._embed_ollama_batch(texts)
         except httpx.ConnectError as exc:
-            raise EmbeddingError(
-                f"Cannot connect to Ollama at {self._settings.ollama_url}. "
-                f"Is Ollama running? Start it with: ollama serve\n"
-                f"Or via Docker: docker compose up ollama -d\n"
-                f"Run 'memgentic doctor' to check your setup.\n"
-                f"Original error: {exc}"
-            ) from exc
+            raise self._connect_error(exc) from exc
         except httpx.TimeoutException as exc:
             raise EmbeddingError(f"Batch embedding timed out after retries: {exc}") from exc
         except httpx.HTTPStatusError as exc:
@@ -242,6 +234,36 @@ class Embedder:
             provider=self._settings.embedding_provider.value,
         )
         return result
+
+    # -- Errors ---------------------------------------------------------------
+
+    def _connect_error(self, exc: httpx.ConnectError) -> EmbeddingError:
+        """Build a provider-aware 'cannot connect' error.
+
+        The endpoint depends on the configured provider, so the message names
+        the right server (not a hardcoded 'Ollama') to make setup debugging
+        obvious — especially for the local OpenAI-compatible engines.
+        """
+        provider = self._settings.embedding_provider
+        if provider == EmbeddingProvider.OLLAMA:
+            where = f"Ollama at {self._settings.ollama_url}"
+            hint = (
+                "Is Ollama running? Start it with 'ollama serve' "
+                "(or 'docker compose up ollama -d')."
+            )
+        elif provider == EmbeddingProvider.OPENAI_COMPAT:
+            where = f"the embedding server at {self._settings.embedding_base_url}"
+            hint = (
+                "Is your OpenAI-compatible embedding server (llama.cpp / vLLM / LM Studio / "
+                "TEI) running and reachable at MEMGENTIC_EMBEDDING_BASE_URL?"
+            )
+        else:  # OPENAI
+            where = "the OpenAI API"
+            hint = "Check your network connection and OpenAI API status."
+        return EmbeddingError(
+            f"Cannot connect to {where}. {hint}\n"
+            f"Run 'memgentic doctor' to check your setup.\nOriginal error: {exc}"
+        )
 
     # -- Ollama ---------------------------------------------------------------
 
@@ -334,5 +356,67 @@ class Embedder:
         response.raise_for_status()
         data = response.json()
         # Sort by index to ensure correct order
+        sorted_data = sorted(data["data"], key=lambda x: x["index"])
+        return [item["embedding"] for item in sorted_data]
+
+    # -- OpenAI-compatible local server (llama.cpp, vLLM, LM Studio, TEI) ------
+
+    def _compat_embeddings_url(self) -> str:
+        """Resolve the OpenAI-compatible ``/embeddings`` endpoint URL.
+
+        Treats ``embedding_base_url`` like the OpenAI SDK ``base_url`` (it
+        should include the version path, e.g. ``http://localhost:8082/v1``) and
+        appends ``/embeddings`` — unless the caller already pointed at the full
+        endpoint. Raises if no base URL is configured for the provider.
+        """
+        base = self._settings.embedding_base_url
+        if not base:
+            raise EmbeddingError(
+                "embedding_provider='openai_compat' requires a base URL. Set "
+                "MEMGENTIC_EMBEDDING_BASE_URL to your OpenAI-compatible /v1 endpoint "
+                "(e.g. http://localhost:8082/v1 for llama.cpp's llama-server, or your "
+                "vLLM / LM Studio / TEI server)."
+            )
+        base = base.rstrip("/")
+        return base if base.endswith("/embeddings") else f"{base}/embeddings"
+
+    def _compat_headers(self) -> dict[str, str]:
+        """Auth header for the compat endpoint — only when a key is configured.
+        Local servers (llama.cpp, vLLM, LM Studio) typically need none.
+        """
+        if self._settings.embedding_api_key:
+            return {"Authorization": f"Bearer {self._settings.embedding_api_key}"}
+        return {}
+
+    @_RETRY_DECORATOR
+    async def _embed_openai_compat(self, text: str) -> list[float]:
+        """Generate one embedding via an OpenAI-compatible local server."""
+        response = await self._client.post(
+            self._compat_embeddings_url(),
+            headers=self._compat_headers(),
+            json={
+                "model": self._settings.embedding_model,
+                "input": text,
+                "dimensions": self._settings.embedding_dimensions,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
+        return data["data"][0]["embedding"]
+
+    @_RETRY_DECORATOR
+    async def _embed_openai_compat_batch(self, texts: list[str]) -> list[list[float]]:
+        """Batch embedding via an OpenAI-compatible local server."""
+        response = await self._client.post(
+            self._compat_embeddings_url(),
+            headers=self._compat_headers(),
+            json={
+                "model": self._settings.embedding_model,
+                "input": texts,
+                "dimensions": self._settings.embedding_dimensions,
+            },
+        )
+        response.raise_for_status()
+        data = response.json()
         sorted_data = sorted(data["data"], key=lambda x: x["index"])
         return [item["embedding"] for item in sorted_data]
