@@ -4,6 +4,22 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.3.0] — 2026-06-29 — openai_compat in the CLI + bulletproof releases
+
+A quality-of-life follow-up to 1.2.0's bring-your-own-embedding-engine: the OpenAI-compatible embedding provider is now first-class in the CLI, and the release pipeline is hardened so the three packages can never drift apart on PyPI.
+
+### Added
+
+- **`memgentic setup` offers the OpenAI-compatible embedding server** (option 7 — llama.cpp / vLLM / LM Studio). It prompts for the base URL + model + dimensions, writes `MEMGENTIC_EMBEDDING_PROVIDER=openai_compat` + `MEMGENTIC_EMBEDDING_BASE_URL`, and skips the Ollama model-pull — no more hand-editing `.env` to run embeddings off a non-Ollama engine.
+
+### Changed
+
+- **`memgentic doctor` is embedding-provider-aware.** With `openai_compat` it probes the configured `/v1` endpoint instead of falsely reporting "Ollama not available", and treats a missing Ollama as a warning (not a failure) when Ollama isn't actually needed.
+
+### Fixed
+
+- **Linked releases are now bulletproof.** A standalone reconciliation step backfills any per-package tag the release pipeline would otherwise leave missing, so `memgentic` / `memgentic-api` / `memgentic-native` always publish together at the same version — no component can get stuck a version behind on PyPI.
+
 ## [1.2.0] — 2026-06-29 — Bring Your Own Embedding Engine
 
 Embeddings are no longer tied to Ollama — point Memgentic at any OpenAI-compatible embedding server and run whichever engine is fastest on your hardware, with one engine (e.g. llama.cpp) covering both embeddings and the reranker.
