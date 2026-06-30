@@ -71,9 +71,7 @@ async def test_chunks_scrubbed_before_intelligence_graph(tmp_path, monkeypatch):
             content_type=ContentType.FACT,
         )
     ]
-    await pipe.ingest_conversation(
-        chunks=chunks, platform=Platform.CLAUDE_CODE, session_id="s1"
-    )
+    await pipe.ingest_conversation(chunks=chunks, platform=Platform.CLAUDE_CODE, session_id="s1")
 
     assert "contents" in captured, "intelligence graph was not invoked"
     assert all(secret not in c for c in captured["contents"]), (
