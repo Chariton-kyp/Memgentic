@@ -28,3 +28,17 @@ def text_overlap(text_a: str, text_b: str) -> float:
     intersection = words_a & words_b
     union = words_a | words_b
     return len(intersection) / len(union)
+
+
+def recall_display_text(content: str, distilled: str | None, *, enabled: bool) -> str:
+    """Pick the snippet to show for a recall hit.
+
+    Prefers the distilled recall surface when the feature is enabled and a
+    (non-empty) distillation exists; otherwise falls back to the verbatim
+    ``content``. Shared by the MCP recall formatter and the CLI search renderer
+    so both surfaces agree. Full-content / expand paths bypass this and always
+    show verbatim ``content``.
+    """
+    if enabled and distilled:
+        return distilled
+    return content

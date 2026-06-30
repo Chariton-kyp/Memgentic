@@ -25,6 +25,7 @@ from memgentic.models import (
     SourceMetadata,
 )
 from memgentic.observability import record_counter, record_histogram, trace_span
+from memgentic.processing._grounding import is_grounded
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.heuristics import is_noise
 from memgentic.processing.scrubber import scrub_text
@@ -398,6 +399,18 @@ class IngestionPipeline:
                     conf = classified_chunk.get("confidence")
                     if conf is not None:
                         memory.confidence = conf
+                    # Persist the distilled atomic facts as the recall surface,
+                    # but only when they are lexically grounded in the verbatim
+                    # turn — a cheap guard against promoting a hallucinated fact
+                    # to a top recall row. ``content`` stays the verbatim
+                    # source-of-truth; this only fills the separate ``distilled``
+                    # column (embedded/displayed later behind the flag).
+                    distillation = classified_chunk.get("distillation")
+                    facts = (distillation or {}).get("facts") or []
+                    if facts:
+                        joined = " ".join(f.strip() for f in facts if f.strip())
+                        if joined and is_grounded(joined, memory.content):
+                            memory.distilled = joined
 
                 # Apply intelligence results back to chunks
                 if intel_result.get("all_topics"):
@@ -496,8 +509,14 @@ class IngestionPipeline:
                     msg="No LLM provider configured. Set GOOGLE_API_KEY for better classification.",
                 )
 
-        # Step 3: Generate embeddings
-        texts = [m.content for m in memories]
+        # Step 3: Generate embeddings. When the distilled recall surface is
+        # enabled, embed the grounded distillation (falling back to verbatim
+        # content for raw/legacy/ungrounded rows where distilled is None);
+        # otherwise embed verbatim content exactly as before.
+        if self._settings.enable_distilled_recall_surface:
+            texts = [m.distilled or m.content for m in memories]
+        else:
+            texts = [m.content for m in memories]
         logger.info("pipeline.embedding", count=len(texts), platform=platform.value)
 
         t0 = time.perf_counter()

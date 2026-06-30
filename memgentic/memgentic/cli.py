@@ -470,10 +470,18 @@ def search(
                 console.print(f"[yellow]No memories found for: '{query}'[/]")
                 return
 
+            from memgentic.processing.utils import recall_display_text
+
+            distilled_on = settings.enable_distilled_recall_surface
+
             if output_format == "compact":
                 for r in results:
                     payload = r["payload"]
-                    content = payload.get("content", "")[:100].replace("\n", " ")
+                    content = recall_display_text(
+                        payload.get("content", ""),
+                        payload.get("distilled"),
+                        enabled=distilled_on,
+                    )[:100].replace("\n", " ")
                     ctype = payload.get("content_type", "?")
                     platform = payload.get("platform", "?")
                     project_label = payload.get("project") or "—"
@@ -493,6 +501,7 @@ def search(
                             "relevance": round(r.get("relevance", r.get("score", 0.0)), 3),
                             "reranked": bool(r.get("reranked", False)),
                             "content": payload.get("content", ""),
+                            "distilled": payload.get("distilled"),
                             "content_type": payload.get("content_type", ""),
                             "platform": payload.get("platform", ""),
                             "project": payload.get("project", ""),
@@ -515,7 +524,11 @@ def search(
 
             for r in results:
                 payload = r["payload"]
-                content = payload.get("content", "")[:80]
+                content = recall_display_text(
+                    payload.get("content", ""),
+                    payload.get("distilled"),
+                    enabled=distilled_on,
+                )[:80]
                 relevance = r.get("relevance", r.get("score", 0.0))
                 table.add_row(
                     f"{relevance:.2f}",
