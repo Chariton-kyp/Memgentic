@@ -259,6 +259,33 @@ class TestProfilePassThrough:
         assert captured.get("capture_profile") == "enriched"
         assert captured.get("session_id") == "s-1"
 
+    async def test_dense_search_receives_concrete_n_results(self, tmp_path: Path) -> None:
+        """Regression: dense mode must pass the resolved over-fetch depth, not None.
+
+        The default ``chunk_fetch`` is None; the runner must substitute the
+        resolved ``effective_chunk_fetch`` before calling ``search`` (the real
+        sqlite-vec backend multiplies the limit and crashes on None).
+        """
+        seen: list[int | None] = []
+
+        class _RecordingHarness(_FakeHarness):
+            async def search(self, text: str, n_results: int = 5) -> list[dict[str, Any]]:
+                seen.append(n_results)
+                return await super().search(text, n_results if n_results is not None else 5)
+
+        harness = _RecordingHarness(profile="raw")
+        await longmemeval_bench.run(
+            FIXTURES / "longmemeval_tiny.json",
+            profile="raw",
+            k=5,
+            output_dir=tmp_path,
+            harness=harness,
+            retrieval_mode="dense",
+        )
+        assert seen, "dense search was never called"
+        assert all(n is not None for n in seen), f"dense search got None n_results: {seen}"
+        assert all(n == max(5 * 6, 30) for n in seen), seen
+
     async def test_search_hits_are_scored(self) -> None:
         """A runner scoring with canned hits should see a positive recall."""
         queries = [BenchmarkQuery(id="q1", text="question A", gold={"s-1"})]
