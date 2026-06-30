@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import sys
 import tempfile
@@ -72,7 +73,9 @@ def _summarize(records: list[dict], k: int) -> dict:
     return {"n": n, "recall_at_k": recall, "mrr": mrr}
 
 
-def _build_settings(arm: Arm, *, base_tmp: Path, embedder_model: str, dims: int) -> MemgenticSettings:
+def _build_settings(
+    arm: Arm, *, base_tmp: Path, embedder_model: str, dims: int
+) -> MemgenticSettings:
     data_dir = base_tmp / arm.name / "data"
     data_dir.mkdir(parents=True, exist_ok=True)
     return MemgenticSettings(
@@ -104,7 +107,9 @@ async def _run_arm(
     # Arm C guard: a claude-* distiller with no key silently degrades to the
     # heuristic, which would be a misleading "distilled" arm. Skip loudly.
     if arm.llm_model.lower().startswith("claude-") and not settings.anthropic_api_key:
-        print(f"  [skip] arm {arm.name}: distiller {arm.llm_model} needs ANTHROPIC_API_KEY (unset).")
+        print(
+            f"  [skip] arm {arm.name}: distiller {arm.llm_model} needs ANTHROPIC_API_KEY (unset)."
+        )
         return None
 
     harness = BenchmarkHarness(
@@ -130,7 +135,9 @@ async def _run_arm(
         await harness.teardown()
     elapsed = time.perf_counter() - t0
 
-    records = [json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line]
+    records = [
+        json.loads(line) for line in out_path.read_text(encoding="utf-8").splitlines() if line
+    ]
     summary = _summarize(records, k)
     summary.update({"arm": arm.name, "flag": arm.flag, "distiller": arm.llm_model, "secs": elapsed})
     print(
@@ -144,20 +151,24 @@ async def main() -> None:
     # Force UTF-8 stdout so the arrow/delta glyphs in the report survive a
     # legacy Windows code page (e.g. cp1253) without an encode crash.
     for stream in (sys.stdout, sys.stderr):
-        try:
+        with contextlib.suppress(Exception):
             stream.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
-        except Exception:
-            pass
 
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--dataset", type=Path, default=Path("benchmarks/datasets/longmemeval_s_50.json"))
+    ap.add_argument(
+        "--dataset", type=Path, default=Path("benchmarks/datasets/longmemeval_s_50.json")
+    )
     ap.add_argument("--max-questions", type=int, default=0, help="0 = all questions in the dataset")
-    ap.add_argument("--session-concat", action="store_true", help="1 chunk per session (faster, session-level)")
+    ap.add_argument(
+        "--session-concat", action="store_true", help="1 chunk per session (faster, session-level)"
+    )
     ap.add_argument("--k", type=int, default=5)
     ap.add_argument("--embedder-model", default="bge-m3")
     ap.add_argument("--embedder-dims", type=int, default=1024)
     ap.add_argument("--local-model", default="gemma4:e4b", help="Ollama distiller tag for arms A/B")
-    ap.add_argument("--claude-model", default="claude-sonnet-4-6", help="Anthropic distiller for arm C")
+    ap.add_argument(
+        "--claude-model", default="claude-sonnet-4-6", help="Anthropic distiller for arm C"
+    )
     ap.add_argument("--arms", default="A,B,C", help="comma list subset of A,B,C")
     args = ap.parse_args()
 
