@@ -477,13 +477,11 @@ def search(
             if output_format == "compact":
                 for r in results:
                     payload = r["payload"]
-                    content = (
-                        recall_display_text(
-                            payload.get("content", ""),
-                            payload.get("distilled"),
-                            enabled=distilled_on,
-                        )[:100].replace("\n", " ")
-                    )
+                    content = recall_display_text(
+                        payload.get("content", ""),
+                        payload.get("distilled"),
+                        enabled=distilled_on,
+                    )[:100].replace("\n", " ")
                     ctype = payload.get("content_type", "?")
                     platform = payload.get("platform", "?")
                     project_label = payload.get("project") or "—"

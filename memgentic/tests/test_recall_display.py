@@ -19,6 +19,7 @@ def test_recall_display_text_falls_back_when_distilled_missing():
     assert recall_display_text("verbatim", None, enabled=True) == "verbatim"
     assert recall_display_text("verbatim", "", enabled=True) == "verbatim"
 
+
 DISTILLED = "Deployed v2 to production at 14:00 UTC."
 VERBATIM = (
     "Human: ok so there is a lot of noise here, anyway we deployed v2\n"
