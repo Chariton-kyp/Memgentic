@@ -266,6 +266,19 @@ MIGRATIONS: list[tuple[int, str, list[str]]] = [
             "ON memories(status, updated_at)",
         ],
     ),
+    (
+        13,
+        "distilled — persisted LLM-distilled recall surface (nullable)",
+        [
+            # The atomic fact(s) the enriched ingest already distills, persisted
+            # so they can be embedded + displayed as the recall surface (behind
+            # enable_distilled_recall_surface). NULL for raw/legacy/dual rows;
+            # ``content`` stays the verbatim source-of-truth. Additive, no
+            # backfill — existing rows keep distilled = NULL and behave exactly
+            # as today (distilled or content).
+            "ALTER TABLE memories ADD COLUMN distilled TEXT",
+        ],
+    ),
 ]
 
 SCHEMA_VERSION_TABLE = """

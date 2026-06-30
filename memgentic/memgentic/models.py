@@ -129,6 +129,15 @@ class Memory(BaseModel):
         default=ContentType.FACT,
         description="What kind of knowledge this represents",
     )
+    distilled: str | None = Field(
+        default=None,
+        description=(
+            "LLM-distilled, self-contained fact(s) for this memory — the recall "
+            "surface when enable_distilled_recall_surface is on. None for "
+            "raw/legacy rows. ``content`` stays the verbatim source-of-truth "
+            "(FTS5 lexical backstop, audit, re-embed, provenance)."
+        ),
+    )
 
     # Source provenance
     source: SourceMetadata = Field(

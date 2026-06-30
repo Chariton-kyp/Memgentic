@@ -237,8 +237,8 @@ class MetadataStore:
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
              user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
-             project, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             project, updated_at, distilled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 memory.id,
@@ -270,6 +270,7 @@ class MetadataStore:
                 memory.dual_sibling_id,
                 memory.project or "",
                 now_iso,
+                memory.distilled,
             ),
         )
         await self._db.commit()
@@ -308,6 +309,7 @@ class MetadataStore:
                 m.dual_sibling_id,
                 m.project or "",
                 now_iso,
+                m.distilled,
             )
             for m in memories
         ]
@@ -319,8 +321,8 @@ class MetadataStore:
              topics, entities, confidence, supersedes, status, created_at,
              last_accessed, access_count, importance_score, corroborated_by,
              user_id, is_pinned, pinned_at, capture_profile, dual_sibling_id,
-             project, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             project, updated_at, distilled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -1003,11 +1005,19 @@ class MetadataStore:
         except (IndexError, KeyError):
             project = ""
 
+        # distilled added in migration 13; NULL on raw/legacy rows. Fall back to
+        # None so pre-migration snapshots / fixtures keep deserialising.
+        try:
+            distilled = row["distilled"]
+        except (IndexError, KeyError):
+            distilled = None
+
         return Memory(
             id=row["id"],
             user_id=user_id or "",
             content=row["content"],
             content_type=ContentType(row["content_type"]),
+            distilled=distilled,
             source=SourceMetadata(
                 platform=Platform(row["platform"]),
                 platform_version=row["platform_version"],
