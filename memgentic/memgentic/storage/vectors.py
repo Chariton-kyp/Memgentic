@@ -552,6 +552,7 @@ class VectorStore:
         """Convert memory to Qdrant payload for filtering."""
         return {
             "content": memory.content,
+            "distilled": memory.distilled,
             "content_type": memory.content_type.value,
             "platform": memory.source.platform.value,
             "platform_version": memory.source.platform_version,

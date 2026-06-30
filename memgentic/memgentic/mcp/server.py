@@ -54,6 +54,7 @@ from memgentic.processing.project import (
     resolve_current_project,
 )
 from memgentic.processing.search_basic import basic_search
+from memgentic.processing.utils import recall_display_text
 from memgentic.retrieval.reranker import LlamaCppReranker, Reranker
 from memgentic.storage.metadata import MetadataStore
 from memgentic.storage.vectors import VectorStore
@@ -727,9 +728,18 @@ def _format_memory_md(
     created = memory_data.get("created_at", "")
     date = created[:10] if created else ""
 
+    # Prefer the distilled recall surface for the *snippet* (index/preview) when
+    # the flag is on and a distillation exists; full detail (expand) always
+    # returns the verbatim source-of-truth.
+    snippet = recall_display_text(
+        content,
+        memory_data.get("distilled"),
+        enabled=settings.enable_distilled_recall_surface,
+    )
+
     if detail == "index":
-        preview = content[:50].replace("\n", " ")
-        suffix = "..." if len(content) > 50 else ""
+        preview = snippet[:50].replace("\n", " ")
+        suffix = "..." if len(snippet) > 50 else ""
         return f"- `{mid}` [{content_type}] {preview}{suffix} | {platform} | {date}"
 
     score_str = f" (relevance: {score:.2f})" if score is not None else ""
@@ -738,7 +748,7 @@ def _format_memory_md(
     if detail == "full":
         lines.append(content)
     else:  # preview (default)
-        lines.append(content[:300] + ("..." if len(content) > 300 else ""))
+        lines.append(snippet[:300] + ("..." if len(snippet) > 300 else ""))
     lines.append("")
 
     topics = memory_data.get("topics", [])
@@ -961,6 +971,7 @@ async def memgentic_expand(params: ExpandInput, ctx: Context) -> str:
         data = {
             "id": memory.id,
             "content": memory.content,
+            "distilled": memory.distilled,
             "content_type": memory.content_type.value,
             "platform": memory.source.platform.value,
             "created_at": memory.created_at.isoformat() if memory.created_at else "",
