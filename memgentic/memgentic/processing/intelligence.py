@@ -562,21 +562,52 @@ def _distill_heuristic(content: str, content_type: str) -> DistillationResult:
     return DistillationResult(facts=facts, is_valuable=is_valuable, value_score=value_score)
 
 
+# Truncation cap for the distilled content window. Raised from 2000 → 4000 so a
+# longer turn (a decision plus its rationale, a multi-step bug fix) survives into
+# the prompt instead of being cut mid-thought. The local default num_ctx is
+# ~2048 tokens; 4000 chars ≈ 1k tokens of content, leaving headroom for the
+# instruction block and the JSON response on small Ollama models.
+_DISTILL_CONTENT_CAP = 4000
+
+
+def _build_distill_prompt(content: str, content_type: str) -> str:
+    """Build the detail-preserving distillation prompt (mem0-style rules).
+
+    Kept as a pure function so the rules can be asserted cheaply in tests. The
+    JSON output contract (facts / is_valuable / value_score) is unchanged.
+    """
+    return (
+        "You extract durable, self-contained facts from one AI-conversation turn "
+        "so they can be recalled in a future, unrelated conversation. Rewrite the "
+        "useful information as 1-5 atomic statements that each stand on their own.\n\n"
+        "Rules — preserve detail; a recalled fact is useless if it is vague or wrong:\n"
+        "- Preserve every concrete identifier verbatim: names, file paths, code "
+        "symbols, commands, URLs, error strings, version numbers, and any other "
+        "numbers. Never round, summarise, or paraphrase an identifier.\n"
+        "- Resolve pronouns and coreference to the named entity "
+        '("it"/"this"/"the file" → the actual name) so each fact is understandable '
+        "in isolation.\n"
+        "- Keep a decision together with its rationale (the choice AND the reason), "
+        "and a problem together with its resolution. Never split cause from effect.\n"
+        "- Ground relative time expressions to absolute dates when the turn makes "
+        'them recoverable ("yesterday"/"last week" → the actual date); otherwise '
+        "keep the original wording.\n"
+        "- Drop pleasantries, filler, and restated context that carries no new "
+        "information.\n\n"
+        f"Content type: {content_type}\n"
+        f"Content:\n{content[:_DISTILL_CONTENT_CAP]}\n\n"
+        'Return JSON: {"facts": ["fact1", "fact2"], "is_valuable": true, "value_score": 0.8}\n'
+        "- facts: list of 1-5 atomic, self-contained fact strings (identifiers preserved)\n"
+        "- is_valuable: false only if the content is pure noise/pleasantry\n"
+        "- value_score: 0.0 to 1.0 based on usefulness for future recall"
+    )
+
+
 async def _distill_with_llm(
     llm_client: LLMClient, content: str, content_type: str
 ) -> DistillationResult:
     """Use LLM to extract atomic facts."""
-    prompt = (
-        "Extract 1-5 atomic facts from this conversation that would be useful in a "
-        "future conversation. Each fact should be a standalone statement with enough "
-        "context to be understood alone.\n\n"
-        f"Content type: {content_type}\n"
-        f"Content:\n{content[:2000]}\n\n"
-        'Return JSON: {"facts": ["fact1", "fact2"], "is_valuable": true, "value_score": 0.8}\n'
-        "- facts: list of 1-5 atomic fact strings\n"
-        "- is_valuable: false only if content is pure noise/pleasantry\n"
-        "- value_score: 0.0 to 1.0 based on usefulness for future recall"
-    )
+    prompt = _build_distill_prompt(content, content_type)
     return await llm_client.generate_structured(prompt, DistillationResult)
 
 
