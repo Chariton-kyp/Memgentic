@@ -334,6 +334,14 @@ class IngestionPipeline:
                 if result.redaction_count > 0:
                     memory.content = result.text
                     total_redacted += result.redaction_count
+            # Scrub the chunk list too — it (not ``memories``) is what feeds the
+            # LLM intelligence graph below (``intel_state`` is built from
+            # ``chunk.content``). Without this, raw secrets reach the LLM
+            # provider (cloud Gemini when GOOGLE_API_KEY is set).
+            for chunk in chunks:
+                cres = scrub_text(chunk.content)
+                if cres.redaction_count > 0:
+                    chunk.content = cres.text
             if total_redacted:
                 logger.info("pipeline.credentials_scrubbed", count=total_redacted)
 
