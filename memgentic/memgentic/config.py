@@ -368,6 +368,16 @@ class MemgenticSettings(BaseSettings):
             "conservative (drops fewer)."
         ),
     )
+    enable_distilled_recall_surface: bool = Field(
+        default=False,
+        description=(
+            "When True, embed + display the LLM-distilled facts (already computed "
+            "by the enriched ingest distill_node) as the recall surface, keeping the "
+            "verbatim turn in-row as the FTS5/audit backstop. OFF until the R@5/MRR "
+            "harness confirms it beats verbatim. Override via "
+            "MEMGENTIC_ENABLE_DISTILLED_RECALL_SURFACE."
+        ),
+    )
     max_memory_content_chars: int = Field(
         default=65_536,
         gt=0,
