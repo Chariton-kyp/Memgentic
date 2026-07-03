@@ -4,6 +4,20 @@ All notable changes to Memgentic are documented here. Format follows [Keep a Cha
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-07-03 — Distillation as a recall surface (opt-in)
+
+The enriched ingest has always distilled 1-5 self-contained facts per chunk and then thrown them away. 1.4.0 persists that distillation and can embed + display it as the recall surface — behind a flag that stays **off by default** after A/B measurement showed it trades recall coverage for ranking precision.
+
+### Added
+
+- **`Memory.distilled` column (migration 13).** Enriched ingest persists the LLM-distilled facts alongside the verbatim turn when they pass a lexical grounding gate (`is_grounded`) that keeps hallucinated facts off the recall surface. Verbatim `content` remains the immutable source of truth (FTS5, audit, re-embed).
+- **`enable_distilled_recall_surface` flag (default off).** When enabled, embeddings use `distilled or content` and recall snippets prefer the distilled fact (`expand` always returns verbatim). Measured on LongMemEval: the distilled surface ranks gold sessions higher (MRR +0.12) but loses coverage (R@5 −0.25) — a bad trade with a reranker downstream, so the default stays off.
+- **mem0-style distillation prompt.** Preserves identifiers/code/numbers verbatim, resolves pronouns to named entities, keeps decisions with their rationale, grounds relative time; distill content window raised 2000 → 4000 chars.
+
+### Fixed
+
+- **Security: chunk content is credential-scrubbed before it reaches the LLM intelligence graph.** Previously only the stored copy was sanitized — raw secrets could reach the configured cloud LLM during classification/distillation.
+
 ## [1.3.0] — 2026-06-29 — openai_compat in the CLI + bulletproof releases
 
 A quality-of-life follow-up to 1.2.0's bring-your-own-embedding-engine: the OpenAI-compatible embedding provider is now first-class in the CLI, and the release pipeline is hardened so the three packages can never drift apart on PyPI.
