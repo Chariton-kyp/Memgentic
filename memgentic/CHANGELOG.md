@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.4.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.3.0...v1.4.0) (2026-07-03)
+
+
+### Features
+
+* persist distillation as the recall surface (Phase 1, default off) ([#176](https://github.com/Chariton-kyp/Memgentic/issues/176)) ([affd0d3](https://github.com/Chariton-kyp/Memgentic/commit/affd0d3e7ea330037da71fa4ef179805b81948aa))
+
+
+### Bug Fixes
+
+* **security:** scrub chunk content before it reaches the LLM intelligence graph ([#174](https://github.com/Chariton-kyp/Memgentic/issues/174)) ([c1fbe9b](https://github.com/Chariton-kyp/Memgentic/commit/c1fbe9b2253980af5a956d9aeaf120287f409765))
+
 ## [1.3.0](https://github.com/Chariton-kyp/Memgentic/compare/v1.2.0...v1.3.0) (2026-06-29)
 
 
