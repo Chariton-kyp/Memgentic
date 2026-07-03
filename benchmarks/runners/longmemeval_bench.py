@@ -138,7 +138,7 @@ async def run(
                     retrieve_k=max(rerank_top_k, effective_chunk_fetch),
                 )
             else:
-                hits = await active.search(question.text, n_results=chunk_fetch)
+                hits = await active.search(question.text, n_results=effective_chunk_fetch)
             # Question-aware boosts: extract regex features from the query
             # (temporal / quoted / proper-noun) and re-score candidates by
             # combining cosine with rule-based multipliers. Empty features

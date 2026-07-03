@@ -31,6 +31,7 @@ from typing import Any
 
 from memgentic.config import EmbeddingProvider, MemgenticSettings, StorageBackend
 from memgentic.models import CaptureMethod, CaptureProfile, ConversationChunk, Platform
+from memgentic.processing.dream import _build_phase_llm
 from memgentic.processing.embedder import Embedder
 from memgentic.processing.pipeline import IngestionPipeline
 from memgentic.retrieval import RerankCandidate, Reranker
@@ -124,6 +125,7 @@ class BenchmarkHarness:
         seed: int = DEFAULT_SEED,
         settings_override: MemgenticSettings | None = None,
         reranker: Reranker | None = None,
+        llm_model: str | None = None,
     ) -> None:
         """Construct a harness without touching disk.
 
@@ -153,6 +155,12 @@ class BenchmarkHarness:
         self.seed = seed
         self._settings_override = settings_override
         self._reranker = reranker  # optional cross-encoder rerank
+        # Optional distiller model. When set, ``setup()`` builds an LLMClient
+        # via the dream provider-router (claude-* → Anthropic, gemini-* →
+        # Google, a bare tag → Ollama) and threads it into the pipeline so
+        # enriched ingestion runs *LLM* distillation, not the heuristic. Left
+        # None preserves the historic heuristic-only benchmark behaviour.
+        self._llm_model = llm_model
 
         self._tmp_root: Path | None = None
         self._settings: MemgenticSettings | None = None
@@ -189,16 +197,21 @@ class BenchmarkHarness:
 
         self._embedder = Embedder(self._settings)
 
-        # LLM client is intentionally left ``None`` here. The pipeline
-        # degrades gracefully to heuristic classification. Runners that
-        # want LLM-driven extraction can pass one through
-        # ``settings_override`` plus a post-setup hook.
+        # Distiller LLM: built from ``llm_model`` via the dream provider-router
+        # when given, else left None (pipeline degrades to heuristic
+        # distillation — the historic benchmark default). ``_build_phase_llm``
+        # returns None if the routed provider can't be built (e.g. claude-*
+        # with no ANTHROPIC_API_KEY), which also degrades gracefully.
+        llm_client = None
+        if self._llm_model:
+            llm_client = _build_phase_llm(self._settings, self._llm_model, "bench")
+
         self._pipeline = IngestionPipeline(
             settings=self._settings,
             metadata_store=self._metadata,
             vector_store=self._vectors,
             embedder=self._embedder,
-            llm_client=None,
+            llm_client=llm_client,
             graph=None,
         )
 
