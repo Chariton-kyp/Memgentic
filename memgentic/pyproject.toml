@@ -49,7 +49,7 @@ dependencies = [
 
     # Core utilities
     "pydantic>=2.12",
-    "pydantic-settings>=2.10",
+    "pydantic-settings>=2.14.2",
     "python-dotenv>=1.0",
     "structlog>=25.0",
     "tenacity>=9.0",
