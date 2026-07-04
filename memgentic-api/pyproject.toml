@@ -28,7 +28,7 @@ dependencies = [
     "memgentic[intelligence]",
     "fastapi>=0.130",
     "uvicorn[standard]>=0.34",
-    "python-multipart>=0.0.26",
+    "python-multipart>=0.0.31",
     "slowapi>=0.1",
 ]
 
