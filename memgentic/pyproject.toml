@@ -66,7 +66,7 @@ dependencies = [
 intelligence = [
     "langchain-core>=1.2.28",
     "langchain-google-genai>=4.0",
-    "langchain-anthropic>=1.0",
+    "langchain-anthropic>=1.4.6",
     "langchain-ollama>=0.3",
     # Used for any OpenAI-compatible endpoint (LM Studio, vLLM, llama.cpp's
     # llama-server, etc.). Configured via MEMGENTIC_OPENAI_COMPAT_BASE_URL —
